@@ -26,6 +26,7 @@ const RATE_LIMIT_MAX_REQUESTS = Math.max(20, Number(process.env.RATE_LIMIT_MAX_R
 const DATA_DIR = process.env.RISKRADAR_DATA_DIR || path.join(process.cwd(), 'backend', 'cache');
 const STATE_DRIVER = String(process.env.STATE_DRIVER || 'json').trim().toLowerCase() === 'sqlite' ? 'sqlite' : 'json';
 const SQLITE_STATE_FILE = process.env.SQLITE_STATE_FILE || path.join(DATA_DIR, 'riskradar-state.sqlite');
+const SQLITE_BOOTSTRAP_FROM_JSON = process.env.SQLITE_BOOTSTRAP_FROM_JSON !== 'false';
 const ADMIN_API_KEY = String(process.env.ADMIN_API_KEY || '').trim();
 const PERSISTENT_CACHE_ENABLED = process.env.PERSISTENT_CACHE_ENABLED !== 'false';
 const PERSISTENT_CACHE_FILE = process.env.PERSISTENT_CACHE_FILE || path.join(DATA_DIR, 'upstream-cache.json');
@@ -60,6 +61,17 @@ let searchPresetsLoaded = false;
 let DatabaseSyncCtor = null;
 let stateDb = null;
 let stateDbReady = false;
+const stateBootstrapStatus = {
+  enabled: SQLITE_BOOTSTRAP_FROM_JSON,
+  attempted: false,
+  imported: false,
+  reason: usingSqliteState() ? 'pending' : 'not-applicable',
+  counts: {
+    analysisSnapshots: 0,
+    analysisCache: 0,
+    searchPresets: 0,
+  },
+};
 const requestStats = {
   total: 0,
   errors: 0,
@@ -196,6 +208,7 @@ function initStateDatabase() {
     CREATE INDEX IF NOT EXISTS idx_search_presets_created_at ON search_presets (created_at DESC);
   `);
   stateDbReady = true;
+  bootstrapSqliteStateFromJsonIfNeeded();
 }
 
 function replaceSqliteTableRows(tableName, rows, insertRow) {
@@ -212,6 +225,123 @@ function replaceSqliteTableRows(tableName, rows, insertRow) {
     stateDb.exec('COMMIT');
   } catch (error) {
     stateDb.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function readJsonStoreFile(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+
+  const raw = fs.readFileSync(filePath, 'utf8');
+  const parsed = JSON.parse(raw);
+  return Array.isArray(parsed?.entries) ? parsed.entries : [];
+}
+
+function countSqliteTableRows(tableName) {
+  if (!stateDb) {
+    return 0;
+  }
+
+  const row = stateDb.prepare(`SELECT COUNT(*) as total FROM ${tableName}`).get();
+  return Number(row?.total) || 0;
+}
+
+function bootstrapSqliteStateFromJsonIfNeeded() {
+  if (!usingSqliteState()) {
+    stateBootstrapStatus.reason = 'not-applicable';
+    return;
+  }
+
+  if (!SQLITE_BOOTSTRAP_FROM_JSON) {
+    stateBootstrapStatus.reason = 'disabled';
+    return;
+  }
+
+  if (stateBootstrapStatus.attempted) {
+    return;
+  }
+
+  stateBootstrapStatus.attempted = true;
+
+  const hasExistingRows =
+    countSqliteTableRows('analysis_snapshots') > 0 ||
+    countSqliteTableRows('analysis_cache') > 0 ||
+    countSqliteTableRows('search_presets') > 0;
+
+  if (hasExistingRows) {
+    stateBootstrapStatus.reason = 'sqlite-already-populated';
+    return;
+  }
+
+  const snapshotEntries = ANALYSIS_SNAPSHOTS_ENABLED ? readJsonStoreFile(ANALYSIS_SNAPSHOTS_FILE) : [];
+  const analysisCacheEntries = ANALYSIS_CACHE_ENABLED ? readJsonStoreFile(ANALYSIS_CACHE_FILE) : [];
+  const searchPresetEntries = SEARCH_PRESETS_ENABLED ? readJsonStoreFile(SEARCH_PRESETS_FILE) : [];
+
+  if (!snapshotEntries.length && !analysisCacheEntries.length && !searchPresetEntries.length) {
+    stateBootstrapStatus.reason = 'no-json-state-found';
+    return;
+  }
+
+  try {
+    if (snapshotEntries.length && ANALYSIS_SNAPSHOTS_ENABLED) {
+      const insertSnapshot = stateDb.prepare(
+        'INSERT INTO analysis_snapshots (id, created_at, type, label, payload_json) VALUES (?, ?, ?, ?, ?)'
+      );
+      replaceSqliteTableRows('analysis_snapshots', snapshotEntries.slice(0, ANALYSIS_SNAPSHOT_MAX_ENTRIES), (snapshot) => {
+        insertSnapshot.run(
+          snapshot.id,
+          String(snapshot.savedAt || snapshot.createdAt || new Date().toISOString()),
+          String(snapshot.type || 'postcode'),
+          String(snapshot.label || ''),
+          JSON.stringify(snapshot.payload ?? {})
+        );
+      });
+      stateBootstrapStatus.counts.analysisSnapshots = Math.min(snapshotEntries.length, ANALYSIS_SNAPSHOT_MAX_ENTRIES);
+    }
+
+    if (analysisCacheEntries.length && ANALYSIS_CACHE_ENABLED) {
+      const now = Date.now();
+      const filteredCacheEntries = analysisCacheEntries
+        .filter((entry) => entry?.key && Number(entry?.expiresAt) > now)
+        .slice(0, ANALYSIS_CACHE_MAX_ENTRIES);
+      const insertCache = stateDb.prepare(
+        'INSERT INTO analysis_cache (cache_key, expires_at, value_json) VALUES (?, ?, ?)'
+      );
+      replaceSqliteTableRows('analysis_cache', filteredCacheEntries, (entry) => {
+        insertCache.run(
+          String(entry.key),
+          Number(entry.expiresAt),
+          JSON.stringify(entry.value ?? null)
+        );
+      });
+      stateBootstrapStatus.counts.analysisCache = filteredCacheEntries.length;
+    }
+
+    if (searchPresetEntries.length && SEARCH_PRESETS_ENABLED) {
+      const insertPreset = stateDb.prepare(
+        'INSERT INTO search_presets (id, created_at, type, label, payload_json) VALUES (?, ?, ?, ?, ?)'
+      );
+      replaceSqliteTableRows('search_presets', searchPresetEntries.slice(0, SEARCH_PRESET_MAX_ENTRIES), (preset) => {
+        insertPreset.run(
+          preset.id,
+          String(preset.savedAt || preset.createdAt || new Date().toISOString()),
+          String(preset.type || 'postcode'),
+          String(preset.label || ''),
+          JSON.stringify(preset.payload ?? {})
+        );
+      });
+      stateBootstrapStatus.counts.searchPresets = Math.min(searchPresetEntries.length, SEARCH_PRESET_MAX_ENTRIES);
+    }
+
+    stateBootstrapStatus.imported =
+      stateBootstrapStatus.counts.analysisSnapshots > 0 ||
+      stateBootstrapStatus.counts.analysisCache > 0 ||
+      stateBootstrapStatus.counts.searchPresets > 0;
+    stateBootstrapStatus.reason = stateBootstrapStatus.imported ? 'imported-from-json' : 'json-state-empty';
+  } catch (error) {
+    stateBootstrapStatus.reason = `bootstrap-failed: ${error.message}`;
     throw error;
   }
 }
@@ -2949,6 +3079,7 @@ const server = http.createServer(async (request, response) => {
         dataDir: DATA_DIR,
         stateDriver: STATE_DRIVER,
         sqliteFile: usingSqliteState() ? SQLITE_STATE_FILE : null,
+        sqliteBootstrap: stateBootstrapStatus,
       },
       admin: {
         enabled: Boolean(ADMIN_API_KEY),

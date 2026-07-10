@@ -31,6 +31,8 @@ The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskr
   Backend state persistence mode for snapshots, presets, and analysis cache. Supported values: `json`, `sqlite`. Default: `json`
 - `SQLITE_STATE_FILE`
   SQLite database path used when `STATE_DRIVER=sqlite`. Default: `backend/cache/riskradar-state.sqlite`
+- `SQLITE_BOOTSTRAP_FROM_JSON`
+  When `STATE_DRIVER=sqlite`, bootstraps the SQLite state store from existing JSON snapshot, preset, and analysis-cache files if the SQLite database is still empty. Default: `true`
 - `ADMIN_API_KEY`
   Enables protected admin state-management endpoints when set. Default: disabled
 - `MAX_REQUEST_BODY_BYTES`
@@ -117,6 +119,8 @@ Send the admin key either as `x-api-key: <key>` or `Authorization: Bearer <key>`
   Stores analysis snapshots, saved presets, and analysis cache in one SQLite database file while leaving the upstream cache in JSON. This is useful when you want a more database-like deploy path without changing the frontend contract.
 
 SQLite support comes from Node's built-in `node:sqlite` module and is still marked experimental by Node `v22`, so expect an experimental warning when this mode is enabled.
+
+If you switch an existing deployment from `json` to `sqlite`, the backend can automatically import the current JSON snapshots, presets, and analysis cache into the new SQLite database on first startup while `SQLITE_BOOTSTRAP_FROM_JSON=true`. The `/health` endpoint reports whether that bootstrap ran through `storage.sqliteBootstrap`.
 
 ### Why caching matters
 

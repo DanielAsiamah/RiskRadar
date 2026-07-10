@@ -86,6 +86,8 @@ The backend now supports two state persistence modes:
 
 SQLite mode keeps the same frontend/API contract and passed local restart testing here, but Node `v22` still marks `node:sqlite` as experimental.
 
+If you are switching an existing backend from `json` to `sqlite`, leave `SQLITE_BOOTSTRAP_FROM_JSON=true` for the first boot. That lets the backend import the current JSON snapshots, presets, and analysis-cache data into SQLite automatically when the database is still empty.
+
 ### Backend state portability
 
 The backend now supports protected state export/import/clear operations when `ADMIN_API_KEY` is set. This makes it much easier to:
