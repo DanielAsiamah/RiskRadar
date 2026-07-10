@@ -136,11 +136,44 @@ async function main() {
   assert(runPreset.json?.result?.postcode || runPreset.json?.result?.label, 'Preset execution returned unexpected payload');
   results.push({ step: 'run-preset', ok: true });
 
+  const pointPreset = await requestJson('/api/search-presets', {
+    method: 'POST',
+    body: JSON.stringify({
+      type: 'point',
+      label: `Smoke Point ${Date.now()}`,
+      payload: {
+        lat: analysis.json.postcodeData.latitude,
+        lng: analysis.json.postcodeData.longitude,
+        monthCount: 6,
+      },
+    }),
+  });
+  assert(pointPreset.response.ok, `/api/search-presets point failed with ${pointPreset.response.status}`);
+  assert(pointPreset.json?.id, 'Point preset creation did not return an id');
+  results.push({ step: 'create-point-preset', ok: true, presetId: pointPreset.json.id });
+
+  const runPointPreset = await requestJson('/api/run-search-preset', {
+    method: 'POST',
+    body: JSON.stringify({
+      id: pointPreset.json.id,
+      mode: 'analyze',
+    }),
+  });
+  assert(runPointPreset.response.ok, `/api/run-search-preset point analyze failed with ${runPointPreset.response.status}`);
+  assert(Number.isFinite(runPointPreset.json?.result?.crimeData?.crimeScore), 'Point preset analyze returned unexpected payload');
+  results.push({ step: 'run-point-preset', ok: true });
+
   const deletePreset = await requestJson(`/api/search-preset?id=${encodeURIComponent(preset.json.id)}`, {
     method: 'DELETE',
   });
   assert(deletePreset.response.ok, `/api/search-preset DELETE failed with ${deletePreset.response.status}`);
   results.push({ step: 'delete-preset', ok: true });
+
+  const deletePointPreset = await requestJson(`/api/search-preset?id=${encodeURIComponent(pointPreset.json.id)}`, {
+    method: 'DELETE',
+  });
+  assert(deletePointPreset.response.ok, `/api/search-preset point DELETE failed with ${deletePointPreset.response.status}`);
+  results.push({ step: 'delete-point-preset', ok: true });
 
   if (ADMIN_API_KEY) {
     const adminExport = await requestJson('/api/admin/state-export');

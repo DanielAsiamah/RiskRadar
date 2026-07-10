@@ -1788,7 +1788,15 @@ async function executeSearchPreset(id, mode = 'analyze') {
 
     return {
       preset,
-      result: await fetchPointCrimeFeed(latitude, longitude, payload),
+      result: mode === 'feed'
+        ? await fetchPointCrimeFeed(latitude, longitude, payload)
+        : await analyzePoint({
+          latitude,
+          longitude,
+          month: payload.month,
+          categories: payload.categories,
+          monthCount: payload.monthCount,
+        }),
     };
   }
 

@@ -282,6 +282,7 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
     ```json
     { "id": "<presetId>", "mode": "feed" }
     ```
+  - `analyze` now works for saved `postcode`, `point`, and `area` presets.
 - `GET /api/location-suggestions?lat=51.4062&lng=0.0186`
 - `GET /api/admin/state-export`
 - `POST /api/admin/state-import`
