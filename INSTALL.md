@@ -53,6 +53,13 @@ cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
 npm run api:crime-source-check
 ```
 
+Summarize imported local snapshot coverage:
+
+```powershell
+cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
+npm run api:crime-dataset-summary
+```
+
 Wait for readiness and then run the full smoke check:
 
 ```powershell
@@ -173,8 +180,14 @@ npm run api:import-crime-snapshots -- --source C:\crime-downloads --target C:\cr
 You can also inspect the active provider from:
 
 - `GET /api/crime-source-status`
+- `GET /api/crime-dataset-summary`
 - `GET /health`
   - `storage.crimeSource`
+
+Optional summary query parameters:
+
+- `month=YYYY-MM`
+- `monthLimit=6`
 
 ### Backend state portability
 

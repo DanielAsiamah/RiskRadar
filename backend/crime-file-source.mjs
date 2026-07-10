@@ -166,6 +166,7 @@ function pointInPolygon(latitude, longitude, polygon) {
 export function createCrimeFileSource(options = {}) {
   const rootDir = path.resolve(String(options.rootDir || path.join(process.cwd(), 'backend', 'data', 'police')));
   const fileCache = new Map();
+  const summaryCache = new Map();
   let fileIndexCache = null;
 
   function buildFileIndex() {
@@ -262,6 +263,96 @@ export function createCrimeFileSource(options = {}) {
     return records;
   }
 
+  function summarizeDataset(options = {}) {
+    const requestedMonth = normalizeMonth(options.month);
+    const monthLimit = Math.max(1, Math.min(24, Number(options.monthLimit) || 6));
+    const selectedMonths = requestedMonth
+      ? [requestedMonth]
+      : listAvailableMonths().slice(0, monthLimit);
+    const cacheKey = JSON.stringify({
+      month: requestedMonth || '',
+      monthLimit,
+      selectedMonths,
+    });
+
+    if (summaryCache.has(cacheKey)) {
+      return summaryCache.get(cacheKey);
+    }
+
+    const monthSummaries = [];
+    const categoryTotals = new Map();
+    const uniqueLocations = new Set();
+    let totalCrimes = 0;
+    let minLatitude = Number.POSITIVE_INFINITY;
+    let maxLatitude = Number.NEGATIVE_INFINITY;
+    let minLongitude = Number.POSITIVE_INFINITY;
+    let maxLongitude = Number.NEGATIVE_INFINITY;
+
+    for (const month of selectedMonths) {
+      const crimes = readMonth(month);
+      const monthCategoryTotals = new Map();
+
+      for (const crime of crimes) {
+        totalCrimes += 1;
+        const category = String(crime.category || 'other-crime');
+        categoryTotals.set(category, (categoryTotals.get(category) || 0) + 1);
+        monthCategoryTotals.set(category, (monthCategoryTotals.get(category) || 0) + 1);
+
+        const latitude = Number(crime.location.latitude);
+        const longitude = Number(crime.location.longitude);
+        if (Number.isFinite(latitude) && Number.isFinite(longitude)) {
+          minLatitude = Math.min(minLatitude, latitude);
+          maxLatitude = Math.max(maxLatitude, latitude);
+          minLongitude = Math.min(minLongitude, longitude);
+          maxLongitude = Math.max(maxLongitude, longitude);
+          uniqueLocations.add(`${latitude.toFixed(5)}:${longitude.toFixed(5)}`);
+        }
+      }
+
+      monthSummaries.push({
+        month,
+        totalCrimes: crimes.length,
+        uniqueApproxLocations: new Set(
+          crimes.map((crime) => {
+            const latitude = Number(crime.location.latitude);
+            const longitude = Number(crime.location.longitude);
+            return Number.isFinite(latitude) && Number.isFinite(longitude)
+              ? `${latitude.toFixed(5)}:${longitude.toFixed(5)}`
+              : 'unknown';
+          })
+        ).size,
+        topCategories: [...monthCategoryTotals.entries()]
+          .map(([category, count]) => ({ category, count }))
+          .sort((left, right) => right.count - left.count)
+          .slice(0, 5),
+      });
+    }
+
+    const summary = {
+      rootDir,
+      requestedMonth: requestedMonth || null,
+      monthLimit,
+      monthsAnalyzed: monthSummaries.length,
+      totalCrimes,
+      uniqueApproxLocations: uniqueLocations.size,
+      bounds: totalCrimes
+        ? {
+            minLatitude,
+            maxLatitude,
+            minLongitude,
+            maxLongitude,
+          }
+        : null,
+      categories: [...categoryTotals.entries()]
+        .map(([category, count]) => ({ category, count }))
+        .sort((left, right) => right.count - left.count),
+      months: monthSummaries,
+    };
+
+    summaryCache.set(cacheKey, summary);
+    return summary;
+  }
+
   function pickMonth(month) {
     const normalizedMonth = normalizeMonth(month);
     if (normalizedMonth) {
@@ -350,6 +441,7 @@ export function createCrimeFileSource(options = {}) {
       };
     },
     listAvailableMonths,
+    summarizeDataset,
     queryPoint,
     queryLocation,
     queryPolygon,
