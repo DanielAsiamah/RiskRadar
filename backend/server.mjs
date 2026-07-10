@@ -2694,6 +2694,56 @@ async function fetchPostcodeCrimeFeed(query, options = {}) {
   };
 }
 
+async function fetchPostcodeIntelligence(payload = {}) {
+  const query = String(payload.postcode ?? payload.query ?? '').trim();
+
+  if (!query) {
+    const error = new Error('A postcode or place query is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const location = await resolveLocation(query);
+  const categoryFilters = normalizeCategoryFilters(payload.categories);
+  const [analysis, postcodeFeed, exactLocationFeed, hotspotMap, nearbyPostcodes] = await Promise.all([
+    analyzeLocation(query),
+    fetchPostcodeCrimeFeed(query, {
+      month: payload.month,
+      radiusMeters: payload.radiusMeters,
+      categories: categoryFilters,
+    }),
+    fetchExactLocationCrimeFeed(location.latitude, location.longitude, {
+      month: payload.month,
+      categories: categoryFilters,
+    }),
+    fetchHotspotMap({
+      postcode: location.postcode,
+      month: payload.month,
+      radiusMeters: payload.radiusMeters,
+      categories: categoryFilters,
+      minimumClusterSize: payload.minimumClusterSize,
+      maxClusters: payload.maxClusters,
+    }),
+    fetchNearbyPostcodes(location.latitude, location.longitude).catch(() => []),
+  ]);
+
+  return {
+    fetchedAt: new Date().toISOString(),
+    query,
+    postcode: location.postcode,
+    district: location.admin_district,
+    location: {
+      latitude: location.latitude,
+      longitude: location.longitude,
+    },
+    analysis,
+    postcodeFeed,
+    exactLocationFeed,
+    hotspotMap,
+    nearby: nearbyPostcodes,
+  };
+}
+
 async function fetchPointCrimeFeed(latitude, longitude, options = {}) {
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     const error = new Error('Valid latitude and longitude are required.');
@@ -3995,6 +4045,20 @@ const server = http.createServer(async (request, response) => {
         radiusMeters: body.radiusMeters,
         categories: body.categories,
       });
+      sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/postcode-intelligence') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await fetchPostcodeIntelligence(body);
       sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;

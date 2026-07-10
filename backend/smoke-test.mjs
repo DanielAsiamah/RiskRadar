@@ -63,6 +63,27 @@ async function main() {
     score: analysis.json.crimeData.crimeScore,
   });
 
+  const postcodeIntelligence = await requestJson('/api/postcode-intelligence', {
+    method: 'POST',
+    body: JSON.stringify({
+      postcode: POSTCODE,
+      month: analysis.json?.crimeData?.month,
+      radiusMeters: 900,
+      minimumClusterSize: 2,
+      maxClusters: 4,
+    }),
+  });
+  assert(postcodeIntelligence.response.ok, `/api/postcode-intelligence failed with ${postcodeIntelligence.response.status}`);
+  assert(Number.isFinite(postcodeIntelligence.json?.analysis?.crimeData?.crimeScore), 'Postcode intelligence missing analysis payload');
+  assert(Array.isArray(postcodeIntelligence.json?.nearby), 'Postcode intelligence missing nearby suggestions');
+  assert(Array.isArray(postcodeIntelligence.json?.hotspotMap?.clusters), 'Postcode intelligence missing hotspot clusters');
+  results.push({
+    step: 'postcode-intelligence',
+    ok: true,
+    nearby: postcodeIntelligence.json.nearby.length,
+    hotspotClusters: postcodeIntelligence.json?.hotspotMap?.clusterCount ?? 0,
+  });
+
   const pointAnalysis = await requestJson('/api/analyze-point', {
     method: 'POST',
     body: JSON.stringify({
