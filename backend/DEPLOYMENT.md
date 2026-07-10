@@ -27,6 +27,10 @@ The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskr
   Bind host. Default: `0.0.0.0`
 - `RISKRADAR_DATA_DIR`
   Base directory for persisted backend cache and saved state files. Default: `backend/cache`
+- `STATE_DRIVER`
+  Backend state persistence mode for snapshots, presets, and analysis cache. Supported values: `json`, `sqlite`. Default: `json`
+- `SQLITE_STATE_FILE`
+  SQLite database path used when `STATE_DRIVER=sqlite`. Default: `backend/cache/riskradar-state.sqlite`
 - `ADMIN_API_KEY`
   Enables protected admin state-management endpoints when set. Default: disabled
 - `MAX_REQUEST_BODY_BYTES`
@@ -104,6 +108,15 @@ When `ADMIN_API_KEY` is configured, the backend exposes protected operational en
   ```
 
 Send the admin key either as `x-api-key: <key>` or `Authorization: Bearer <key>`.
+
+### Storage modes
+
+- `json`
+  Keeps the existing file-per-store persistence model and is the default.
+- `sqlite`
+  Stores analysis snapshots, saved presets, and analysis cache in one SQLite database file while leaving the upstream cache in JSON. This is useful when you want a more database-like deploy path without changing the frontend contract.
+
+SQLite support comes from Node's built-in `node:sqlite` module and is still marked experimental by Node `v22`, so expect an experimental warning when this mode is enabled.
 
 ### Why caching matters
 

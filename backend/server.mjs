@@ -1,6 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -23,6 +24,8 @@ const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false';
 const RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000);
 const RATE_LIMIT_MAX_REQUESTS = Math.max(20, Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 180);
 const DATA_DIR = process.env.RISKRADAR_DATA_DIR || path.join(process.cwd(), 'backend', 'cache');
+const STATE_DRIVER = String(process.env.STATE_DRIVER || 'json').trim().toLowerCase() === 'sqlite' ? 'sqlite' : 'json';
+const SQLITE_STATE_FILE = process.env.SQLITE_STATE_FILE || path.join(DATA_DIR, 'riskradar-state.sqlite');
 const ADMIN_API_KEY = String(process.env.ADMIN_API_KEY || '').trim();
 const PERSISTENT_CACHE_ENABLED = process.env.PERSISTENT_CACHE_ENABLED !== 'false';
 const PERSISTENT_CACHE_FILE = process.env.PERSISTENT_CACHE_FILE || path.join(DATA_DIR, 'upstream-cache.json');
@@ -37,6 +40,7 @@ const SEARCH_PRESETS_ENABLED = process.env.SEARCH_PRESETS_ENABLED !== 'false';
 const SEARCH_PRESETS_FILE = process.env.SEARCH_PRESETS_FILE || path.join(DATA_DIR, 'search-presets.json');
 const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.SEARCH_PRESET_MAX_ENTRIES) || 200));
 const SERVER_STARTED_AT = new Date();
+const require = createRequire(import.meta.url);
 const upstreamCache = new Map();
 const inflightFetches = new Map();
 const rateLimitBuckets = new Map();
@@ -53,6 +57,9 @@ let analysisCacheWrites = 0;
 let analysisCacheLoaded = false;
 let searchPresetWrites = 0;
 let searchPresetsLoaded = false;
+let DatabaseSyncCtor = null;
+let stateDb = null;
+let stateDbReady = false;
 const requestStats = {
   total: 0,
   errors: 0,
@@ -104,11 +111,16 @@ function getCacheTtlMs(url) {
   return CACHE_TTL_MS;
 }
 
+function ensureDataDir() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
 function ensurePersistentCacheDir() {
   if (!PERSISTENT_CACHE_ENABLED && !ANALYSIS_SNAPSHOTS_ENABLED && !SEARCH_PRESETS_ENABLED) {
     return;
   }
 
+  ensureDataDir();
   fs.mkdirSync(path.dirname(PERSISTENT_CACHE_FILE), { recursive: true });
 }
 
@@ -117,6 +129,7 @@ function ensureAnalysisSnapshotDir() {
     return;
   }
 
+  ensureDataDir();
   fs.mkdirSync(path.dirname(ANALYSIS_SNAPSHOTS_FILE), { recursive: true });
 }
 
@@ -125,6 +138,7 @@ function ensureAnalysisCacheDir() {
     return;
   }
 
+  ensureDataDir();
   fs.mkdirSync(path.dirname(ANALYSIS_CACHE_FILE), { recursive: true });
 }
 
@@ -133,7 +147,73 @@ function ensureSearchPresetDir() {
     return;
   }
 
+  ensureDataDir();
   fs.mkdirSync(path.dirname(SEARCH_PRESETS_FILE), { recursive: true });
+}
+
+function usingSqliteState() {
+  return STATE_DRIVER === 'sqlite';
+}
+
+function initStateDatabase() {
+  if (!usingSqliteState()) {
+    return;
+  }
+
+  if (stateDbReady && stateDb) {
+    return;
+  }
+
+  if (!DatabaseSyncCtor) {
+    ({ DatabaseSync: DatabaseSyncCtor } = require('node:sqlite'));
+  }
+
+  ensureDataDir();
+  stateDb = new DatabaseSyncCtor(SQLITE_STATE_FILE);
+  stateDb.exec(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE IF NOT EXISTS analysis_snapshots (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      type TEXT NOT NULL,
+      label TEXT NOT NULL,
+      payload_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS analysis_cache (
+      cache_key TEXT PRIMARY KEY,
+      expires_at INTEGER NOT NULL,
+      value_json TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS search_presets (
+      id TEXT PRIMARY KEY,
+      created_at TEXT NOT NULL,
+      type TEXT NOT NULL,
+      label TEXT NOT NULL,
+      payload_json TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_analysis_snapshots_created_at ON analysis_snapshots (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_analysis_cache_expires_at ON analysis_cache (expires_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_search_presets_created_at ON search_presets (created_at DESC);
+  `);
+  stateDbReady = true;
+}
+
+function replaceSqliteTableRows(tableName, rows, insertRow) {
+  if (!stateDb) {
+    return;
+  }
+
+  stateDb.exec('BEGIN');
+  try {
+    stateDb.exec(`DELETE FROM ${tableName}`);
+    for (const row of rows) {
+      insertRow(row);
+    }
+    stateDb.exec('COMMIT');
+  } catch (error) {
+    stateDb.exec('ROLLBACK');
+    throw error;
+  }
 }
 
 function serializeCacheEntries() {
@@ -184,6 +264,24 @@ function saveAnalysisSnapshots() {
   }
 
   try {
+    if (usingSqliteState()) {
+      initStateDatabase();
+      const insert = stateDb.prepare(
+        'INSERT INTO analysis_snapshots (id, created_at, type, label, payload_json) VALUES (?, ?, ?, ?, ?)'
+      );
+      replaceSqliteTableRows('analysis_snapshots', analysisSnapshots, (snapshot) => {
+        insert.run(
+          snapshot.id,
+          snapshot.savedAt,
+          snapshot.type,
+          snapshot.label,
+          JSON.stringify(snapshot.payload)
+        );
+      });
+      analysisSnapshotWrites += 1;
+      return;
+    }
+
     ensureAnalysisSnapshotDir();
     fs.writeFileSync(
       ANALYSIS_SNAPSHOTS_FILE,
@@ -210,6 +308,18 @@ function saveAnalysisCache() {
   }
 
   try {
+    if (usingSqliteState()) {
+      initStateDatabase();
+      const insert = stateDb.prepare(
+        'INSERT INTO analysis_cache (cache_key, expires_at, value_json) VALUES (?, ?, ?)'
+      );
+      replaceSqliteTableRows('analysis_cache', analysisResultCache, (entry) => {
+        insert.run(entry.key, entry.expiresAt, JSON.stringify(entry.value));
+      });
+      analysisCacheWrites += 1;
+      return;
+    }
+
     ensureAnalysisCacheDir();
     fs.writeFileSync(
       ANALYSIS_CACHE_FILE,
@@ -236,6 +346,24 @@ function saveSearchPresets() {
   }
 
   try {
+    if (usingSqliteState()) {
+      initStateDatabase();
+      const insert = stateDb.prepare(
+        'INSERT INTO search_presets (id, created_at, type, label, payload_json) VALUES (?, ?, ?, ?, ?)'
+      );
+      replaceSqliteTableRows('search_presets', searchPresets, (preset) => {
+        insert.run(
+          preset.id,
+          preset.savedAt,
+          preset.type,
+          preset.label,
+          JSON.stringify(preset.payload)
+        );
+      });
+      searchPresetWrites += 1;
+      return;
+    }
+
     ensureSearchPresetDir();
     fs.writeFileSync(
       SEARCH_PRESETS_FILE,
@@ -306,6 +434,28 @@ function loadAnalysisSnapshots() {
   }
 
   try {
+    if (usingSqliteState()) {
+      initStateDatabase();
+      const rows = stateDb
+        .prepare(
+          'SELECT id, created_at, type, label, payload_json FROM analysis_snapshots ORDER BY created_at DESC LIMIT ?'
+        )
+        .all(ANALYSIS_SNAPSHOT_MAX_ENTRIES);
+      analysisSnapshots.splice(
+        0,
+        analysisSnapshots.length,
+        ...rows.map((row) => ({
+          id: row.id,
+          savedAt: row.created_at,
+          type: row.type,
+          label: row.label,
+          payload: JSON.parse(row.payload_json),
+        }))
+      );
+      analysisSnapshotsLoaded = true;
+      return;
+    }
+
     if (!fs.existsSync(ANALYSIS_SNAPSHOTS_FILE)) {
       analysisSnapshotsLoaded = true;
       return;
@@ -330,6 +480,27 @@ function loadAnalysisCache() {
   }
 
   try {
+    if (usingSqliteState()) {
+      initStateDatabase();
+      const now = Date.now();
+      const rows = stateDb
+        .prepare(
+          'SELECT cache_key, expires_at, value_json FROM analysis_cache WHERE expires_at > ? ORDER BY expires_at DESC LIMIT ?'
+        )
+        .all(now, ANALYSIS_CACHE_MAX_ENTRIES);
+      analysisResultCache.splice(
+        0,
+        analysisResultCache.length,
+        ...rows.map((row) => ({
+          key: row.cache_key,
+          expiresAt: row.expires_at,
+          value: JSON.parse(row.value_json),
+        }))
+      );
+      analysisCacheLoaded = true;
+      return;
+    }
+
     if (!fs.existsSync(ANALYSIS_CACHE_FILE)) {
       analysisCacheLoaded = true;
       return;
@@ -361,6 +532,28 @@ function loadSearchPresets() {
   }
 
   try {
+    if (usingSqliteState()) {
+      initStateDatabase();
+      const rows = stateDb
+        .prepare(
+          'SELECT id, created_at, type, label, payload_json FROM search_presets ORDER BY created_at DESC LIMIT ?'
+        )
+        .all(SEARCH_PRESET_MAX_ENTRIES);
+      searchPresets.splice(
+        0,
+        searchPresets.length,
+        ...rows.map((row) => ({
+          id: row.id,
+          savedAt: row.created_at,
+          type: row.type,
+          label: row.label,
+          payload: JSON.parse(row.payload_json),
+        }))
+      );
+      searchPresetsLoaded = true;
+      return;
+    }
+
     if (!fs.existsSync(SEARCH_PRESETS_FILE)) {
       searchPresetsLoaded = true;
       return;
@@ -2754,6 +2947,8 @@ const server = http.createServer(async (request, response) => {
       },
       storage: {
         dataDir: DATA_DIR,
+        stateDriver: STATE_DRIVER,
+        sqliteFile: usingSqliteState() ? SQLITE_STATE_FILE : null,
       },
       admin: {
         enabled: Boolean(ADMIN_API_KEY),

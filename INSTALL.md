@@ -75,6 +75,17 @@ This repo now includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/
 
 Use [.env.example](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/.env.example) as the starting point for production configuration.
 
+### Storage mode
+
+The backend now supports two state persistence modes:
+
+- `STATE_DRIVER=json`
+  Default mode using JSON files in `RISKRADAR_DATA_DIR`
+- `STATE_DRIVER=sqlite`
+  Stores snapshots, saved presets, and analysis cache in one SQLite database file defined by `SQLITE_STATE_FILE`
+
+SQLite mode keeps the same frontend/API contract and passed local restart testing here, but Node `v22` still marks `node:sqlite` as experimental.
+
 ### Backend state portability
 
 The backend now supports protected state export/import/clear operations when `ADMIN_API_KEY` is set. This makes it much easier to:
