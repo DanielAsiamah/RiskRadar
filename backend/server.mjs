@@ -2915,6 +2915,37 @@ async function fetchAreaCrimeFeed(points, options = {}) {
   };
 }
 
+async function fetchMapFeed(payload = {}) {
+  const mode = String(payload.mode || '').trim().toLowerCase();
+
+  if (mode === 'postcode') {
+    return {
+      mode,
+      result: await fetchPostcodeCrimeFeed(payload.postcode ?? payload.query ?? '', payload),
+    };
+  }
+
+  if (mode === 'point') {
+    const latitude = Number(payload.latitude ?? payload.lat);
+    const longitude = Number(payload.longitude ?? payload.lng);
+    return {
+      mode,
+      result: await fetchPointCrimeFeed(latitude, longitude, payload),
+    };
+  }
+
+  if (mode === 'area') {
+    return {
+      mode,
+      result: await fetchAreaCrimeFeed(payload.points, payload),
+    };
+  }
+
+  const error = new Error('Map feed mode must be one of: postcode, point, area.');
+  error.statusCode = 400;
+  throw error;
+}
+
 async function fetchAreaIntelligence(payload = {}) {
   const label = String(payload.label || '').trim() || 'Selected area';
   const polygonPoints = normalizePolygonPoints(payload.points);
@@ -4186,6 +4217,20 @@ const server = http.createServer(async (request, response) => {
     try {
       const body = await readJsonBody(request);
       const result = await fetchMapIntelligence(body);
+      sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/map-feed') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await fetchMapFeed(body);
       sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;

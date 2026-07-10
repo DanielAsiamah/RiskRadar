@@ -84,6 +84,23 @@ async function main() {
     hotspotClusters: postcodeIntelligence.json?.hotspotMap?.clusterCount ?? 0,
   });
 
+  const unifiedPostcodeFeed = await requestJson('/api/map-feed', {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'postcode',
+      postcode: POSTCODE,
+      month: analysis.json?.crimeData?.month,
+      radiusMeters: 900,
+    }),
+  });
+  assert(unifiedPostcodeFeed.response.ok, `/api/map-feed postcode failed with ${unifiedPostcodeFeed.response.status}`);
+  assert(unifiedPostcodeFeed.json?.mode === 'postcode', 'Unified postcode feed returned unexpected mode');
+  assert(Array.isArray(unifiedPostcodeFeed.json?.result?.crimes), 'Unified postcode feed missing crimes array');
+  results.push({
+    step: 'map-feed-postcode',
+    ok: true,
+  });
+
   const unifiedPostcode = await requestJson('/api/map-intelligence', {
     method: 'POST',
     body: JSON.stringify({
@@ -186,6 +203,24 @@ async function main() {
     hotspotClusters: pointIntelligence.json?.hotspotMap?.clusterCount ?? 0,
   });
 
+  const unifiedPointFeed = await requestJson('/api/map-feed', {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'point',
+      lat: analysis.json?.postcodeData?.latitude,
+      lng: analysis.json?.postcodeData?.longitude,
+      month: analysis.json?.crimeData?.month,
+      radiusMeters: 900,
+    }),
+  });
+  assert(unifiedPointFeed.response.ok, `/api/map-feed point failed with ${unifiedPointFeed.response.status}`);
+  assert(unifiedPointFeed.json?.mode === 'point', 'Unified point feed returned unexpected mode');
+  assert(Array.isArray(unifiedPointFeed.json?.result?.crimes), 'Unified point feed missing crimes array');
+  results.push({
+    step: 'map-feed-point',
+    ok: true,
+  });
+
   const unifiedPoint = await requestJson('/api/map-intelligence', {
     method: 'POST',
     body: JSON.stringify({
@@ -263,6 +298,26 @@ async function main() {
     ok: true,
     nearby: areaIntelligence.json.nearby.length,
     hotspotClusters: areaIntelligence.json?.hotspotMap?.clusterCount ?? 0,
+  });
+
+  const unifiedAreaFeed = await requestJson('/api/map-feed', {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'area',
+      points: [
+        { lat: analysis.json.postcodeData.latitude - 0.002, lng: analysis.json.postcodeData.longitude - 0.002 },
+        { lat: analysis.json.postcodeData.latitude + 0.002, lng: analysis.json.postcodeData.longitude - 0.002 },
+        { lat: analysis.json.postcodeData.latitude + 0.002, lng: analysis.json.postcodeData.longitude + 0.002 },
+        { lat: analysis.json.postcodeData.latitude - 0.002, lng: analysis.json.postcodeData.longitude + 0.002 }
+      ],
+    }),
+  });
+  assert(unifiedAreaFeed.response.ok, `/api/map-feed area failed with ${unifiedAreaFeed.response.status}`);
+  assert(unifiedAreaFeed.json?.mode === 'area', 'Unified area feed returned unexpected mode');
+  assert(Array.isArray(unifiedAreaFeed.json?.result?.crimes), 'Unified area feed missing crimes array');
+  results.push({
+    step: 'map-feed-area',
+    ok: true,
   });
 
   const unifiedArea = await requestJson('/api/map-intelligence', {
