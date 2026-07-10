@@ -14,10 +14,16 @@ const CONTEXT_RADIUS_METERS = 900;
 const TREND_MONTH_COUNT = 6;
 const PERSISTENT_CACHE_ENABLED = process.env.PERSISTENT_CACHE_ENABLED !== 'false';
 const PERSISTENT_CACHE_FILE = process.env.PERSISTENT_CACHE_FILE || path.join(process.cwd(), 'backend', 'cache', 'upstream-cache.json');
+const ANALYSIS_SNAPSHOTS_ENABLED = process.env.ANALYSIS_SNAPSHOTS_ENABLED !== 'false';
+const ANALYSIS_SNAPSHOTS_FILE = process.env.ANALYSIS_SNAPSHOTS_FILE || path.join(process.cwd(), 'backend', 'cache', 'analysis-snapshots.json');
+const ANALYSIS_SNAPSHOT_MAX_ENTRIES = Math.min(1000, Math.max(20, Number(process.env.ANALYSIS_SNAPSHOT_MAX_ENTRIES) || 200));
 const upstreamCache = new Map();
+const analysisSnapshots = [];
 let persistentCacheWrites = 0;
 let persistentCacheWriteQueued = false;
 let persistentCacheLoaded = false;
+let analysisSnapshotWrites = 0;
+let analysisSnapshotsLoaded = false;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -60,11 +66,19 @@ function getCacheTtlMs(url) {
 }
 
 function ensurePersistentCacheDir() {
-  if (!PERSISTENT_CACHE_ENABLED) {
+  if (!PERSISTENT_CACHE_ENABLED && !ANALYSIS_SNAPSHOTS_ENABLED) {
     return;
   }
 
   fs.mkdirSync(path.dirname(PERSISTENT_CACHE_FILE), { recursive: true });
+}
+
+function ensureAnalysisSnapshotDir() {
+  if (!ANALYSIS_SNAPSHOTS_ENABLED) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(ANALYSIS_SNAPSHOTS_FILE), { recursive: true });
 }
 
 function serializeCacheEntries() {
@@ -107,6 +121,32 @@ function schedulePersistentCacheWrite() {
   }, 150);
 }
 
+function saveAnalysisSnapshots() {
+  if (!ANALYSIS_SNAPSHOTS_ENABLED) {
+    return;
+  }
+
+  try {
+    ensureAnalysisSnapshotDir();
+    fs.writeFileSync(
+      ANALYSIS_SNAPSHOTS_FILE,
+      JSON.stringify(
+        {
+          version: 1,
+          savedAt: new Date().toISOString(),
+          entries: analysisSnapshots,
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+    analysisSnapshotWrites += 1;
+  } catch (error) {
+    console.error('Failed to persist analysis snapshots:', error);
+  }
+}
+
 function loadPersistentCache() {
   if (!PERSISTENT_CACHE_ENABLED) {
     return;
@@ -138,6 +178,30 @@ function loadPersistentCache() {
   } catch (error) {
     console.error('Failed to load persistent upstream cache:', error);
     persistentCacheLoaded = true;
+  }
+}
+
+function loadAnalysisSnapshots() {
+  if (!ANALYSIS_SNAPSHOTS_ENABLED) {
+    analysisSnapshotsLoaded = true;
+    return;
+  }
+
+  try {
+    if (!fs.existsSync(ANALYSIS_SNAPSHOTS_FILE)) {
+      analysisSnapshotsLoaded = true;
+      return;
+    }
+
+    const raw = fs.readFileSync(ANALYSIS_SNAPSHOTS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+
+    analysisSnapshots.splice(0, analysisSnapshots.length, ...entries.slice(0, ANALYSIS_SNAPSHOT_MAX_ENTRIES));
+    analysisSnapshotsLoaded = true;
+  } catch (error) {
+    console.error('Failed to load analysis snapshots:', error);
+    analysisSnapshotsLoaded = true;
   }
 }
 
@@ -443,6 +507,57 @@ function buildTrendSummary(monthly) {
     },
     summary,
   };
+}
+
+function createSnapshotId(prefix = 'snapshot') {
+  const random = Math.random().toString(36).slice(2, 8);
+  return `${prefix}_${Date.now()}_${random}`;
+}
+
+function saveAnalysisSnapshot(type, label, payload) {
+  if (!ANALYSIS_SNAPSHOTS_ENABLED) {
+    return null;
+  }
+
+  const snapshot = {
+    id: createSnapshotId(type),
+    type,
+    label,
+    savedAt: new Date().toISOString(),
+    payload,
+  };
+
+  analysisSnapshots.unshift(snapshot);
+
+  if (analysisSnapshots.length > ANALYSIS_SNAPSHOT_MAX_ENTRIES) {
+    analysisSnapshots.length = ANALYSIS_SNAPSHOT_MAX_ENTRIES;
+  }
+
+  saveAnalysisSnapshots();
+  return snapshot.id;
+}
+
+function listAnalysisSnapshots(type, limit = 10) {
+  return analysisSnapshots
+    .filter((snapshot) => !type || snapshot.type === type)
+    .slice(0, limit)
+    .map((snapshot) => ({
+      id: snapshot.id,
+      type: snapshot.type,
+      label: snapshot.label,
+      savedAt: snapshot.savedAt,
+      summary:
+        snapshot.payload?.aiAnalysis?.summary ||
+        snapshot.payload?.summary ||
+        snapshot.payload?.trendData?.summary ||
+        'Saved analysis snapshot.',
+      crimeScore: snapshot.payload?.crimeData?.crimeScore ?? null,
+      totalCrimes: snapshot.payload?.crimeData?.totalCrimes ?? null,
+    }));
+}
+
+function getAnalysisSnapshotById(id) {
+  return analysisSnapshots.find((snapshot) => snapshot.id === id) || null;
 }
 
 function deriveDistrictFromAddress(address = {}) {
@@ -1349,7 +1464,7 @@ async function analyzeArea(area = {}) {
     categories: contextCategories,
   });
 
-  return {
+  const result = {
     label,
     areaData: {
       polygon: polygonPoints,
@@ -1383,6 +1498,12 @@ async function analyzeArea(area = {}) {
       summary: hotspotPayload.summary,
     },
     summary: latestAreaFeed.summary,
+  };
+
+  const snapshotId = saveAnalysisSnapshot('area', label, result);
+  return {
+    ...result,
+    snapshotId,
   };
 }
 
@@ -1675,7 +1796,7 @@ async function analyzeLocation(query) {
     categories: crimeData.categories,
   });
 
-  return {
+  const result = {
     postcode: location.postcode,
     crimeData: {
       ...crimeData,
@@ -1705,6 +1826,12 @@ async function analyzeLocation(query) {
     }),
     hotspotData,
     newsLink: `https://news.google.com/search?q=${encodeURIComponent(`${location.admin_district} police OR crime`)}`,
+  };
+
+  const snapshotId = saveAnalysisSnapshot('postcode', location.postcode, result);
+  return {
+    ...result,
+    snapshotId,
   };
 }
 
@@ -1796,7 +1923,59 @@ const server = http.createServer(async (request, response) => {
         persistentFile: PERSISTENT_CACHE_FILE,
         persistentWrites: persistentCacheWrites,
       },
+      snapshots: {
+        enabled: ANALYSIS_SNAPSHOTS_ENABLED,
+        loaded: analysisSnapshotsLoaded,
+        file: ANALYSIS_SNAPSHOTS_FILE,
+        entries: analysisSnapshots.length,
+        maxEntries: ANALYSIS_SNAPSHOT_MAX_ENTRIES,
+        writes: analysisSnapshotWrites,
+      },
     });
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/recent-analyses') {
+    try {
+      const type = String(url.searchParams.get('type') || '').trim() || '';
+      const limit = clamp(Number(url.searchParams.get('limit')) || 10, 1, 50);
+      sendJson(response, 200, {
+        analyses: listAnalysisSnapshots(type, limit),
+      });
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/analysis-snapshot') {
+    try {
+      const id = String(url.searchParams.get('id') || '').trim();
+
+      if (!id) {
+        const error = new Error('A snapshot id is required.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const snapshot = getAnalysisSnapshotById(id);
+
+      if (!snapshot) {
+        const error = new Error('Analysis snapshot not found.');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      sendJson(response, 200, snapshot);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
     return;
   }
 
@@ -1991,6 +2170,7 @@ const server = http.createServer(async (request, response) => {
 });
 
 loadPersistentCache();
+loadAnalysisSnapshots();
 
 server.listen(PORT, HOST, () => {
   console.log(`RiskRadar API listening on http://${HOST}:${PORT}`);

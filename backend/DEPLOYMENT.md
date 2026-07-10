@@ -28,6 +28,12 @@ npm run api
   Enables disk-backed upstream cache reuse across backend restarts. Default: `true`
 - `PERSISTENT_CACHE_FILE`
   JSON file used for persisted upstream cache entries. Default: `backend/cache/upstream-cache.json`
+- `ANALYSIS_SNAPSHOTS_ENABLED`
+  Enables disk-backed saved analysis history across backend restarts. Default: `true`
+- `ANALYSIS_SNAPSHOTS_FILE`
+  JSON file used for persisted analysis snapshots. Default: `backend/cache/analysis-snapshots.json`
+- `ANALYSIS_SNAPSHOT_MAX_ENTRIES`
+  Maximum number of saved analysis snapshots retained on disk. Default: `200`
 
 ### Why caching matters
 
@@ -43,7 +49,8 @@ Caching helps:
 - improve response times for repeated postcode searches
 - make a public deployment more stable under shared traffic
 - keep useful police snapshot data available after backend restarts when persistent cache is enabled
+- keep generated report analyses available after backend restarts when snapshots are enabled
 
 ### Production note
 
-The backend now supports a simple disk-backed cache for one-instance deployments. For broader public deployment, this should eventually move from local disk to a shared cache or database-backed layer so multiple server instances can reuse upstream results safely.
+The backend now supports simple disk-backed upstream caching and saved analysis snapshots for one-instance deployments. For broader public deployment, this should eventually move from local disk to a shared cache or database-backed layer so multiple server instances can reuse upstream results and saved reports safely.
