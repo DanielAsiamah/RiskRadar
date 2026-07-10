@@ -877,14 +877,7 @@ function buildAreaContext({ district, totalCrimes, categories }) {
   return `${district} appears closer to a quieter residential or mixed-use area, with risk shaped by a smaller number of repeating local issues.`;
 }
 
-function summarizeHotspots({ district, latitude, longitude, crimes }) {
-  if (!crimes.length) {
-    return {
-      clusters: [],
-      summary: `No repeat hotspot clusters were strong enough to stand out around ${district} in the latest postcode context.`,
-    };
-  }
-
+function clusterCrimesIntoHotspots({ latitude, longitude, crimes, minimumClusterSize = 3, maxClusters = 3 }) {
   const clustersByCell = new Map();
 
   for (const crime of crimes) {
@@ -916,8 +909,8 @@ function summarizeHotspots({ district, latitude, longitude, crimes }) {
     }
   }
 
-  const clusters = [...clustersByCell.values()]
-    .filter((cluster) => cluster.count >= 3)
+  return [...clustersByCell.values()]
+    .filter((cluster) => cluster.count >= minimumClusterSize)
     .map((cluster) => {
       const centerLat = cluster.latitudeTotal / cluster.count;
       const centerLon = cluster.longitudeTotal / cluster.count;
@@ -933,10 +926,26 @@ function summarizeHotspots({ district, latitude, longitude, crimes }) {
         distanceMeters: Math.round(distanceInMeters(latitude, longitude, centerLat, centerLon)),
         topCategory,
         topCategoryLabel: humanizeCategory(topCategory),
+        categories: topCategories,
       };
     })
     .sort((a, b) => b.count - a.count)
-    .slice(0, 3);
+    .slice(0, maxClusters);
+}
+
+function summarizeHotspots({ district, latitude, longitude, crimes }) {
+  if (!crimes.length) {
+    return {
+      clusters: [],
+      summary: `No repeat hotspot clusters were strong enough to stand out around ${district} in the latest postcode context.`,
+    };
+  }
+
+  const clusters = clusterCrimesIntoHotspots({
+    latitude,
+    longitude,
+    crimes,
+  });
 
   if (!clusters.length) {
     return {
@@ -954,6 +963,22 @@ function summarizeHotspots({ district, latitude, longitude, crimes }) {
   }
 
   return { clusters, summary };
+}
+
+function averageCoordinates(points) {
+  if (!points.length) {
+    return { latitude: 0, longitude: 0 };
+  }
+
+  const totals = points.reduce((accumulator, point) => ({
+    latitude: accumulator.latitude + point.latitude,
+    longitude: accumulator.longitude + point.longitude,
+  }), { latitude: 0, longitude: 0 });
+
+  return {
+    latitude: totals.latitude / points.length,
+    longitude: totals.longitude / points.length,
+  };
 }
 
 function buildPremiumInsights({ trendData, areaContext, hotspotSummary }) {
@@ -1101,6 +1126,75 @@ async function fetchAreaCrimeFeed(points, options = {}) {
     }),
     categories,
     crimes: filteredCrimes.map(sanitizeCrimeRecord),
+  };
+}
+
+async function fetchHotspotMap(payload = {}) {
+  const pointQuery = payload.postcode ?? payload.query ?? '';
+  const categoryFilters = normalizeCategoryFilters(payload.categories);
+  const month = String(payload.month || '');
+  const minimumClusterSize = clamp(Number(payload.minimumClusterSize) || 3, 2, 20);
+  const maxClusters = clamp(Number(payload.maxClusters) || 8, 1, 25);
+
+  if (pointQuery) {
+    const location = await resolveLocation(pointQuery);
+    const radiusMeters = clamp(Number(payload.radiusMeters) || CONTEXT_RADIUS_METERS, 200, 3000);
+    const crimes = await fetchStreetCrimesAtPoint(location.latitude, location.longitude, month);
+    const radiusFilteredCrimes = filterCrimesByRadius(crimes, location.latitude, location.longitude, radiusMeters);
+    const filteredCrimes = filterCrimesByCategory(radiusFilteredCrimes, categoryFilters);
+    const clusters = clusterCrimesIntoHotspots({
+      latitude: location.latitude,
+      longitude: location.longitude,
+      crimes: filteredCrimes,
+      minimumClusterSize,
+      maxClusters,
+    });
+
+    return {
+      mode: 'postcode',
+      target: {
+        postcode: location.postcode,
+        district: location.admin_district,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        radiusMeters,
+      },
+      month,
+      appliedCategories: categoryFilters,
+      totalCrimes: filteredCrimes.length,
+      clusterCount: clusters.length,
+      summary: clusters.length
+        ? `${clusters.length} hotspot clusters were identified around ${location.postcode}.`
+        : `No hotspot clusters met the current threshold around ${location.postcode}.`,
+      clusters,
+    };
+  }
+
+  const { polygonPoints, crimes } = await fetchStreetCrimesInPolygon(payload.points, month);
+  const filteredCrimes = filterCrimesByCategory(crimes, categoryFilters);
+  const center = averageCoordinates(polygonPoints);
+  const clusters = clusterCrimesIntoHotspots({
+    latitude: center.latitude,
+    longitude: center.longitude,
+    crimes: filteredCrimes,
+    minimumClusterSize,
+    maxClusters,
+  });
+
+  return {
+    mode: 'area',
+    target: {
+      polygon: polygonPoints,
+      center,
+    },
+    month,
+    appliedCategories: categoryFilters,
+    totalCrimes: filteredCrimes.length,
+    clusterCount: clusters.length,
+    summary: clusters.length
+      ? `${clusters.length} hotspot clusters were identified inside the selected area.`
+      : 'No hotspot clusters met the current threshold inside the selected area.',
+    clusters,
   };
 }
 
@@ -1386,6 +1480,20 @@ const server = http.createServer(async (request, response) => {
         month: body.month,
         categories: body.categories,
       });
+      sendJson(response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/map-hotspots') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await fetchHotspotMap(body);
       sendJson(response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;

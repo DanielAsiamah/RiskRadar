@@ -78,6 +78,24 @@ npm run android
       "categories": ["robbery", "violent-crime"]
     }
     ```
+- `POST /api/map-hotspots`
+  - Body:
+    ```json
+    { "postcode": "BR1 5NN", "radiusMeters": 900, "month": "2026-05", "categories": ["violent-crime", "robbery"], "minimumClusterSize": 3, "maxClusters": 6 }
+    ```
+  - Or with an area polygon:
+    ```json
+    {
+      "points": [
+        { "lat": 51.4280, "lng": 0.0035 },
+        { "lat": 51.4365, "lng": 0.0035 },
+        { "lat": 51.4365, "lng": 0.0175 },
+        { "lat": 51.4280, "lng": 0.0175 }
+      ],
+      "month": "2026-05",
+      "minimumClusterSize": 3
+    }
+    ```
 - `GET /api/location-suggestions?lat=51.4062&lng=0.0186`
 - `GET /health`
 
@@ -89,6 +107,7 @@ The backend is designed to be hosted separately from the Expo app and currently:
 - filters crimes to a postcode-focused radius around the searched coordinates
 - keeps compare requests sequential to reduce public API rate-limit pressure
 - exposes raw postcode crime feeds and polygon area crime feeds for future explorer/map features
+- exposes clustered hotspot map data for postcode- or polygon-based map views
 
 For backend env vars and cache settings, see [backend/DEPLOYMENT.md](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/backend/DEPLOYMENT.md).
 
