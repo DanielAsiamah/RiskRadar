@@ -22,6 +22,7 @@
   },
   "scripts": {
     "api": "node backend/server.mjs",
+    "api:crime-source-check": "node backend/crime-source-check.mjs",
     "api:prewarm": "node backend/prewarm.mjs",
     "api:smoke": "node backend/smoke-test.mjs",
     "api:verify": "node backend/verify.mjs",

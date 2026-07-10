@@ -112,6 +112,16 @@ function hasLocalCrimeFiles() {
   return crimeFileSource.hasFiles();
 }
 
+function buildCrimeSourceStatus() {
+  const localStatus = crimeFileSource.getStatus(12);
+  return {
+    mode: CRIME_SOURCE_MODE,
+    fallbackToApi: CRIME_SOURCE_FALLBACK_TO_API,
+    dataRoot: CRIME_DATA_ROOT,
+    ...localStatus,
+  };
+}
+
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -3933,15 +3943,7 @@ const server = http.createServer(async (request, response) => {
         stateDriver: STATE_DRIVER,
         sqliteFile: usingSqliteState() ? SQLITE_STATE_FILE : null,
         sqliteBootstrap: stateBootstrapStatus,
-        crimeSource: {
-          mode: CRIME_SOURCE_MODE,
-          fallbackToApi: CRIME_SOURCE_FALLBACK_TO_API,
-          dataRoot: CRIME_DATA_ROOT,
-          localFilesDetected: hasLocalCrimeFiles(),
-          availableMonths: usingFileCrimeSource() && hasLocalCrimeFiles()
-            ? crimeFileSource.listAvailableMonths().slice(0, 12)
-            : [],
-        },
+        crimeSource: buildCrimeSourceStatus(),
       },
       admin: {
         enabled: Boolean(ADMIN_API_KEY),
@@ -4142,6 +4144,18 @@ const server = http.createServer(async (request, response) => {
     try {
       const result = await fetchFilterMetadata();
       sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/crime-source-status') {
+    try {
+      sendJson(request, response, 200, buildCrimeSourceStatus());
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
       sendJson(request, response, statusCode, {

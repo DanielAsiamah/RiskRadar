@@ -46,6 +46,13 @@ cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
 npm run api:smoke
 ```
 
+Check which crime-data provider the backend is using:
+
+```powershell
+cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
+npm run api:crime-source-check
+```
+
 Wait for readiness and then run the full smoke check:
 
 ```powershell
@@ -146,6 +153,12 @@ npm run api
 ```
 
 If local files are present but incomplete, leave `CRIME_SOURCE_FALLBACK_TO_API=true` so the backend can fall back to the live police API for missing months.
+
+You can also inspect the active provider from:
+
+- `GET /api/crime-source-status`
+- `GET /health`
+  - `storage.crimeSource`
 
 ### Backend state portability
 

@@ -317,6 +317,21 @@ export function createCrimeFileSource(options = {}) {
     hasFiles() {
       return getFileIndex().length > 0;
     },
+    getStatus(limit = 20) {
+      const index = getFileIndex();
+      const months = [...new Set(index.map((entry) => entry.month))];
+      return {
+        rootDir,
+        localFilesDetected: index.length > 0,
+        fileCount: index.length,
+        cachedMonths: [...fileCache.keys()].sort((left, right) => right.localeCompare(left)),
+        availableMonths: months,
+        sampleFiles: index.slice(0, Math.max(1, limit)).map((entry) => ({
+          month: entry.month,
+          filePath: entry.filePath,
+        })),
+      };
+    },
     listAvailableMonths,
     queryPoint,
     queryLocation,
