@@ -1080,6 +1080,22 @@ function buildComparisonSummary(results) {
   return `${highest.postcodeData.postcode} is highest at ${highest.crimeData.crimeScore}/100, while ${lowest.postcodeData.postcode} is lowest at ${lowest.crimeData.crimeScore}/100 in this postcode-level comparison.`;
 }
 
+function buildAreaComparisonSummary(results) {
+  if (!results.length) {
+    return 'No area comparisons were generated.';
+  }
+
+  const sorted = [...results].sort((a, b) => b.crimeData.crimeScore - a.crimeData.crimeScore);
+  const highest = sorted[0];
+  const lowest = sorted[sorted.length - 1];
+
+  if (sorted.length === 1) {
+    return `${highest.label} currently scores ${highest.crimeData.crimeScore}/100 in the latest area comparison.`;
+  }
+
+  return `${highest.label} is highest at ${highest.crimeData.crimeScore}/100, while ${lowest.label} is lowest at ${lowest.crimeData.crimeScore}/100 in this area comparison.`;
+}
+
 async function fetchCrimeData(latitude, longitude) {
   const safeCrimes = await fetchStreetCrimesAtPoint(latitude, longitude);
   const postcodeCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, POSTCODE_RADIUS_METERS);
@@ -1156,6 +1172,89 @@ async function fetchAreaCrimeFeed(points, options = {}) {
     }),
     categories,
     crimes: filteredCrimes.map(sanitizeCrimeRecord),
+  };
+}
+
+async function analyzeArea(area = {}) {
+  const label = String(area.label || '').trim() || 'Selected area';
+  const polygonPoints = normalizePolygonPoints(area.points);
+
+  if (polygonPoints.length < 3) {
+    const error = new Error(`Area "${label}" must include at least three valid polygon points.`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const latestAreaFeed = await fetchAreaCrimeFeed(polygonPoints, {
+    month: area.month,
+    categories: area.categories,
+  });
+  const contextCategories = latestAreaFeed.categories;
+  const crimeScore = scoreCrime(contextCategories, latestAreaFeed.totalCrimes);
+  const hotspotPayload = await fetchHotspotMap({
+    points: polygonPoints,
+    month: area.month,
+    categories: area.categories,
+    minimumClusterSize: area.minimumClusterSize,
+    maxClusters: area.maxClusters,
+  });
+  const trendData = await fetchMonthlyCrimeSeries({
+    points: polygonPoints,
+    monthCount: area.monthCount,
+    categories: area.categories,
+  });
+  const areaCenter = averageCoordinates(polygonPoints);
+  const riskSignals = buildRiskSignals({
+    district: label,
+    totalCrimes: latestAreaFeed.totalCrimes,
+    categories: contextCategories,
+  });
+  const scoreFactors = buildScoreFactors({
+    district: label,
+    totalCrimes: latestAreaFeed.totalCrimes,
+    categories: contextCategories,
+    crimeScore,
+  });
+  const areaContext = buildAreaContext({
+    district: label,
+    totalCrimes: latestAreaFeed.totalCrimes,
+    categories: contextCategories,
+  });
+
+  return {
+    label,
+    areaData: {
+      polygon: polygonPoints,
+      center: areaCenter,
+      month: latestAreaFeed.month,
+      appliedCategories: latestAreaFeed.appliedCategories,
+    },
+    crimeData: {
+      totalCrimes: latestAreaFeed.totalCrimes,
+      crimeScore,
+      safetyLevel: getSafetyLevel(crimeScore),
+      month: latestAreaFeed.month || '',
+      monthDisplay: formatMonthDisplay(latestAreaFeed.month),
+      categories: contextCategories,
+      riskSignals,
+      scoreFactors,
+      capExplanation: `Area score is calculated from incidents inside the selected polygon, using the same category thresholds as postcode analysis but without a postcode-radius blend.`,
+    },
+    aiAnalysis: buildAiAnalysis({
+      district: label,
+      safetyLevel: getSafetyLevel(crimeScore),
+      totalCrimes: latestAreaFeed.totalCrimes,
+      topCategories: contextCategories,
+      scoreFactors,
+      areaContext,
+      trendData,
+    }),
+    trendData,
+    hotspotData: {
+      clusters: hotspotPayload.clusters,
+      summary: hotspotPayload.summary,
+    },
+    summary: latestAreaFeed.summary,
   };
 }
 
@@ -1511,6 +1610,33 @@ async function compareLocations(queries) {
   };
 }
 
+async function compareAreas(areas) {
+  const normalizedAreas = Array.isArray(areas)
+    ? areas.filter((area) => Array.isArray(area?.points) && area.points.length >= 3).slice(0, 5)
+    : [];
+
+  if (!normalizedAreas.length) {
+    const error = new Error('At least one valid area with polygon points is required for comparison.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const results = [];
+
+  for (const area of normalizedAreas) {
+    // eslint-disable-next-line no-await-in-loop
+    results.push(await analyzeArea(area));
+  }
+
+  const sorted = [...results].sort((a, b) => b.crimeData.crimeScore - a.crimeData.crimeScore);
+
+  return {
+    comparedAt: new Date().toISOString(),
+    summary: buildAreaComparisonSummary(sorted),
+    results: sorted,
+  };
+}
+
 const server = http.createServer(async (request, response) => {
   if (!request.url) {
     sendJson(response, 404, { error: 'Not found.' });
@@ -1630,6 +1756,20 @@ const server = http.createServer(async (request, response) => {
     try {
       const body = await readJsonBody(request);
       const result = await fetchMonthlyCrimeSeries(body);
+      sendJson(response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/compare-areas') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await compareAreas(body.areas);
       sendJson(response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;

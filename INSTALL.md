@@ -114,6 +114,35 @@ npm run android
       "categories": ["violent-crime", "robbery"]
     }
     ```
+- `POST /api/compare-areas`
+  - Body:
+    ```json
+    {
+      "areas": [
+        {
+          "label": "Lewisham Patch A",
+          "points": [
+            { "lat": 51.4280, "lng": 0.0035 },
+            { "lat": 51.4365, "lng": 0.0035 },
+            { "lat": 51.4365, "lng": 0.0175 },
+            { "lat": 51.4280, "lng": 0.0175 }
+          ],
+          "monthCount": 6,
+          "categories": ["violent-crime", "robbery"]
+        },
+        {
+          "label": "Lewisham Patch B",
+          "points": [
+            { "lat": 51.4235, "lng": 0.0060 },
+            { "lat": 51.4310, "lng": 0.0060 },
+            { "lat": 51.4310, "lng": 0.0185 },
+            { "lat": 51.4235, "lng": 0.0185 }
+          ],
+          "monthCount": 6
+        }
+      ]
+    }
+    ```
 - `GET /api/location-suggestions?lat=51.4062&lng=0.0186`
 - `GET /health`
 
@@ -127,6 +156,7 @@ The backend is designed to be hosted separately from the Expo app and currently:
 - exposes raw postcode crime feeds and polygon area crime feeds for future explorer/map features
 - exposes clustered hotspot map data for postcode- or polygon-based map views
 - exposes reusable monthly crime series data for postcode or area trend graphs
+- exposes area comparison output with score, trend, and hotspot comparison data
 
 For backend env vars and cache settings, see [backend/DEPLOYMENT.md](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/backend/DEPLOYMENT.md).
 
