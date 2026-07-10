@@ -79,6 +79,39 @@ function runSmokeTest() {
   });
 }
 
+function runPrewarm() {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['backend/prewarm.mjs'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        RISKRADAR_PREWARM_BASE_URL: BASE_URL,
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      resolve({
+        code,
+        stdout,
+        stderr,
+      });
+    });
+  });
+}
+
 async function main() {
   const readiness = await waitForReady();
   if (!readiness.ok) {
@@ -90,6 +123,31 @@ async function main() {
     throw new Error(`Smoke test failed.\n${smoke.stderr || smoke.stdout}`.trim());
   }
 
+  const prewarm = await runPrewarm();
+  if (prewarm.code !== 0) {
+    throw new Error(`Prewarm failed.\n${prewarm.stderr || prewarm.stdout}`.trim());
+  }
+
+  const prewarmJson = JSON.parse(prewarm.stdout);
+  const cacheAfter = prewarmJson?.cacheAfter;
+  const scopeStats = cacheAfter?.stats?.scopes;
+
+  if (!cacheAfter || !scopeStats) {
+    throw new Error('Prewarm did not return analysis cache stats.');
+  }
+
+  if ((scopeStats['map-feed']?.misses || 0) < 1) {
+    throw new Error('Prewarm did not record any map-feed cache warmup activity.');
+  }
+
+  if ((scopeStats['map-intelligence']?.misses || 0) < 1) {
+    throw new Error('Prewarm did not record any map-intelligence cache warmup activity.');
+  }
+
+  if ((scopeStats['map-compare']?.misses || 0) < 1) {
+    throw new Error('Prewarm did not record any map-compare cache warmup activity.');
+  }
+
   console.log(
     JSON.stringify(
       {
@@ -97,6 +155,7 @@ async function main() {
         baseUrl: BASE_URL,
         ready: true,
         smoke: JSON.parse(smoke.stdout),
+        prewarm: prewarmJson,
       },
       null,
       2
