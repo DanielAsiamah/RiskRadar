@@ -48,6 +48,20 @@ export interface PremiumInsight {
   badge: string;
 }
 
+export interface HotspotCluster {
+  count: number;
+  latitude: number;
+  longitude: number;
+  distanceMeters: number;
+  topCategory: string;
+  topCategoryLabel: string;
+}
+
+export interface HotspotData {
+  clusters: HotspotCluster[];
+  summary: string;
+}
+
 export interface PostcodeResult {
   postcode: string;
   crimeData: CrimeData;
@@ -67,5 +81,6 @@ export interface PostcodeResult {
   };
   trendData: TrendData;
   premiumInsights: PremiumInsight[];
+  hotspotData?: HotspotData;
   newsLink: string | null;
 }

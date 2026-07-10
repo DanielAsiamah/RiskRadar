@@ -7,10 +7,17 @@ const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 15 * 60 * 1000);
 const GEOCODE_CACHE_TTL_MS = Number(process.env.GEOCODE_CACHE_TTL_MS || 24 * 60 * 60 * 1000);
 const CRIME_CACHE_TTL_MS = Number(process.env.CRIME_CACHE_TTL_MS || 6 * 60 * 60 * 1000);
 const CACHE_MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES || 500);
+const POSTCODE_RADIUS_METERS = 400;
+const CONTEXT_RADIUS_METERS = 900;
+const TREND_MONTH_COUNT = 6;
 const upstreamCache = new Map();
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function sleep(milliseconds) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 function thresholdPoints(count, thresholds) {
@@ -254,18 +261,6 @@ function percentChange(currentValue, previousValue) {
   return Math.round(((currentValue - previousValue) / previousValue) * 100);
 }
 
-function getPastMonthKeys(count, offsetFromCurrent = 2) {
-  const months = [];
-  const now = new Date();
-
-  for (let index = count - 1; index >= 0; index -= 1) {
-    const date = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - offsetFromCurrent - index, 1));
-    months.push(`${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}`);
-  }
-
-  return months;
-}
-
 function deriveDistrictFromAddress(address = {}) {
   return (
     address.city ||
@@ -374,6 +369,22 @@ async function fetchNearbyPostcodes(latitude, longitude, limit = 5) {
     .slice(0, limit);
 }
 
+async function fetchAvailableCrimeMonths() {
+  const response = await fetchJson('https://data.police.uk/api/crimes-street-dates', {}, 12000).catch((error) => {
+    if (error.statusCode === 404) {
+      return [];
+    }
+    throw error;
+  });
+
+  const dates = Array.isArray(response) ? response : Array.isArray(response?.value) ? response.value : [];
+
+  return dates
+    .map((entry) => entry?.date)
+    .filter((date) => /^\d{4}-\d{2}$/.test(String(date || '')))
+    .slice(0, TREND_MONTH_COUNT);
+}
+
 async function resolveLocation(query) {
   const normalized = normalizeQuery(query);
 
@@ -423,6 +434,19 @@ function summarizeCrimeCategories(crimes) {
   return [...totals.entries()]
     .map(([category, count]) => ({ category, count }))
     .sort((a, b) => b.count - a.count);
+}
+
+function filterCrimesByRadius(crimes, latitude, longitude, radiusMeters) {
+  return crimes.filter((crime) => {
+    const incidentLat = Number(crime?.location?.latitude);
+    const incidentLon = Number(crime?.location?.longitude);
+
+    if (!Number.isFinite(incidentLat) || !Number.isFinite(incidentLon)) {
+      return false;
+    }
+
+    return distanceInMeters(latitude, longitude, incidentLat, incidentLon) <= radiusMeters;
+  });
 }
 
 function scoreCrime(categories, totalCrimes) {
@@ -657,7 +681,86 @@ function buildAreaContext({ district, totalCrimes, categories }) {
   return `${district} appears closer to a quieter residential or mixed-use area, with risk shaped by a smaller number of repeating local issues.`;
 }
 
-function buildPremiumInsights({ district, trendData, areaContext }) {
+function summarizeHotspots({ district, latitude, longitude, crimes }) {
+  if (!crimes.length) {
+    return {
+      clusters: [],
+      summary: `No repeat hotspot clusters were strong enough to stand out around ${district} in the latest postcode context.`,
+    };
+  }
+
+  const clustersByCell = new Map();
+
+  for (const crime of crimes) {
+    const incidentLat = Number(crime?.location?.latitude);
+    const incidentLon = Number(crime?.location?.longitude);
+
+    if (!Number.isFinite(incidentLat) || !Number.isFinite(incidentLon)) {
+      continue;
+    }
+
+    // Small grid grouping keeps hotspot summaries stable without extra map infrastructure.
+    const latCell = Math.round(incidentLat * 250);
+    const lonCell = Math.round(incidentLon * 250);
+    const cellKey = `${latCell}:${lonCell}`;
+    const existing = clustersByCell.get(cellKey);
+
+    if (existing) {
+      existing.count += 1;
+      existing.latitudeTotal += incidentLat;
+      existing.longitudeTotal += incidentLon;
+      existing.categories.push(String(crime.category || 'other-crime'));
+    } else {
+      clustersByCell.set(cellKey, {
+        count: 1,
+        latitudeTotal: incidentLat,
+        longitudeTotal: incidentLon,
+        categories: [String(crime.category || 'other-crime')],
+      });
+    }
+  }
+
+  const clusters = [...clustersByCell.values()]
+    .filter((cluster) => cluster.count >= 3)
+    .map((cluster) => {
+      const centerLat = cluster.latitudeTotal / cluster.count;
+      const centerLon = cluster.longitudeTotal / cluster.count;
+      const topCategories = summarizeCrimeCategories(
+        cluster.categories.map((category) => ({ category }))
+      ).slice(0, 2);
+      const topCategory = topCategories[0]?.category || 'other-crime';
+
+      return {
+        count: cluster.count,
+        latitude: Number(centerLat.toFixed(6)),
+        longitude: Number(centerLon.toFixed(6)),
+        distanceMeters: Math.round(distanceInMeters(latitude, longitude, centerLat, centerLon)),
+        topCategory,
+        topCategoryLabel: humanizeCategory(topCategory),
+      };
+    })
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 3);
+
+  if (!clusters.length) {
+    return {
+      clusters: [],
+      summary: `Incidents around ${district} are fairly dispersed rather than stacking into one dominant hotspot cluster right now.`,
+    };
+  }
+
+  const leadCluster = clusters[0];
+  const secondaryCluster = clusters[1];
+  let summary = `The tightest hotspot near ${district} contains ${leadCluster.count} recent incidents centred about ${leadCluster.distanceMeters}m from the searched postcode, led by ${leadCluster.topCategoryLabel.toLowerCase()}.`;
+
+  if (secondaryCluster) {
+    summary += ` A second cluster of ${secondaryCluster.count} incidents also appears roughly ${secondaryCluster.distanceMeters}m away.`;
+  }
+
+  return { clusters, summary };
+}
+
+function buildPremiumInsights({ trendData, areaContext, hotspotSummary }) {
   return [
     {
       id: 'trend',
@@ -680,7 +783,7 @@ function buildPremiumInsights({ district, trendData, areaContext }) {
     {
       id: 'hotspot-map',
       title: 'Hotspot Map',
-      description: `Unlock a hotspot view to see where incident clusters are concentrated around ${district}, not just the single postcode summary.`,
+      description: hotspotSummary,
       badge: 'Map',
     },
   ];
@@ -735,30 +838,9 @@ async function fetchCrimeData(latitude, longitude) {
     throw error;
   });
 
-  const postcodeRadiusMeters = 400;
-  const contextRadiusMeters = 900;
   const safeCrimes = Array.isArray(crimes) ? crimes : [];
-  const postcodeCrimes = safeCrimes.filter((crime) => {
-    const incidentLat = Number(crime?.location?.latitude);
-    const incidentLon = Number(crime?.location?.longitude);
-
-    if (!Number.isFinite(incidentLat) || !Number.isFinite(incidentLon)) {
-      return false;
-    }
-
-    return distanceInMeters(latitude, longitude, incidentLat, incidentLon) <= postcodeRadiusMeters;
-  });
-
-  const contextCrimes = safeCrimes.filter((crime) => {
-    const incidentLat = Number(crime?.location?.latitude);
-    const incidentLon = Number(crime?.location?.longitude);
-
-    if (!Number.isFinite(incidentLat) || !Number.isFinite(incidentLon)) {
-      return false;
-    }
-
-    return distanceInMeters(latitude, longitude, incidentLat, incidentLon) <= contextRadiusMeters;
-  });
+  const postcodeCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, POSTCODE_RADIUS_METERS);
+  const contextCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, CONTEXT_RADIUS_METERS);
 
   const postcodeCategories = summarizeCrimeCategories(postcodeCrimes);
   const contextCategories = summarizeCrimeCategories(contextCrimes);
@@ -776,51 +858,62 @@ async function fetchCrimeData(latitude, longitude) {
     monthDisplay: formatMonthDisplay(month),
     categories: postcodeCategories,
     contextCrimeCount: contextCrimes.length,
-    postcodeRadiusMeters,
-    contextRadiusMeters,
+    postcodeRadiusMeters: POSTCODE_RADIUS_METERS,
+    contextRadiusMeters: CONTEXT_RADIUS_METERS,
     capExplanation:
-      `Live score blends incidents within roughly ${postcodeRadiusMeters} metres of the postcode point with a wider ${contextRadiusMeters} metre context view, so the result stays postcode-led without becoming too brittle around one exact point.`,
+      `Live score blends incidents within roughly ${POSTCODE_RADIUS_METERS} metres of the postcode point with a wider ${CONTEXT_RADIUS_METERS} metre context view, so the result stays postcode-led without becoming too brittle around one exact point.`,
   };
 }
 
-async function fetchCrimeHistory(latitude, longitude, monthCount = 6) {
-  const monthKeys = getPastMonthKeys(monthCount);
-  let monthly;
+async function fetchCrimeHistory(latitude, longitude, monthCount = TREND_MONTH_COUNT) {
+  const monthKeys = (await fetchAvailableCrimeMonths()).slice(0, monthCount).reverse();
+  const monthly = [];
 
   try {
-    monthly = await Promise.all(
-      monthKeys.map(async (monthKey) => {
-        const crimesUrl = `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}&date=${monthKey}`;
-        const crimes = await fetchJson(crimesUrl, {}, 18000).catch((error) => {
-          if (error.statusCode === 404) {
-            return [];
-          }
-          throw error;
-        });
+    for (const monthKey of monthKeys) {
+      const crimesUrl = `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}&date=${monthKey}`;
+      // eslint-disable-next-line no-await-in-loop
+      const crimes = await fetchJson(crimesUrl, {}, 18000).catch((error) => {
+        if (error.statusCode === 404) {
+          return [];
+        }
+        throw error;
+      });
 
-        const safeCrimes = Array.isArray(crimes) ? crimes : [];
+      const safeCrimes = Array.isArray(crimes) ? crimes : [];
+      const postcodeCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, POSTCODE_RADIUS_METERS);
 
-        return {
-          month: monthKey,
-          monthDisplay: formatShortMonthDisplay(monthKey),
-          totalCrimes: safeCrimes.length,
-          violentCrimes: safeCrimes.filter((crime) => ['violent-crime', 'violence-and-sexual-offences'].includes(crime.category)).length,
-          antiSocialCrimes: safeCrimes.filter((crime) => crime.category === 'anti-social-behaviour').length,
-          robberyCrimes: safeCrimes.filter((crime) => crime.category === 'robbery').length,
-        };
-      })
-    );
+      monthly.push({
+        month: monthKey,
+        monthDisplay: formatShortMonthDisplay(monthKey),
+        totalCrimes: postcodeCrimes.length,
+        violentCrimes: postcodeCrimes.filter((crime) => ['violent-crime', 'violence-and-sexual-offences'].includes(crime.category)).length,
+        antiSocialCrimes: postcodeCrimes.filter((crime) => crime.category === 'anti-social-behaviour').length,
+        robberyCrimes: postcodeCrimes.filter((crime) => crime.category === 'robbery').length,
+      });
+
+      if (monthKey !== monthKeys[monthKeys.length - 1]) {
+        // Light pacing helps with public API throttling when several users search at once.
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(150);
+      }
+    }
   } catch (error) {
     if (error.statusCode === 429) {
-      return {
-        monthly: monthKeys.map((monthKey) => ({
+      const fallbackMonthly = monthKeys.map((monthKey) => {
+        const existing = monthly.find((point) => point.month === monthKey);
+        return existing || {
           month: monthKey,
           monthDisplay: formatShortMonthDisplay(monthKey),
           totalCrimes: 0,
           violentCrimes: 0,
           antiSocialCrimes: 0,
           robberyCrimes: 0,
-        })),
+        };
+      });
+
+      return {
+        monthly: fallbackMonthly,
         direction: 'stable',
         changePercent: 0,
         categoryDirection: {
@@ -828,7 +921,9 @@ async function fetchCrimeHistory(latitude, longitude, monthCount = 6) {
           antiSocialCrimes: 'stable',
           robberyCrimes: 'stable',
         },
-        summary: 'Monthly trend data is temporarily rate-limited by the police feed, but PRO unlocks the historical graph as soon as those snapshots are available.',
+        summary: monthly.length
+          ? 'Historical trend data is partially loaded because the public police API throttled part of the month-by-month lookup.'
+          : 'Historical trend data is temporarily unavailable because the public police API throttled the month-by-month lookup.',
       };
     }
 
@@ -869,6 +964,24 @@ async function analyzeLocation(query) {
   const location = await resolveLocation(query);
   const crimeData = await fetchCrimeData(location.latitude, location.longitude);
   const trendData = await fetchCrimeHistory(location.latitude, location.longitude);
+  const latestContextCrimesUrl = `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(location.latitude)}&lng=${encodeURIComponent(location.longitude)}`;
+  const latestContextCrimes = await fetchJson(latestContextCrimesUrl, {}, 18000).catch((error) => {
+    if (error.statusCode === 404) {
+      return [];
+    }
+    throw error;
+  });
+  const hotspotData = summarizeHotspots({
+    district: location.admin_district,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    crimes: filterCrimesByRadius(
+      Array.isArray(latestContextCrimes) ? latestContextCrimes : [],
+      location.latitude,
+      location.longitude,
+      CONTEXT_RADIUS_METERS
+    ),
+  });
   const scoreFactors = buildScoreFactors({
     district: location.admin_district,
     totalCrimes: crimeData.totalCrimes,
@@ -910,10 +1023,11 @@ async function analyzeLocation(query) {
     }),
     trendData,
     premiumInsights: buildPremiumInsights({
-      district: location.admin_district,
       trendData,
-      areaContext,
+      areaContext: `${areaContext} ${hotspotData.summary}`,
+      hotspotSummary: hotspotData.summary,
     }),
+    hotspotData,
     newsLink: `https://news.google.com/search?q=${encodeURIComponent(`${location.admin_district} police OR crime`)}`,
   };
 }
