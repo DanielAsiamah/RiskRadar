@@ -123,6 +123,29 @@ async function main() {
     totalCrimes: locationCrimes.json.totalCrimes,
   });
 
+  const pointIntelligence = await requestJson('/api/point-intelligence', {
+    method: 'POST',
+    body: JSON.stringify({
+      lat: analysis.json?.postcodeData?.latitude,
+      lng: analysis.json?.postcodeData?.longitude,
+      month: analysis.json?.crimeData?.month,
+      monthCount: 6,
+      radiusMeters: 900,
+      minimumClusterSize: 2,
+      maxClusters: 4,
+    }),
+  });
+  assert(pointIntelligence.response.ok, `/api/point-intelligence failed with ${pointIntelligence.response.status}`);
+  assert(Number.isFinite(pointIntelligence.json?.analysis?.crimeData?.crimeScore), 'Point intelligence missing analysis payload');
+  assert(Array.isArray(pointIntelligence.json?.nearby), 'Point intelligence missing nearby suggestions');
+  assert(Array.isArray(pointIntelligence.json?.boundary?.boundary), 'Point intelligence missing boundary payload');
+  results.push({
+    step: 'point-intelligence',
+    ok: true,
+    nearby: pointIntelligence.json.nearby.length,
+    hotspotClusters: pointIntelligence.json?.hotspotMap?.clusterCount ?? 0,
+  });
+
   const monthly = await requestJson('/api/monthly-crime-series', {
     method: 'POST',
     body: JSON.stringify({ postcode: POSTCODE, monthCount: 6 }),

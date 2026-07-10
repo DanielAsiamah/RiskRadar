@@ -197,6 +197,20 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
     { "lat": 51.431075, "lng": 0.009835, "month": "2026-05", "categories": ["violent-crime", "robbery"] }
     ```
   - Returns crimes at the nearest mapped street location rather than a radius around the point.
+- `POST /api/point-intelligence`
+  - Body:
+    ```json
+    {
+      "lat": 51.431075,
+      "lng": 0.009835,
+      "month": "2026-05",
+      "monthCount": 6,
+      "radiusMeters": 900,
+      "minimumClusterSize": 2,
+      "maxClusters": 4
+    }
+    ```
+  - Returns a bundled clickable-map payload with point analysis, exact-location crimes, hotspot clusters, neighbourhood boundary, and nearby postcode suggestions in one request.
 - `POST /api/area-crimes`
   - Body:
     ```json

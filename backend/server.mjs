@@ -2767,6 +2767,82 @@ async function fetchExactLocationCrimeFeed(latitude, longitude, options = {}) {
   };
 }
 
+async function fetchPointIntelligence(payload = {}) {
+  const latitude = Number(payload.latitude ?? payload.lat);
+  const longitude = Number(payload.longitude ?? payload.lng);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    const error = new Error('Valid latitude and longitude are required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const month = String(payload.month || '');
+  const categoryFilters = normalizeCategoryFilters(payload.categories);
+  const radiusMeters = clamp(Number(payload.radiusMeters) || CONTEXT_RADIUS_METERS, 200, 3000);
+  const minimumClusterSize = clamp(Number(payload.minimumClusterSize) || 3, 2, 20);
+  const maxClusters = clamp(Number(payload.maxClusters) || 8, 1, 25);
+  const hotspotCrimes = await fetchStreetCrimesAtPoint(latitude, longitude, month);
+  const hotspotFilteredCrimes = filterCrimesByCategory(
+    filterCrimesByRadius(hotspotCrimes, latitude, longitude, radiusMeters),
+    categoryFilters
+  );
+  const hotspotClusters = clusterCrimesIntoHotspots({
+    latitude,
+    longitude,
+    crimes: hotspotFilteredCrimes,
+    minimumClusterSize,
+    maxClusters,
+  });
+
+  const [analysis, exactLocationFeed, boundaryData, nearbyPostcodes] = await Promise.all([
+    analyzePoint({
+      latitude,
+      longitude,
+      monthCount: payload.monthCount,
+      month,
+      categories: categoryFilters,
+    }),
+    fetchExactLocationCrimeFeed(latitude, longitude, {
+      month,
+      categories: categoryFilters,
+    }),
+    fetchNeighbourhoodBoundary(latitude, longitude).catch(() => ({
+      neighbourhood: null,
+      boundary: [],
+    })),
+    fetchNearbyPostcodes(latitude, longitude).catch(() => []),
+  ]);
+
+  return {
+    fetchedAt: new Date().toISOString(),
+    point: {
+      latitude,
+      longitude,
+    },
+    analysis,
+    exactLocationFeed,
+    hotspotMap: {
+      mode: 'point',
+      target: {
+        latitude,
+        longitude,
+        radiusMeters,
+      },
+      month,
+      appliedCategories: categoryFilters,
+      totalCrimes: hotspotFilteredCrimes.length,
+      clusterCount: hotspotClusters.length,
+      summary: hotspotClusters.length
+        ? `${hotspotClusters.length} hotspot clusters were identified around the selected point.`
+        : 'No hotspot clusters met the current threshold around the selected point.',
+      clusters: hotspotClusters,
+    },
+    boundary: boundaryData,
+    nearby: nearbyPostcodes,
+  };
+}
+
 async function fetchAreaCrimeFeed(points, options = {}) {
   const { polygonPoints, crimes } = await fetchStreetCrimesInPolygon(points, String(options.month || ''));
   const categoryFilters = normalizeCategoryFilters(options.categories);
@@ -3911,6 +3987,20 @@ const server = http.createServer(async (request, response) => {
         month: body.month,
         categories: body.categories,
       });
+      sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/point-intelligence') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await fetchPointIntelligence(body);
       sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
