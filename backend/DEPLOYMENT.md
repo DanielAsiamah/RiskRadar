@@ -34,6 +34,12 @@ npm run api
   JSON file used for persisted analysis snapshots. Default: `backend/cache/analysis-snapshots.json`
 - `ANALYSIS_SNAPSHOT_MAX_ENTRIES`
   Maximum number of saved analysis snapshots retained on disk. Default: `200`
+- `SEARCH_PRESETS_ENABLED`
+  Enables disk-backed saved target presets across backend restarts. Default: `true`
+- `SEARCH_PRESETS_FILE`
+  JSON file used for persisted search presets. Default: `backend/cache/search-presets.json`
+- `SEARCH_PRESET_MAX_ENTRIES`
+  Maximum number of saved presets retained on disk. Default: `200`
 
 ### Why caching matters
 
@@ -50,7 +56,8 @@ Caching helps:
 - make a public deployment more stable under shared traffic
 - keep useful police snapshot data available after backend restarts when persistent cache is enabled
 - keep generated report analyses available after backend restarts when snapshots are enabled
+- keep reusable saved search targets available after backend restarts when presets are enabled
 
 ### Production note
 
-The backend now supports simple disk-backed upstream caching and saved analysis snapshots for one-instance deployments. For broader public deployment, this should eventually move from local disk to a shared cache or database-backed layer so multiple server instances can reuse upstream results and saved reports safely.
+The backend now supports simple disk-backed upstream caching, saved analysis snapshots, and saved search presets for one-instance deployments. For broader public deployment, this should eventually move from local disk to a shared cache or database-backed layer so multiple server instances can reuse upstream results, saved reports, and saved targets safely.

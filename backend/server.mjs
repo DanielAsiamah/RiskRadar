@@ -17,13 +17,19 @@ const PERSISTENT_CACHE_FILE = process.env.PERSISTENT_CACHE_FILE || path.join(pro
 const ANALYSIS_SNAPSHOTS_ENABLED = process.env.ANALYSIS_SNAPSHOTS_ENABLED !== 'false';
 const ANALYSIS_SNAPSHOTS_FILE = process.env.ANALYSIS_SNAPSHOTS_FILE || path.join(process.cwd(), 'backend', 'cache', 'analysis-snapshots.json');
 const ANALYSIS_SNAPSHOT_MAX_ENTRIES = Math.min(1000, Math.max(20, Number(process.env.ANALYSIS_SNAPSHOT_MAX_ENTRIES) || 200));
+const SEARCH_PRESETS_ENABLED = process.env.SEARCH_PRESETS_ENABLED !== 'false';
+const SEARCH_PRESETS_FILE = process.env.SEARCH_PRESETS_FILE || path.join(process.cwd(), 'backend', 'cache', 'search-presets.json');
+const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.SEARCH_PRESET_MAX_ENTRIES) || 200));
 const upstreamCache = new Map();
 const analysisSnapshots = [];
+const searchPresets = [];
 let persistentCacheWrites = 0;
 let persistentCacheWriteQueued = false;
 let persistentCacheLoaded = false;
 let analysisSnapshotWrites = 0;
 let analysisSnapshotsLoaded = false;
+let searchPresetWrites = 0;
+let searchPresetsLoaded = false;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -66,7 +72,7 @@ function getCacheTtlMs(url) {
 }
 
 function ensurePersistentCacheDir() {
-  if (!PERSISTENT_CACHE_ENABLED && !ANALYSIS_SNAPSHOTS_ENABLED) {
+  if (!PERSISTENT_CACHE_ENABLED && !ANALYSIS_SNAPSHOTS_ENABLED && !SEARCH_PRESETS_ENABLED) {
     return;
   }
 
@@ -79,6 +85,14 @@ function ensureAnalysisSnapshotDir() {
   }
 
   fs.mkdirSync(path.dirname(ANALYSIS_SNAPSHOTS_FILE), { recursive: true });
+}
+
+function ensureSearchPresetDir() {
+  if (!SEARCH_PRESETS_ENABLED) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(SEARCH_PRESETS_FILE), { recursive: true });
 }
 
 function serializeCacheEntries() {
@@ -147,6 +161,32 @@ function saveAnalysisSnapshots() {
   }
 }
 
+function saveSearchPresets() {
+  if (!SEARCH_PRESETS_ENABLED) {
+    return;
+  }
+
+  try {
+    ensureSearchPresetDir();
+    fs.writeFileSync(
+      SEARCH_PRESETS_FILE,
+      JSON.stringify(
+        {
+          version: 1,
+          savedAt: new Date().toISOString(),
+          entries: searchPresets,
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+    searchPresetWrites += 1;
+  } catch (error) {
+    console.error('Failed to persist search presets:', error);
+  }
+}
+
 function loadPersistentCache() {
   if (!PERSISTENT_CACHE_ENABLED) {
     return;
@@ -202,6 +242,30 @@ function loadAnalysisSnapshots() {
   } catch (error) {
     console.error('Failed to load analysis snapshots:', error);
     analysisSnapshotsLoaded = true;
+  }
+}
+
+function loadSearchPresets() {
+  if (!SEARCH_PRESETS_ENABLED) {
+    searchPresetsLoaded = true;
+    return;
+  }
+
+  try {
+    if (!fs.existsSync(SEARCH_PRESETS_FILE)) {
+      searchPresetsLoaded = true;
+      return;
+    }
+
+    const raw = fs.readFileSync(SEARCH_PRESETS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+
+    searchPresets.splice(0, searchPresets.length, ...entries.slice(0, SEARCH_PRESET_MAX_ENTRIES));
+    searchPresetsLoaded = true;
+  } catch (error) {
+    console.error('Failed to load search presets:', error);
+    searchPresetsLoaded = true;
   }
 }
 
@@ -569,6 +633,72 @@ function deleteAnalysisSnapshotById(id) {
 
   analysisSnapshots.splice(index, 1);
   saveAnalysisSnapshots();
+  return true;
+}
+
+function saveSearchPreset(preset = {}) {
+  if (!SEARCH_PRESETS_ENABLED) {
+    return null;
+  }
+
+  const type = String(preset.type || '').trim().toLowerCase();
+  if (!['postcode', 'area', 'point'].includes(type)) {
+    const error = new Error('Preset type must be postcode, area, or point.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const label = String(preset.label || '').trim();
+  if (!label) {
+    const error = new Error('Preset label is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const payload = preset.payload && typeof preset.payload === 'object' ? preset.payload : {};
+  const entry = {
+    id: createSnapshotId('preset'),
+    type,
+    label,
+    savedAt: new Date().toISOString(),
+    payload,
+  };
+
+  searchPresets.unshift(entry);
+  if (searchPresets.length > SEARCH_PRESET_MAX_ENTRIES) {
+    searchPresets.length = SEARCH_PRESET_MAX_ENTRIES;
+  }
+
+  saveSearchPresets();
+  return entry;
+}
+
+function listSearchPresets(type, limit = 20) {
+  return searchPresets
+    .filter((preset) => !type || preset.type === type)
+    .slice(0, limit)
+    .map((preset) => ({
+      id: preset.id,
+      type: preset.type,
+      label: preset.label,
+      savedAt: preset.savedAt,
+      payload: preset.payload,
+    }));
+}
+
+function getSearchPresetById(id) {
+  return searchPresets.find((preset) => preset.id === id) || null;
+}
+
+function deleteSearchPresetById(id) {
+  const index = searchPresets.findIndex((preset) => preset.id === id);
+
+  if (index === -1) {
+    return false;
+  }
+
+  searchPresets.splice(index, 1);
+  saveSearchPresets();
   return true;
 }
 
@@ -1943,6 +2073,14 @@ const server = http.createServer(async (request, response) => {
         maxEntries: ANALYSIS_SNAPSHOT_MAX_ENTRIES,
         writes: analysisSnapshotWrites,
       },
+      presets: {
+        enabled: SEARCH_PRESETS_ENABLED,
+        loaded: searchPresetsLoaded,
+        file: SEARCH_PRESETS_FILE,
+        entries: searchPresets.length,
+        maxEntries: SEARCH_PRESET_MAX_ENTRIES,
+        writes: searchPresetWrites,
+      },
     });
     return;
   }
@@ -2026,6 +2164,95 @@ const server = http.createServer(async (request, response) => {
     try {
       const result = await fetchFilterMetadata();
       sendJson(response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/search-presets') {
+    try {
+      const type = String(url.searchParams.get('type') || '').trim() || '';
+      const limit = clamp(Number(url.searchParams.get('limit')) || 20, 1, 100);
+      sendJson(response, 200, {
+        presets: listSearchPresets(type, limit),
+      });
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/search-presets') {
+    try {
+      const body = await readJsonBody(request);
+      const preset = saveSearchPreset({
+        type: body.type,
+        label: body.label,
+        payload: body.payload,
+      });
+      sendJson(response, 200, preset);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/search-preset') {
+    try {
+      const id = String(url.searchParams.get('id') || '').trim();
+      if (!id) {
+        const error = new Error('A preset id is required.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const preset = getSearchPresetById(id);
+      if (!preset) {
+        const error = new Error('Search preset not found.');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      sendJson(response, 200, preset);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'DELETE' && url.pathname === '/api/search-preset') {
+    try {
+      const id = String(url.searchParams.get('id') || '').trim();
+      if (!id) {
+        const error = new Error('A preset id is required.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const deleted = deleteSearchPresetById(id);
+      if (!deleted) {
+        const error = new Error('Search preset not found.');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      sendJson(response, 200, {
+        ok: true,
+        deletedId: id,
+      });
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
       sendJson(response, statusCode, {
@@ -2214,6 +2441,7 @@ const server = http.createServer(async (request, response) => {
 
 loadPersistentCache();
 loadAnalysisSnapshots();
+loadSearchPresets();
 
 server.listen(PORT, HOST, () => {
   console.log(`RiskRadar API listening on http://${HOST}:${PORT}`);
