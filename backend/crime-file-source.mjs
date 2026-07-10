@@ -219,6 +219,22 @@ export function createCrimeFileSource(options = {}) {
     return [...new Set(getFileIndex().map((entry) => entry.month))];
   }
 
+  function readManifest() {
+    const manifestPath = path.join(rootDir, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    } catch {
+      return {
+        error: 'manifest.json could not be parsed.',
+        manifestPath,
+      };
+    }
+  }
+
   function readMonth(month) {
     const normalizedMonth = normalizeMonth(month);
     if (!normalizedMonth) {
@@ -330,6 +346,7 @@ export function createCrimeFileSource(options = {}) {
           month: entry.month,
           filePath: entry.filePath,
         })),
+        manifest: readManifest(),
       };
     },
     listAvailableMonths,

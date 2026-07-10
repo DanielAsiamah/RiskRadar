@@ -154,6 +154,22 @@ npm run api
 
 If local files are present but incomplete, leave `CRIME_SOURCE_FALLBACK_TO_API=true` so the backend can fall back to the live police API for missing months.
 
+To import downloaded monthly police CSV snapshots into the backend layout:
+
+```powershell
+cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
+npm run api:import-crime-snapshots -- --source C:\crime-downloads --clean
+```
+
+That command scans recursively for `street.csv` files whose path contains a `YYYY-MM` month, copies them into the backend data layout, and writes `manifest.json` inside the target crime-data root.
+
+If you want to import into a different target folder:
+
+```powershell
+cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
+npm run api:import-crime-snapshots -- --source C:\crime-downloads --target C:\crime-data-uk --clean
+```
+
 You can also inspect the active provider from:
 
 - `GET /api/crime-source-status`
