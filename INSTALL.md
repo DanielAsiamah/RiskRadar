@@ -46,6 +46,13 @@ cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
 npm run api:smoke
 ```
 
+Wait for readiness and then run the full smoke check:
+
+```powershell
+cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
+npm run api:verify
+```
+
 ## Backend public deploy
 
 ### Option 1: Docker
@@ -84,6 +91,7 @@ This repo now includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/
 3. Deploy the `riskradar-api` service.
 4. Copy the live backend URL into `EXPO_PUBLIC_API_BASE_URL` for your Expo environment.
 5. Set `RISKRADAR_SMOKE_BASE_URL` to that backend URL and run `npm run api:smoke` as a release sanity check.
+6. Optionally set `RISKRADAR_PREWARM_BASE_URL` and run `npm run api:prewarm` to warm common backend responses immediately after deploy.
 
 ### Environment template
 

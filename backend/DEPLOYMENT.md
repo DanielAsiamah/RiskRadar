@@ -12,14 +12,26 @@ npm run api
 
 - `GET /ready`
   Returns `200` only when the backend has finished its startup grace period and all required state stores are loaded. Returns `503` while warming or if a required store failed to initialize.
+- `npm run api:prewarm`
+  Preloads filter metadata plus postcode analysis, monthly trend, and hotspot responses for `RISKRADAR_PREWARM_POSTCODES`.
 - `npm run api:smoke`
   Runs an end-to-end backend smoke test against `RISKRADAR_SMOKE_BASE_URL` (default `http://127.0.0.1:3001`).
+- `npm run api:verify`
+  Waits for `/ready` to return `200` and then runs the smoke test against `RISKRADAR_SMOKE_BASE_URL`.
 
 Example:
 
 ```powershell
 $env:RISKRADAR_SMOKE_BASE_URL='https://your-backend-domain.onrender.com'
 npm run api:smoke
+```
+
+Example prewarm:
+
+```powershell
+$env:RISKRADAR_PREWARM_BASE_URL='https://your-backend-domain.onrender.com'
+$env:RISKRADAR_PREWARM_POSTCODES='BR1 5NN,SW1A 1AA'
+npm run api:prewarm
 ```
 
 ### Run in Docker

@@ -22,7 +22,9 @@
   },
   "scripts": {
     "api": "node backend/server.mjs",
+    "api:prewarm": "node backend/prewarm.mjs",
     "api:smoke": "node backend/smoke-test.mjs",
+    "api:verify": "node backend/verify.mjs",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
