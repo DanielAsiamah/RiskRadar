@@ -16,14 +16,30 @@ npm run api
   Bind host. Default: `0.0.0.0`
 - `UPSTREAM_TIMEOUT_MS`
   Timeout for public API requests. Default: `15000`
+- `UPSTREAM_RETRY_COUNT`
+  Extra retry attempts for throttled or flaky upstream responses. Default: `1`
+- `UPSTREAM_RETRY_DELAY_MS`
+  Base backoff delay between upstream retries in milliseconds. Default: `350`
 - `CACHE_TTL_MS`
   Fallback cache TTL for generic upstream responses. Default: `900000`
 - `GEOCODE_CACHE_TTL_MS`
   Cache TTL for postcode/geocoding lookups. Default: `86400000`
 - `CRIME_CACHE_TTL_MS`
   Cache TTL for police crime responses. Default: `21600000`
+- `STALE_IF_ERROR_ENABLED`
+  Reuses a recently expired upstream cache entry when the live upstream request times out or is throttled. Default: `true`
+- `STALE_CACHE_MAX_AGE_MS`
+  Maximum age for stale upstream cache fallback in milliseconds. Default: `604800000`
 - `CACHE_MAX_ENTRIES`
   Maximum in-memory upstream cache entries before pruning. Default: `500`
+- `CORS_ALLOW_ORIGIN`
+  Allowed browser origins, either `*` or a comma-separated list. Default: `*`
+- `RATE_LIMIT_ENABLED`
+  Enables simple in-memory per-client throttling to protect the public API. Default: `true`
+- `RATE_LIMIT_WINDOW_MS`
+  Rolling rate-limit window in milliseconds. Default: `60000`
+- `RATE_LIMIT_MAX_REQUESTS`
+  Maximum requests per client inside the rate-limit window. Default: `180`
 - `PERSISTENT_CACHE_ENABLED`
   Enables disk-backed upstream cache reuse across backend restarts. Default: `true`
 - `PERSISTENT_CACHE_FILE`
@@ -62,10 +78,12 @@ Caching helps:
 - reduce rate-limit pressure
 - improve response times for repeated postcode searches
 - make a public deployment more stable under shared traffic
+- keep duplicate live requests from stampeding the public upstream APIs
+- let the backend serve a recent cached answer when the upstream service is temporarily slow or throttled
 - keep useful police snapshot data available after backend restarts when persistent cache is enabled
 - keep generated report analyses available after backend restarts when snapshots are enabled
 - keep reusable saved search targets available after backend restarts when presets are enabled
 
 ### Production note
 
-The backend now supports simple disk-backed upstream caching, saved analysis snapshots, and saved search presets for one-instance deployments. For broader public deployment, this should eventually move from local disk to a shared cache or database-backed layer so multiple server instances can reuse upstream results, saved reports, and saved targets safely.
+The backend now supports simple disk-backed upstream caching, stale-cache fallback, upstream request deduping, basic rate limiting, saved analysis snapshots, and saved search presets for one-instance deployments. For broader public deployment, this should eventually move from local disk and in-memory limits to a shared cache or database-backed layer so multiple server instances can reuse upstream results, protect rate limits, and share saved reports and saved targets safely.

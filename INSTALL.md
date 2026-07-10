@@ -178,6 +178,10 @@ npm run android
 The backend is designed to be hosted separately from the Expo app and currently:
 
 - caches upstream police and postcode lookups in memory
+- dedupes identical live upstream GET requests so repeated searches do not hammer the public APIs
+- retries throttled or flaky upstream calls with small backoff before failing
+- falls back to a recent cached upstream response when a live upstream request times out or gets throttled
+- applies simple per-client rate limiting for safer public deployment
 - filters crimes to a postcode-focused radius around the searched coordinates
 - keeps compare requests sequential to reduce public API rate-limit pressure
 - exposes raw postcode crime feeds and polygon area crime feeds for future explorer/map features
@@ -199,5 +203,7 @@ For a public deployment:
 
 1. Host the Node backend on a small VPS, Render, Railway, Fly.io, or similar.
 2. Set `EXPO_PUBLIC_API_BASE_URL` in the Expo environment to the public backend URL.
-3. Replace in-memory cache with a persistent/shared cache or stored crime snapshots as traffic grows.
-4. Build a web or native release from Expo once the backend URL is stable.
+3. Set `CORS_ALLOW_ORIGIN` to your production app origin instead of `*` once the final host is known.
+4. Tune `RATE_LIMIT_MAX_REQUESTS` and cache env vars for your traffic profile.
+5. Replace in-memory cache with a persistent/shared cache or stored crime snapshots as traffic grows.
+6. Build a web or native release from Expo once the backend URL is stable.

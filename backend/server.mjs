@@ -5,13 +5,21 @@ import path from 'node:path';
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
 const DEFAULT_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS || 15000);
+const UPSTREAM_RETRY_COUNT = Math.max(0, Math.min(3, Number(process.env.UPSTREAM_RETRY_COUNT) || 1));
+const UPSTREAM_RETRY_DELAY_MS = Math.max(100, Number(process.env.UPSTREAM_RETRY_DELAY_MS) || 350);
 const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 15 * 60 * 1000);
 const GEOCODE_CACHE_TTL_MS = Number(process.env.GEOCODE_CACHE_TTL_MS || 24 * 60 * 60 * 1000);
 const CRIME_CACHE_TTL_MS = Number(process.env.CRIME_CACHE_TTL_MS || 6 * 60 * 60 * 1000);
+const STALE_IF_ERROR_ENABLED = process.env.STALE_IF_ERROR_ENABLED !== 'false';
+const STALE_CACHE_MAX_AGE_MS = Math.max(CACHE_TTL_MS, Number(process.env.STALE_CACHE_MAX_AGE_MS) || 7 * 24 * 60 * 60 * 1000);
 const CACHE_MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES || 500);
 const POSTCODE_RADIUS_METERS = 400;
 const CONTEXT_RADIUS_METERS = 900;
 const TREND_MONTH_COUNT = 6;
+const CORS_ALLOW_ORIGIN = process.env.CORS_ALLOW_ORIGIN || '*';
+const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false';
+const RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000);
+const RATE_LIMIT_MAX_REQUESTS = Math.max(20, Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 180);
 const PERSISTENT_CACHE_ENABLED = process.env.PERSISTENT_CACHE_ENABLED !== 'false';
 const PERSISTENT_CACHE_FILE = process.env.PERSISTENT_CACHE_FILE || path.join(process.cwd(), 'backend', 'cache', 'upstream-cache.json');
 const ANALYSIS_SNAPSHOTS_ENABLED = process.env.ANALYSIS_SNAPSHOTS_ENABLED !== 'false';
@@ -25,6 +33,8 @@ const SEARCH_PRESETS_ENABLED = process.env.SEARCH_PRESETS_ENABLED !== 'false';
 const SEARCH_PRESETS_FILE = process.env.SEARCH_PRESETS_FILE || path.join(process.cwd(), 'backend', 'cache', 'search-presets.json');
 const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.SEARCH_PRESET_MAX_ENTRIES) || 200));
 const upstreamCache = new Map();
+const inflightFetches = new Map();
+const rateLimitBuckets = new Map();
 const analysisSnapshots = [];
 const analysisResultCache = [];
 const searchPresets = [];
@@ -37,6 +47,10 @@ let analysisCacheWrites = 0;
 let analysisCacheLoaded = false;
 let searchPresetWrites = 0;
 let searchPresetsLoaded = false;
+const allowedCorsOrigins = CORS_ALLOW_ORIGIN
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -111,10 +125,12 @@ function ensureSearchPresetDir() {
 }
 
 function serializeCacheEntries() {
+  cleanupExpiredUpstreamCache();
   return [...upstreamCache.entries()].map(([key, entry]) => ({
     key,
     value: entry.value,
     expiresAt: entry.expiresAt,
+    cachedAt: entry.cachedAt,
   }));
 }
 
@@ -243,15 +259,24 @@ function loadPersistentCache() {
     const parsed = JSON.parse(raw);
     const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
     const now = Date.now();
+    const staleCutoff = now - STALE_CACHE_MAX_AGE_MS;
 
     for (const entry of entries) {
-      if (!entry?.key || entry.expiresAt <= now) {
+      const cachedAt = Number(entry?.cachedAt) || Number(entry?.expiresAt) || now;
+      const expiresAt = Number(entry?.expiresAt) || 0;
+
+      if (!entry?.key) {
+        continue;
+      }
+
+      if (expiresAt <= now && (!STALE_IF_ERROR_ENABLED || cachedAt < staleCutoff)) {
         continue;
       }
 
       upstreamCache.set(entry.key, {
         value: entry.value,
-        expiresAt: entry.expiresAt,
+        expiresAt,
+        cachedAt,
       });
     }
 
@@ -342,11 +367,13 @@ function loadSearchPresets() {
 }
 
 function pruneCacheIfNeeded() {
+  cleanupExpiredUpstreamCache();
+
   if (upstreamCache.size <= CACHE_MAX_ENTRIES) {
     return;
   }
 
-  const entries = [...upstreamCache.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+  const entries = [...upstreamCache.entries()].sort((a, b) => (a[1].cachedAt || a[1].expiresAt) - (b[1].cachedAt || b[1].expiresAt));
   const overflow = upstreamCache.size - CACHE_MAX_ENTRIES;
 
   for (let index = 0; index < overflow; index += 1) {
@@ -356,15 +383,55 @@ function pruneCacheIfNeeded() {
   schedulePersistentCacheWrite();
 }
 
-function getCachedResponse(cacheKey) {
+function cleanupExpiredUpstreamCache() {
+  const now = Date.now();
+  const staleCutoff = now - STALE_CACHE_MAX_AGE_MS;
+
+  for (const [key, entry] of upstreamCache.entries()) {
+    if (entry.expiresAt > now) {
+      continue;
+    }
+
+    if (STALE_IF_ERROR_ENABLED && Number(entry.cachedAt || 0) >= staleCutoff) {
+      continue;
+    }
+
+    upstreamCache.delete(key);
+  }
+}
+
+function getCachedEntry(cacheKey) {
   const entry = upstreamCache.get(cacheKey);
 
   if (!entry) {
     return null;
   }
 
-  if (entry.expiresAt <= Date.now()) {
-    upstreamCache.delete(cacheKey);
+  return entry;
+}
+
+function getCachedResponse(cacheKey) {
+  const entry = getCachedEntry(cacheKey);
+
+  if (!entry || entry.expiresAt <= Date.now()) {
+    return null;
+  }
+
+  return entry.value;
+}
+
+function getStaleCachedResponse(cacheKey) {
+  if (!STALE_IF_ERROR_ENABLED) {
+    return null;
+  }
+
+  const entry = getCachedEntry(cacheKey);
+
+  if (!entry || entry.expiresAt > Date.now()) {
+    return null;
+  }
+
+  if (Date.now() - Number(entry.cachedAt || 0) > STALE_CACHE_MAX_AGE_MS) {
     return null;
   }
 
@@ -375,19 +442,86 @@ function setCachedResponse(cacheKey, value, ttlMs) {
   upstreamCache.set(cacheKey, {
     value,
     expiresAt: Date.now() + ttlMs,
+    cachedAt: Date.now(),
   });
   pruneCacheIfNeeded();
   schedulePersistentCacheWrite();
 }
 
-function sendJson(response, statusCode, payload) {
+function getCorsOrigin(request) {
+  const origin = String(request.headers.origin || '').trim();
+
+  if (!allowedCorsOrigins.length || allowedCorsOrigins.includes('*')) {
+    return '*';
+  }
+
+  if (origin && allowedCorsOrigins.includes(origin)) {
+    return origin;
+  }
+
+  return allowedCorsOrigins[0];
+}
+
+function buildCorsHeaders(request) {
+  return {
+    'Access-Control-Allow-Origin': getCorsOrigin(request),
+    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
+    Vary: 'Origin',
+  };
+}
+
+function sendJson(request, response, statusCode, payload, extraHeaders = {}) {
   response.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+    ...buildCorsHeaders(request),
+    ...extraHeaders,
   });
   response.end(JSON.stringify(payload));
+}
+
+function getClientAddress(request) {
+  const forwarded = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim();
+
+  if (forwarded) {
+    return forwarded;
+  }
+
+  return String(request.socket?.remoteAddress || 'unknown');
+}
+
+function enforceRateLimit(request, pathname) {
+  if (!RATE_LIMIT_ENABLED || pathname === '/health') {
+    return null;
+  }
+
+  const key = getClientAddress(request);
+  const now = Date.now();
+  const existing = rateLimitBuckets.get(key);
+
+  if (!existing || existing.resetAt <= now) {
+    rateLimitBuckets.set(key, {
+      count: 1,
+      resetAt: now + RATE_LIMIT_WINDOW_MS,
+    });
+    return null;
+  }
+
+  existing.count += 1;
+
+  if (existing.count <= RATE_LIMIT_MAX_REQUESTS) {
+    return null;
+  }
+
+  if (rateLimitBuckets.size > RATE_LIMIT_MAX_REQUESTS * 4) {
+    for (const [bucketKey, bucket] of rateLimitBuckets.entries()) {
+      if (bucket.resetAt <= now) {
+        rateLimitBuckets.delete(bucketKey);
+      }
+    }
+  }
+
+  return Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
 }
 
 function readJsonBody(request) {
@@ -430,54 +564,101 @@ async function fetchJson(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
     return cached;
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  if (method === 'GET' && inflightFetches.has(cacheKey)) {
+    return inflightFetches.get(cacheKey);
+  }
 
-  try {
-    const response = await fetch(url, {
-      ...options,
-      signal: controller.signal,
-    });
+  const runRequest = async () => {
+    let lastError = null;
 
-    const rawText = await response.text();
-    let parsed = null;
+    for (let attempt = 0; attempt <= UPSTREAM_RETRY_COUNT; attempt += 1) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-    if (rawText) {
       try {
-        parsed = JSON.parse(rawText);
-      } catch {
-        const error = new Error(`Invalid JSON returned by upstream: ${url}`);
-        error.statusCode = 502;
-        throw error;
+        const response = await fetch(url, {
+          ...options,
+          headers: {
+            'User-Agent': 'RiskRadar/1.0 (+https://github.com/DanielAsiamah/RiskRadar)',
+            Accept: 'application/json',
+            ...(options.headers || {}),
+          },
+          signal: controller.signal,
+        });
+
+        const rawText = await response.text();
+        let parsed = null;
+
+        if (rawText) {
+          try {
+            parsed = JSON.parse(rawText);
+          } catch {
+            const error = new Error(`Invalid JSON returned by upstream: ${url}`);
+            error.statusCode = 502;
+            throw error;
+          }
+        }
+
+        if (!response.ok) {
+          const upstreamMessage =
+            parsed?.error ||
+            parsed?.message ||
+            `${response.status} ${response.statusText}`.trim();
+          const error = new Error(`Upstream request failed: ${upstreamMessage}`);
+          error.statusCode = response.status === 429 ? 429 : response.status >= 500 ? 502 : response.status;
+          throw error;
+        }
+
+        if (method === 'GET') {
+          setCachedResponse(cacheKey, parsed, ttlMs);
+        }
+
+        return parsed;
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          const timeoutError = new Error(`Upstream request timed out after ${timeoutMs}ms.`);
+          timeoutError.statusCode = 504;
+          lastError = timeoutError;
+        } else {
+          lastError = error;
+        }
+
+        const statusCode = Number(lastError?.statusCode) || 0;
+        const shouldRetry =
+          attempt < UPSTREAM_RETRY_COUNT &&
+          (statusCode === 429 || statusCode === 502 || statusCode === 503 || statusCode === 504 || lastError instanceof TypeError);
+
+        if (!shouldRetry) {
+          break;
+        }
+
+        await sleep(UPSTREAM_RETRY_DELAY_MS * (attempt + 1));
+      } finally {
+        clearTimeout(timeout);
       }
     }
 
-    if (!response.ok) {
-      const upstreamMessage =
-        parsed?.error ||
-        parsed?.message ||
-        `${response.status} ${response.statusText}`.trim();
-      const error = new Error(`Upstream request failed: ${upstreamMessage}`);
-      error.statusCode = response.status >= 500 ? 502 : response.status;
-      throw error;
+    if (method === 'GET') {
+      const staleCached = getStaleCachedResponse(cacheKey);
+      if (staleCached) {
+        return staleCached;
+      }
     }
 
-    if (method === 'GET' && response.ok) {
-      setCachedResponse(cacheKey, parsed, ttlMs);
-    }
+    throw lastError;
+  };
 
-    return parsed;
-  } catch (error) {
-    if (error.name === 'AbortError') {
-      const timeoutError = new Error(`Upstream request timed out after ${timeoutMs}ms.`);
-      timeoutError.statusCode = 504;
-      throw timeoutError;
+  const requestPromise = runRequest().finally(() => {
+    if (method === 'GET') {
+      inflightFetches.delete(cacheKey);
     }
+  });
 
-    throw error;
-  } finally {
-    clearTimeout(timeout);
+  if (method === 'GET') {
+    inflightFetches.set(cacheKey, requestPromise);
   }
+
+  return requestPromise;
 }
 
 function formatMonthDisplay(monthValue) {
@@ -2266,7 +2447,7 @@ async function compareAreas(areas) {
 
 const server = http.createServer(async (request, response) => {
   if (!request.url) {
-    sendJson(response, 404, { error: 'Not found.' });
+    sendJson(request, response, 404, { error: 'Not found.' });
     return;
   }
 
@@ -2274,19 +2455,42 @@ const server = http.createServer(async (request, response) => {
 
   if (request.method === 'OPTIONS') {
     response.writeHead(204, {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Headers': 'Content-Type',
-      'Access-Control-Allow-Methods': 'GET,POST,OPTIONS',
+      ...buildCorsHeaders(request),
     });
     response.end();
     return;
   }
 
+  const retryAfterSeconds = enforceRateLimit(request, url.pathname);
+  if (retryAfterSeconds) {
+    sendJson(
+      request,
+      response,
+      429,
+      {
+        error: 'Too many requests. Please slow down and try again shortly.',
+      },
+      {
+        'Retry-After': String(retryAfterSeconds),
+      }
+    );
+    return;
+  }
+
   if (request.method === 'GET' && url.pathname === '/health') {
-    sendJson(response, 200, {
+    sendJson(request, response, 200, {
       ok: true,
       service: 'riskradar-api',
       timestamp: new Date().toISOString(),
+      cors: {
+        allowOrigin: CORS_ALLOW_ORIGIN,
+      },
+      rateLimit: {
+        enabled: RATE_LIMIT_ENABLED,
+        windowMs: RATE_LIMIT_WINDOW_MS,
+        maxRequests: RATE_LIMIT_MAX_REQUESTS,
+        trackedClients: rateLimitBuckets.size,
+      },
       cache: {
         entries: upstreamCache.size,
         maxEntries: CACHE_MAX_ENTRIES,
@@ -2294,6 +2498,11 @@ const server = http.createServer(async (request, response) => {
         persistentLoaded: persistentCacheLoaded,
         persistentFile: PERSISTENT_CACHE_FILE,
         persistentWrites: persistentCacheWrites,
+        staleIfErrorEnabled: STALE_IF_ERROR_ENABLED,
+        staleMaxAgeMs: STALE_CACHE_MAX_AGE_MS,
+        inflightRequests: inflightFetches.size,
+        retryCount: UPSTREAM_RETRY_COUNT,
+        retryDelayMs: UPSTREAM_RETRY_DELAY_MS,
       },
       snapshots: {
         enabled: ANALYSIS_SNAPSHOTS_ENABLED,
@@ -2328,12 +2537,12 @@ const server = http.createServer(async (request, response) => {
     try {
       const type = String(url.searchParams.get('type') || '').trim() || '';
       const limit = clamp(Number(url.searchParams.get('limit')) || 10, 1, 50);
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         analyses: listAnalysisSnapshots(type, limit),
       });
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2358,10 +2567,10 @@ const server = http.createServer(async (request, response) => {
         throw error;
       }
 
-      sendJson(response, 200, snapshot);
+      sendJson(request, response, 200, snapshot);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2386,13 +2595,13 @@ const server = http.createServer(async (request, response) => {
         throw error;
       }
 
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         ok: true,
         deletedId: id,
       });
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2402,10 +2611,10 @@ const server = http.createServer(async (request, response) => {
   if (request.method === 'GET' && url.pathname === '/api/filter-metadata') {
     try {
       const result = await fetchFilterMetadata();
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2416,12 +2625,12 @@ const server = http.createServer(async (request, response) => {
     try {
       const type = String(url.searchParams.get('type') || '').trim() || '';
       const limit = clamp(Number(url.searchParams.get('limit')) || 20, 1, 100);
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         presets: listSearchPresets(type, limit),
       });
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2436,10 +2645,10 @@ const server = http.createServer(async (request, response) => {
         label: body.label,
         payload: body.payload,
       });
-      sendJson(response, 200, preset);
+      sendJson(request, response, 200, preset);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2462,10 +2671,10 @@ const server = http.createServer(async (request, response) => {
         throw error;
       }
 
-      sendJson(response, 200, preset);
+      sendJson(request, response, 200, preset);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2488,13 +2697,13 @@ const server = http.createServer(async (request, response) => {
         throw error;
       }
 
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         ok: true,
         deletedId: id,
       });
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2520,10 +2729,10 @@ const server = http.createServer(async (request, response) => {
       }
 
       const result = await executeSearchPreset(id, mode);
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2535,10 +2744,10 @@ const server = http.createServer(async (request, response) => {
       const body = await readJsonBody(request);
       const query = body.postcode ?? body.query ?? '';
       const result = await analyzeLocation(query);
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2550,10 +2759,10 @@ const server = http.createServer(async (request, response) => {
       const body = await readJsonBody(request);
       const queries = Array.isArray(body.postcodes) ? body.postcodes : [];
       const result = await compareLocations(queries);
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2569,10 +2778,10 @@ const server = http.createServer(async (request, response) => {
         radiusMeters: body.radiusMeters,
         categories: body.categories,
       });
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2589,10 +2798,10 @@ const server = http.createServer(async (request, response) => {
         radiusMeters: body.radiusMeters,
         categories: body.categories,
       });
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2606,10 +2815,10 @@ const server = http.createServer(async (request, response) => {
         month: body.month,
         categories: body.categories,
       });
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2628,10 +2837,10 @@ const server = http.createServer(async (request, response) => {
       }
 
       const result = await fetchNeighbourhoodBoundary(latitude, longitude);
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2642,10 +2851,10 @@ const server = http.createServer(async (request, response) => {
     try {
       const body = await readJsonBody(request);
       const result = await fetchHotspotMap(body);
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2656,10 +2865,10 @@ const server = http.createServer(async (request, response) => {
     try {
       const body = await readJsonBody(request);
       const result = await fetchMonthlyCrimeSeries(body);
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2670,10 +2879,10 @@ const server = http.createServer(async (request, response) => {
     try {
       const body = await readJsonBody(request);
       const result = await compareAreas(body.areas);
-      sendJson(response, 200, result);
+      sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
@@ -2692,19 +2901,19 @@ const server = http.createServer(async (request, response) => {
       }
 
       const nearby = await fetchNearbyPostcodes(latitude, longitude);
-      sendJson(response, 200, {
+      sendJson(request, response, 200, {
         nearby,
       });
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
-      sendJson(response, statusCode, {
+      sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
       });
     }
     return;
   }
 
-  sendJson(response, 404, { error: 'Not found.' });
+  sendJson(request, response, 404, { error: 'Not found.' });
 });
 
 loadPersistentCache();
