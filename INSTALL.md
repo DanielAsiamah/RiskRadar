@@ -171,6 +171,16 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
     ```json
     { "postcodes": ["BR1 5NN", "SW1A 1AA"] }
     ```
+- `POST /api/compare-points`
+  - Body:
+    ```json
+    {
+      "points": [
+        { "lat": 51.431075, "lng": 0.009835, "label": "Anchor point" },
+        { "lat": 51.434075, "lng": 0.012835, "label": "Nearby point" }
+      ]
+    }
+    ```
 - `POST /api/postcode-crimes`
   - Body:
     ```json

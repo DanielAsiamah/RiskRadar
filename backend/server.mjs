@@ -2596,6 +2596,22 @@ function buildAreaComparisonSummary(results) {
   return `${highest.label} is highest at ${highest.crimeData.crimeScore}/100, while ${lowest.label} is lowest at ${lowest.crimeData.crimeScore}/100 in this area comparison.`;
 }
 
+function buildPointComparisonSummary(results) {
+  if (!results.length) {
+    return 'No point comparisons were generated.';
+  }
+
+  const sorted = [...results].sort((a, b) => b.crimeData.crimeScore - a.crimeData.crimeScore);
+  const highest = sorted[0];
+  const lowest = sorted[sorted.length - 1];
+
+  if (sorted.length === 1) {
+    return `${highest.label} currently scores ${highest.crimeData.crimeScore}/100 in the latest point-level comparison.`;
+  }
+
+  return `${highest.label} is highest at ${highest.crimeData.crimeScore}/100, while ${lowest.label} is lowest at ${lowest.crimeData.crimeScore}/100 in this point-level comparison.`;
+}
+
 async function fetchCrimeData(latitude, longitude) {
   const safeCrimes = await fetchStreetCrimesAtPoint(latitude, longitude);
   const postcodeCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, POSTCODE_RADIUS_METERS);
@@ -3306,6 +3322,42 @@ async function compareAreas(areas) {
   };
 }
 
+async function comparePoints(points) {
+  const normalizedPoints = Array.isArray(points)
+    ? points
+      .map((point) => ({
+        latitude: Number(point?.latitude ?? point?.lat),
+        longitude: Number(point?.longitude ?? point?.lng),
+        label: typeof point?.label === 'string' ? point.label.trim() : '',
+        monthCount: point?.monthCount,
+      }))
+      .filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude))
+      .slice(0, 5)
+    : [];
+
+  if (!normalizedPoints.length) {
+    const error = new Error('At least one valid point with lat/lng coordinates is required for comparison.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const results = [];
+
+  for (const point of normalizedPoints) {
+    // eslint-disable-next-line no-await-in-loop
+    const result = await analyzePoint(point);
+    results.push(point.label ? { ...result, label: point.label } : result);
+  }
+
+  const sorted = [...results].sort((a, b) => b.crimeData.crimeScore - a.crimeData.crimeScore);
+
+  return {
+    comparedAt: new Date().toISOString(),
+    summary: buildPointComparisonSummary(sorted),
+    results: sorted,
+  };
+}
+
 const server = http.createServer(async (request, response) => {
   if (!request.url) {
     request.routeTag = 'unmatched';
@@ -3858,6 +3910,20 @@ const server = http.createServer(async (request, response) => {
     try {
       const body = await readJsonBody(request);
       const result = await compareAreas(body.areas);
+      sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/compare-points') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await comparePoints(body.points);
       sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;

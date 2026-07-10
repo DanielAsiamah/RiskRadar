@@ -80,6 +80,33 @@ async function main() {
     score: pointAnalysis.json.crimeData.crimeScore,
   });
 
+  const comparePoints = await requestJson('/api/compare-points', {
+    method: 'POST',
+    body: JSON.stringify({
+      points: [
+        {
+          lat: analysis.json?.postcodeData?.latitude,
+          lng: analysis.json?.postcodeData?.longitude,
+          label: `${analysis.json?.postcode || POSTCODE} anchor`,
+          monthCount: 6,
+        },
+        {
+          lat: analysis.json?.postcodeData?.latitude + 0.003,
+          lng: analysis.json?.postcodeData?.longitude + 0.003,
+          label: 'Nearby comparison point',
+          monthCount: 6,
+        },
+      ],
+    }),
+  });
+  assert(comparePoints.response.ok, `/api/compare-points failed with ${comparePoints.response.status}`);
+  assert(Array.isArray(comparePoints.json?.results) && comparePoints.json.results.length >= 1, 'Point comparison missing results');
+  results.push({
+    step: 'compare-points',
+    ok: true,
+    points: comparePoints.json.results.length,
+  });
+
   const monthly = await requestJson('/api/monthly-crime-series', {
     method: 'POST',
     body: JSON.stringify({ postcode: POSTCODE, monthCount: 6 }),
