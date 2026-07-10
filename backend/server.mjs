@@ -398,6 +398,36 @@ function percentChange(currentValue, previousValue) {
   return Math.round(((currentValue - previousValue) / previousValue) * 100);
 }
 
+function buildTrendSummary(monthly) {
+  const latest = monthly[monthly.length - 1] || { totalCrimes: 0, violentCrimes: 0, antiSocialCrimes: 0, robberyCrimes: 0 };
+  const comparison = monthly[Math.max(0, monthly.length - 4)] || monthly[0] || latest;
+  const direction = getDirection(latest.totalCrimes, comparison.totalCrimes);
+  const overallChangePercent = percentChange(latest.totalCrimes, comparison.totalCrimes);
+  const violentDirection = getDirection(latest.violentCrimes, comparison.violentCrimes);
+  const antiSocialDirection = getDirection(latest.antiSocialCrimes, comparison.antiSocialCrimes);
+  const robberyDirection = getDirection(latest.robberyCrimes, comparison.robberyCrimes);
+
+  let summary = `Crime volume is ${direction} versus ${comparison.monthDisplay}, with a ${Math.abs(overallChangePercent)}% change across the latest police monthly snapshots.`;
+  if (violentDirection === 'rising') {
+    summary += ' Violent incidents are also trending upward.';
+  } else if (violentDirection === 'cooling') {
+    summary += ' Violent incidents have been easing recently.';
+  } else {
+    summary += ' Violent incidents are broadly stable.';
+  }
+
+  return {
+    direction,
+    changePercent: overallChangePercent,
+    categoryDirection: {
+      violentCrimes: violentDirection,
+      antiSocialCrimes: antiSocialDirection,
+      robberyCrimes: robberyDirection,
+    },
+    summary,
+  };
+}
+
 function deriveDistrictFromAddress(address = {}) {
   return (
     address.city ||
@@ -1129,6 +1159,123 @@ async function fetchAreaCrimeFeed(points, options = {}) {
   };
 }
 
+function buildMonthlyPointFromCrimes(monthKey, crimes) {
+  return {
+    month: monthKey,
+    monthDisplay: formatShortMonthDisplay(monthKey),
+    totalCrimes: crimes.length,
+    violentCrimes: crimes.filter((crime) => ['violent-crime', 'violence-and-sexual-offences'].includes(crime.category)).length,
+    antiSocialCrimes: crimes.filter((crime) => crime.category === 'anti-social-behaviour').length,
+    robberyCrimes: crimes.filter((crime) => crime.category === 'robbery').length,
+  };
+}
+
+async function fetchMonthlyCrimeSeries(payload = {}) {
+  const monthCount = clamp(Number(payload.monthCount) || TREND_MONTH_COUNT, 3, 12);
+  const monthKeys = (await fetchAvailableCrimeMonths()).slice(0, monthCount).reverse();
+  const categoryFilters = normalizeCategoryFilters(payload.categories);
+  const monthly = [];
+
+  try {
+    if (payload.postcode || payload.query) {
+      const location = await resolveLocation(payload.postcode ?? payload.query);
+      const radiusMeters = clamp(Number(payload.radiusMeters) || POSTCODE_RADIUS_METERS, 100, 3000);
+
+      for (const monthKey of monthKeys) {
+        // eslint-disable-next-line no-await-in-loop
+        const crimes = await fetchStreetCrimesAtPoint(location.latitude, location.longitude, monthKey);
+        const radiusFilteredCrimes = filterCrimesByRadius(crimes, location.latitude, location.longitude, radiusMeters);
+        const filteredCrimes = filterCrimesByCategory(radiusFilteredCrimes, categoryFilters);
+        monthly.push(buildMonthlyPointFromCrimes(monthKey, filteredCrimes));
+
+        if (monthKey !== monthKeys[monthKeys.length - 1]) {
+          // eslint-disable-next-line no-await-in-loop
+          await sleep(150);
+        }
+      }
+
+      const trend = buildTrendSummary(monthly);
+
+      return {
+        mode: 'postcode',
+        target: {
+          postcode: location.postcode,
+          district: location.admin_district,
+          latitude: location.latitude,
+          longitude: location.longitude,
+          radiusMeters,
+        },
+        monthCount,
+        appliedCategories: categoryFilters,
+        monthly,
+        ...trend,
+      };
+    }
+
+    const polygonPoints = normalizePolygonPoints(payload.points);
+    if (polygonPoints.length < 3) {
+      const error = new Error('A postcode/query or at least three polygon points are required.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    for (const monthKey of monthKeys) {
+      // eslint-disable-next-line no-await-in-loop
+      const areaResult = await fetchStreetCrimesInPolygon(polygonPoints, monthKey);
+      const filteredCrimes = filterCrimesByCategory(areaResult.crimes, categoryFilters);
+      monthly.push(buildMonthlyPointFromCrimes(monthKey, filteredCrimes));
+
+      if (monthKey !== monthKeys[monthKeys.length - 1]) {
+        // eslint-disable-next-line no-await-in-loop
+        await sleep(150);
+      }
+    }
+
+    const trend = buildTrendSummary(monthly);
+
+    return {
+      mode: 'area',
+      target: {
+        polygon: polygonPoints,
+        center: averageCoordinates(polygonPoints),
+      },
+      monthCount,
+      appliedCategories: categoryFilters,
+      monthly,
+      ...trend,
+    };
+  } catch (error) {
+    if (error.statusCode === 429) {
+      const fallbackMonthly = monthKeys.map((monthKey) => {
+        const existing = monthly.find((point) => point.month === monthKey);
+        return existing || buildMonthlyPointFromCrimes(monthKey, []);
+      });
+
+      return {
+        mode: payload.postcode || payload.query ? 'postcode' : 'area',
+        target: payload.postcode || payload.query
+          ? { query: payload.postcode ?? payload.query }
+          : { polygon: normalizePolygonPoints(payload.points) },
+        monthCount,
+        appliedCategories: categoryFilters,
+        monthly: fallbackMonthly,
+        direction: 'stable',
+        changePercent: 0,
+        categoryDirection: {
+          violentCrimes: 'stable',
+          antiSocialCrimes: 'stable',
+          robberyCrimes: 'stable',
+        },
+        summary: monthly.length
+          ? 'Monthly series data is partially loaded because the public police API throttled part of the history lookup.'
+          : 'Monthly series data is temporarily unavailable because the public police API throttled the history lookup.',
+      };
+    }
+
+    throw error;
+  }
+}
+
 async function fetchHotspotMap(payload = {}) {
   const pointQuery = payload.postcode ?? payload.query ?? '';
   const categoryFilters = normalizeCategoryFilters(payload.categories);
@@ -1262,34 +1409,9 @@ async function fetchCrimeHistory(latitude, longitude, monthCount = TREND_MONTH_C
 
     throw error;
   }
-
-  const latest = monthly[monthly.length - 1] || { totalCrimes: 0, violentCrimes: 0, antiSocialCrimes: 0, robberyCrimes: 0 };
-  const comparison = monthly[Math.max(0, monthly.length - 4)] || monthly[0] || latest;
-  const direction = getDirection(latest.totalCrimes, comparison.totalCrimes);
-  const overallChangePercent = percentChange(latest.totalCrimes, comparison.totalCrimes);
-  const violentDirection = getDirection(latest.violentCrimes, comparison.violentCrimes);
-  const antiSocialDirection = getDirection(latest.antiSocialCrimes, comparison.antiSocialCrimes);
-  const robberyDirection = getDirection(latest.robberyCrimes, comparison.robberyCrimes);
-
-  let summary = `Crime volume is ${direction} versus ${comparison.monthDisplay}, with a ${Math.abs(overallChangePercent)}% change across the latest police monthly snapshots.`;
-  if (violentDirection === 'rising') {
-    summary += ' Violent incidents are also trending upward.';
-  } else if (violentDirection === 'cooling') {
-    summary += ' Violent incidents have been easing recently.';
-  } else {
-    summary += ' Violent incidents are broadly stable.';
-  }
-
   return {
     monthly,
-    direction,
-    changePercent: overallChangePercent,
-    categoryDirection: {
-      violentCrimes: violentDirection,
-      antiSocialCrimes: antiSocialDirection,
-      robberyCrimes: robberyDirection,
-    },
-    summary,
+    ...buildTrendSummary(monthly),
   };
 }
 
@@ -1494,6 +1616,20 @@ const server = http.createServer(async (request, response) => {
     try {
       const body = await readJsonBody(request);
       const result = await fetchHotspotMap(body);
+      sendJson(response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/monthly-crime-series') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await fetchMonthlyCrimeSeries(body);
       sendJson(response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
