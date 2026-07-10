@@ -191,6 +191,12 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
     ```json
     { "lat": 51.431075, "lng": 0.009835, "radiusMeters": 500, "month": "2026-05", "categories": ["violent-crime", "robbery"] }
     ```
+- `POST /api/location-crimes`
+  - Body:
+    ```json
+    { "lat": 51.431075, "lng": 0.009835, "month": "2026-05", "categories": ["violent-crime", "robbery"] }
+    ```
+  - Returns crimes at the nearest mapped street location rather than a radius around the point.
 - `POST /api/area-crimes`
   - Body:
     ```json

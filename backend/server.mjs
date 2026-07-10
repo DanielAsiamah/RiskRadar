@@ -1497,6 +1497,17 @@ function buildCrimeFeedSummary({ label, crimes, categories, radiusMeters }) {
   return `${crimes.length} incidents matched around ${label}${radiusLine}. ${topCategory?.count || 0} were ${humanizeCategory(topCategory?.category || 'other-crime').toLowerCase()}.`;
 }
 
+function buildExactLocationCrimeFeedSummary({ label, crimes, categories, locationStreet }) {
+  if (!crimes.length) {
+    return `No street-level incidents matched the current filters at the nearest mapped location to ${label}.`;
+  }
+
+  const topCategory = categories[0];
+  const streetLine = locationStreet ? ` on or nearest to ${locationStreet}` : '';
+
+  return `${crimes.length} incidents matched at the nearest mapped location to ${label}${streetLine}. ${topCategory?.count || 0} were ${humanizeCategory(topCategory?.category || 'other-crime').toLowerCase()}.`;
+}
+
 function getDirection(currentValue, previousValue) {
   if (!previousValue && !currentValue) {
     return 'stable';
@@ -2056,6 +2067,20 @@ async function fetchStreetCrimesAtPoint(latitude, longitude, month = '') {
   const crimesUrl = month
     ? `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}&date=${encodeURIComponent(month)}`
     : `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}`;
+  const crimes = await fetchJson(crimesUrl, {}, 18000).catch((error) => {
+    if (error.statusCode === 404) {
+      return [];
+    }
+    throw error;
+  });
+
+  return Array.isArray(crimes) ? crimes : [];
+}
+
+async function fetchStreetCrimesAtLocation(latitude, longitude, month = '') {
+  const crimesUrl = month
+    ? `https://data.police.uk/api/crimes-at-location?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}&date=${encodeURIComponent(month)}`
+    : `https://data.police.uk/api/crimes-at-location?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}`;
   const crimes = await fetchJson(crimesUrl, {}, 18000).catch((error) => {
     if (error.statusCode === 404) {
       return [];
@@ -2698,6 +2723,44 @@ async function fetchPointCrimeFeed(latitude, longitude, options = {}) {
       crimes: filteredCrimes,
       categories,
       radiusMeters,
+    }),
+    categories,
+    crimes: filteredCrimes.map(sanitizeCrimeRecord),
+  };
+}
+
+async function fetchExactLocationCrimeFeed(latitude, longitude, options = {}) {
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    const error = new Error('Valid latitude and longitude are required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const categoryFilters = normalizeCategoryFilters(options.categories);
+  const crimes = await fetchStreetCrimesAtLocation(latitude, longitude, String(options.month || ''));
+  const filteredCrimes = filterCrimesByCategory(crimes, categoryFilters);
+  const categories = summarizeCrimeCategories(filteredCrimes);
+  const latestMonth = String(options.month || filteredCrimes?.[0]?.month || crimes?.[0]?.month || '');
+  const locationStreet = String(
+    filteredCrimes?.[0]?.location?.street?.name ||
+    crimes?.[0]?.location?.street?.name ||
+    ''
+  );
+
+  return {
+    point: {
+      latitude,
+      longitude,
+    },
+    month: latestMonth,
+    appliedCategories: categoryFilters,
+    totalCrimes: filteredCrimes.length,
+    locationStreet,
+    summary: buildExactLocationCrimeFeedSummary({
+      label: 'the selected point',
+      crimes: filteredCrimes,
+      categories,
+      locationStreet,
     }),
     categories,
     crimes: filteredCrimes.map(sanitizeCrimeRecord),
@@ -3827,6 +3890,25 @@ const server = http.createServer(async (request, response) => {
       const result = await fetchPointCrimeFeed(latitude, longitude, {
         month: body.month,
         radiusMeters: body.radiusMeters,
+        categories: body.categories,
+      });
+      sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/location-crimes') {
+    try {
+      const body = await readJsonBody(request);
+      const latitude = Number(body.latitude ?? body.lat);
+      const longitude = Number(body.longitude ?? body.lng);
+      const result = await fetchExactLocationCrimeFeed(latitude, longitude, {
+        month: body.month,
         categories: body.categories,
       });
       sendJson(request, response, 200, result);

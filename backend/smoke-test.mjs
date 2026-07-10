@@ -107,6 +107,22 @@ async function main() {
     points: comparePoints.json.results.length,
   });
 
+  const locationCrimes = await requestJson('/api/location-crimes', {
+    method: 'POST',
+    body: JSON.stringify({
+      lat: analysis.json?.postcodeData?.latitude,
+      lng: analysis.json?.postcodeData?.longitude,
+      month: analysis.json?.crimeData?.month,
+    }),
+  });
+  assert(locationCrimes.response.ok, `/api/location-crimes failed with ${locationCrimes.response.status}`);
+  assert(Array.isArray(locationCrimes.json?.crimes), 'Exact location crime feed missing crimes array');
+  results.push({
+    step: 'location-crimes',
+    ok: true,
+    totalCrimes: locationCrimes.json.totalCrimes,
+  });
+
   const monthly = await requestJson('/api/monthly-crime-series', {
     method: 'POST',
     body: JSON.stringify({ postcode: POSTCODE, monthCount: 6 }),
