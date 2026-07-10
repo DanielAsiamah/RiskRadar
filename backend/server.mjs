@@ -560,6 +560,18 @@ function getAnalysisSnapshotById(id) {
   return analysisSnapshots.find((snapshot) => snapshot.id === id) || null;
 }
 
+function deleteAnalysisSnapshotById(id) {
+  const index = analysisSnapshots.findIndex((snapshot) => snapshot.id === id);
+
+  if (index === -1) {
+    return false;
+  }
+
+  analysisSnapshots.splice(index, 1);
+  saveAnalysisSnapshots();
+  return true;
+}
+
 function deriveDistrictFromAddress(address = {}) {
   return (
     address.city ||
@@ -1970,6 +1982,37 @@ const server = http.createServer(async (request, response) => {
       }
 
       sendJson(response, 200, snapshot);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'DELETE' && url.pathname === '/api/analysis-snapshot') {
+    try {
+      const id = String(url.searchParams.get('id') || '').trim();
+
+      if (!id) {
+        const error = new Error('A snapshot id is required.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const deleted = deleteAnalysisSnapshotById(id);
+
+      if (!deleted) {
+        const error = new Error('Analysis snapshot not found.');
+        error.statusCode = 404;
+        throw error;
+      }
+
+      sendJson(response, 200, {
+        ok: true,
+        deletedId: id,
+      });
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
       sendJson(response, statusCode, {
