@@ -1,4 +1,6 @@
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -10,7 +12,12 @@ const CACHE_MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES || 500);
 const POSTCODE_RADIUS_METERS = 400;
 const CONTEXT_RADIUS_METERS = 900;
 const TREND_MONTH_COUNT = 6;
+const PERSISTENT_CACHE_ENABLED = process.env.PERSISTENT_CACHE_ENABLED !== 'false';
+const PERSISTENT_CACHE_FILE = process.env.PERSISTENT_CACHE_FILE || path.join(process.cwd(), 'backend', 'cache', 'upstream-cache.json');
 const upstreamCache = new Map();
+let persistentCacheWrites = 0;
+let persistentCacheWriteQueued = false;
+let persistentCacheLoaded = false;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -52,6 +59,88 @@ function getCacheTtlMs(url) {
   return CACHE_TTL_MS;
 }
 
+function ensurePersistentCacheDir() {
+  if (!PERSISTENT_CACHE_ENABLED) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(PERSISTENT_CACHE_FILE), { recursive: true });
+}
+
+function serializeCacheEntries() {
+  return [...upstreamCache.entries()].map(([key, entry]) => ({
+    key,
+    value: entry.value,
+    expiresAt: entry.expiresAt,
+  }));
+}
+
+function schedulePersistentCacheWrite() {
+  if (!PERSISTENT_CACHE_ENABLED || persistentCacheWriteQueued) {
+    return;
+  }
+
+  persistentCacheWriteQueued = true;
+
+  setTimeout(() => {
+    persistentCacheWriteQueued = false;
+
+    try {
+      ensurePersistentCacheDir();
+      fs.writeFileSync(
+        PERSISTENT_CACHE_FILE,
+        JSON.stringify(
+          {
+            version: 1,
+            savedAt: new Date().toISOString(),
+            entries: serializeCacheEntries(),
+          },
+          null,
+          2
+        ),
+        'utf8'
+      );
+      persistentCacheWrites += 1;
+    } catch (error) {
+      console.error('Failed to persist upstream cache:', error);
+    }
+  }, 150);
+}
+
+function loadPersistentCache() {
+  if (!PERSISTENT_CACHE_ENABLED) {
+    return;
+  }
+
+  try {
+    if (!fs.existsSync(PERSISTENT_CACHE_FILE)) {
+      persistentCacheLoaded = true;
+      return;
+    }
+
+    const raw = fs.readFileSync(PERSISTENT_CACHE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+    const now = Date.now();
+
+    for (const entry of entries) {
+      if (!entry?.key || entry.expiresAt <= now) {
+        continue;
+      }
+
+      upstreamCache.set(entry.key, {
+        value: entry.value,
+        expiresAt: entry.expiresAt,
+      });
+    }
+
+    persistentCacheLoaded = true;
+  } catch (error) {
+    console.error('Failed to load persistent upstream cache:', error);
+    persistentCacheLoaded = true;
+  }
+}
+
 function pruneCacheIfNeeded() {
   if (upstreamCache.size <= CACHE_MAX_ENTRIES) {
     return;
@@ -63,6 +152,8 @@ function pruneCacheIfNeeded() {
   for (let index = 0; index < overflow; index += 1) {
     upstreamCache.delete(entries[index][0]);
   }
+
+  schedulePersistentCacheWrite();
 }
 
 function getCachedResponse(cacheKey) {
@@ -86,6 +177,7 @@ function setCachedResponse(cacheKey, value, ttlMs) {
     expiresAt: Date.now() + ttlMs,
   });
   pruneCacheIfNeeded();
+  schedulePersistentCacheWrite();
 }
 
 function sendJson(response, statusCode, payload) {
@@ -1088,6 +1180,10 @@ const server = http.createServer(async (request, response) => {
       cache: {
         entries: upstreamCache.size,
         maxEntries: CACHE_MAX_ENTRIES,
+        persistentEnabled: PERSISTENT_CACHE_ENABLED,
+        persistentLoaded: persistentCacheLoaded,
+        persistentFile: PERSISTENT_CACHE_FILE,
+        persistentWrites: persistentCacheWrites,
       },
     });
     return;
@@ -1149,6 +1245,8 @@ const server = http.createServer(async (request, response) => {
 
   sendJson(response, 404, { error: 'Not found.' });
 });
+
+loadPersistentCache();
 
 server.listen(PORT, HOST, () => {
   console.log(`RiskRadar API listening on http://${HOST}:${PORT}`);

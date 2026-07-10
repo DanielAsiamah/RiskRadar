@@ -24,6 +24,10 @@ npm run api
   Cache TTL for police crime responses. Default: `21600000`
 - `CACHE_MAX_ENTRIES`
   Maximum in-memory upstream cache entries before pruning. Default: `500`
+- `PERSISTENT_CACHE_ENABLED`
+  Enables disk-backed upstream cache reuse across backend restarts. Default: `true`
+- `PERSISTENT_CACHE_FILE`
+  JSON file used for persisted upstream cache entries. Default: `backend/cache/upstream-cache.json`
 
 ### Why caching matters
 
@@ -38,7 +42,8 @@ Caching helps:
 - reduce rate-limit pressure
 - improve response times for repeated postcode searches
 - make a public deployment more stable under shared traffic
+- keep useful police snapshot data available after backend restarts when persistent cache is enabled
 
 ### Production note
 
-For broader public deployment, this should eventually move from in-memory cache to a shared cache or database-backed layer so multiple server instances can reuse upstream results.
+The backend now supports a simple disk-backed cache for one-instance deployments. For broader public deployment, this should eventually move from local disk to a shared cache or database-backed layer so multiple server instances can reuse upstream results safely.
