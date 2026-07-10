@@ -1590,6 +1590,129 @@ function buildPointAnalysisCacheKey(payload = {}) {
   });
 }
 
+function buildMapFeedCacheKey(payload = {}) {
+  const mode = String(payload.mode || '').trim().toLowerCase();
+
+  if (mode === 'postcode') {
+    return JSON.stringify({
+      type: 'map-feed',
+      mode,
+      query: String(payload.postcode ?? payload.query ?? '').trim().toUpperCase(),
+      month: String(payload.month || ''),
+      radiusMeters: clamp(Number(payload.radiusMeters) || POSTCODE_RADIUS_METERS, 100, 1500),
+      categories: normalizeCategoryFilters(payload.categories),
+    });
+  }
+
+  if (mode === 'point') {
+    return JSON.stringify({
+      type: 'map-feed',
+      mode,
+      latitude: Number(payload.latitude ?? payload.lat ?? 0).toFixed(6),
+      longitude: Number(payload.longitude ?? payload.lng ?? 0).toFixed(6),
+      month: String(payload.month || ''),
+      radiusMeters: clamp(Number(payload.radiusMeters) || POSTCODE_RADIUS_METERS, 100, 3000),
+      categories: normalizeCategoryFilters(payload.categories),
+    });
+  }
+
+  return JSON.stringify({
+    type: 'map-feed',
+    mode,
+    month: String(payload.month || ''),
+    categories: normalizeCategoryFilters(payload.categories),
+    points: normalizePolygonPoints(payload.points),
+  });
+}
+
+function buildMapIntelligenceCacheKey(payload = {}) {
+  const mode = String(payload.mode || '').trim().toLowerCase();
+
+  if (mode === 'postcode') {
+    return JSON.stringify({
+      type: 'map-intelligence',
+      mode,
+      query: String(payload.postcode ?? payload.query ?? '').trim().toUpperCase(),
+      month: String(payload.month || ''),
+      radiusMeters: clamp(Number(payload.radiusMeters) || CONTEXT_RADIUS_METERS, 200, 3000),
+      minimumClusterSize: clamp(Number(payload.minimumClusterSize) || 3, 2, 20),
+      maxClusters: clamp(Number(payload.maxClusters) || 8, 1, 25),
+      categories: normalizeCategoryFilters(payload.categories),
+    });
+  }
+
+  if (mode === 'point') {
+    return JSON.stringify({
+      type: 'map-intelligence',
+      mode,
+      latitude: Number(payload.latitude ?? payload.lat ?? 0).toFixed(6),
+      longitude: Number(payload.longitude ?? payload.lng ?? 0).toFixed(6),
+      month: String(payload.month || ''),
+      monthCount: clamp(Number(payload.monthCount) || TREND_MONTH_COUNT, 3, 12),
+      radiusMeters: clamp(Number(payload.radiusMeters) || CONTEXT_RADIUS_METERS, 200, 3000),
+      minimumClusterSize: clamp(Number(payload.minimumClusterSize) || 3, 2, 20),
+      maxClusters: clamp(Number(payload.maxClusters) || 8, 1, 25),
+      categories: normalizeCategoryFilters(payload.categories),
+    });
+  }
+
+  return JSON.stringify({
+    type: 'map-intelligence',
+    mode,
+    label: String(payload.label || '').trim(),
+    month: String(payload.month || ''),
+    monthCount: clamp(Number(payload.monthCount) || TREND_MONTH_COUNT, 3, 12),
+    minimumClusterSize: clamp(Number(payload.minimumClusterSize) || 3, 2, 20),
+    maxClusters: clamp(Number(payload.maxClusters) || 8, 1, 25),
+    categories: normalizeCategoryFilters(payload.categories),
+    points: normalizePolygonPoints(payload.points),
+  });
+}
+
+function buildMapCompareCacheKey(payload = {}) {
+  const mode = String(payload.mode || '').trim().toLowerCase();
+
+  if (mode === 'postcode') {
+    return JSON.stringify({
+      type: 'map-compare',
+      mode,
+      postcodes: [...new Set(
+        (Array.isArray(payload.postcodes) ? payload.postcodes : [])
+          .map((query) => normalizeQuery(query))
+          .filter(Boolean)
+      )].slice(0, 5),
+    });
+  }
+
+  if (mode === 'point') {
+    return JSON.stringify({
+      type: 'map-compare',
+      mode,
+      points: (Array.isArray(payload.points) ? payload.points : [])
+        .map((point) => ({
+          latitude: Number(point?.latitude ?? point?.lat).toFixed(6),
+          longitude: Number(point?.longitude ?? point?.lng).toFixed(6),
+          label: String(point?.label || '').trim(),
+          monthCount: clamp(Number(point?.monthCount) || TREND_MONTH_COUNT, 3, 12),
+        }))
+        .filter((point) => point.latitude !== 'NaN' && point.longitude !== 'NaN')
+        .slice(0, 5),
+    });
+  }
+
+  return JSON.stringify({
+    type: 'map-compare',
+    mode,
+    areas: (Array.isArray(payload.areas) ? payload.areas : [])
+      .map((area) => ({
+        label: String(area?.label || '').trim(),
+        points: normalizePolygonPoints(area?.points),
+      }))
+      .filter((area) => area.points.length >= 3)
+      .slice(0, 5),
+  });
+}
+
 function getCachedAnalysisResult(cacheKey) {
   const entry = analysisResultCache.find((item) => item.key === cacheKey);
 
@@ -1628,6 +1751,21 @@ function setCachedAnalysisResult(cacheKey, value) {
   }
 
   saveAnalysisCache();
+}
+
+async function getOrComputeCachedResult(cacheKey, compute) {
+  const cached = ANALYSIS_CACHE_ENABLED ? getCachedAnalysisResult(cacheKey) : null;
+  if (cached) {
+    return cached;
+  }
+
+  const result = await compute();
+
+  if (ANALYSIS_CACHE_ENABLED) {
+    setCachedAnalysisResult(cacheKey, result);
+  }
+
+  return result;
 }
 
 function createSnapshotId(prefix = 'snapshot') {
@@ -2916,34 +3054,37 @@ async function fetchAreaCrimeFeed(points, options = {}) {
 }
 
 async function fetchMapFeed(payload = {}) {
-  const mode = String(payload.mode || '').trim().toLowerCase();
+  const cacheKey = buildMapFeedCacheKey(payload);
+  return getOrComputeCachedResult(cacheKey, async () => {
+    const mode = String(payload.mode || '').trim().toLowerCase();
 
-  if (mode === 'postcode') {
-    return {
-      mode,
-      result: await fetchPostcodeCrimeFeed(payload.postcode ?? payload.query ?? '', payload),
-    };
-  }
+    if (mode === 'postcode') {
+      return {
+        mode,
+        result: await fetchPostcodeCrimeFeed(payload.postcode ?? payload.query ?? '', payload),
+      };
+    }
 
-  if (mode === 'point') {
-    const latitude = Number(payload.latitude ?? payload.lat);
-    const longitude = Number(payload.longitude ?? payload.lng);
-    return {
-      mode,
-      result: await fetchPointCrimeFeed(latitude, longitude, payload),
-    };
-  }
+    if (mode === 'point') {
+      const latitude = Number(payload.latitude ?? payload.lat);
+      const longitude = Number(payload.longitude ?? payload.lng);
+      return {
+        mode,
+        result: await fetchPointCrimeFeed(latitude, longitude, payload),
+      };
+    }
 
-  if (mode === 'area') {
-    return {
-      mode,
-      result: await fetchAreaCrimeFeed(payload.points, payload),
-    };
-  }
+    if (mode === 'area') {
+      return {
+        mode,
+        result: await fetchAreaCrimeFeed(payload.points, payload),
+      };
+    }
 
-  const error = new Error('Map feed mode must be one of: postcode, point, area.');
-  error.statusCode = 400;
-  throw error;
+    const error = new Error('Map feed mode must be one of: postcode, point, area.');
+    error.statusCode = 400;
+    throw error;
+  });
 }
 
 async function fetchAreaIntelligence(payload = {}) {
@@ -2994,32 +3135,35 @@ async function fetchAreaIntelligence(payload = {}) {
 }
 
 async function fetchMapIntelligence(payload = {}) {
-  const mode = String(payload.mode || '').trim().toLowerCase();
+  const cacheKey = buildMapIntelligenceCacheKey(payload);
+  return getOrComputeCachedResult(cacheKey, async () => {
+    const mode = String(payload.mode || '').trim().toLowerCase();
 
-  if (mode === 'postcode') {
-    return {
-      mode,
-      result: await fetchPostcodeIntelligence(payload),
-    };
-  }
+    if (mode === 'postcode') {
+      return {
+        mode,
+        result: await fetchPostcodeIntelligence(payload),
+      };
+    }
 
-  if (mode === 'point') {
-    return {
-      mode,
-      result: await fetchPointIntelligence(payload),
-    };
-  }
+    if (mode === 'point') {
+      return {
+        mode,
+        result: await fetchPointIntelligence(payload),
+      };
+    }
 
-  if (mode === 'area') {
-    return {
-      mode,
-      result: await fetchAreaIntelligence(payload),
-    };
-  }
+    if (mode === 'area') {
+      return {
+        mode,
+        result: await fetchAreaIntelligence(payload),
+      };
+    }
 
-  const error = new Error('Map intelligence mode must be one of: postcode, point, area.');
-  error.statusCode = 400;
-  throw error;
+    const error = new Error('Map intelligence mode must be one of: postcode, point, area.');
+    error.statusCode = 400;
+    throw error;
+  });
 }
 
 async function computeAreaAnalysis(area = {}) {
@@ -3655,32 +3799,35 @@ async function comparePoints(points) {
 }
 
 async function compareMapModes(payload = {}) {
-  const mode = String(payload.mode || '').trim().toLowerCase();
+  const cacheKey = buildMapCompareCacheKey(payload);
+  return getOrComputeCachedResult(cacheKey, async () => {
+    const mode = String(payload.mode || '').trim().toLowerCase();
 
-  if (mode === 'postcode') {
-    return {
-      mode,
-      result: await compareLocations(Array.isArray(payload.postcodes) ? payload.postcodes : []),
-    };
-  }
+    if (mode === 'postcode') {
+      return {
+        mode,
+        result: await compareLocations(Array.isArray(payload.postcodes) ? payload.postcodes : []),
+      };
+    }
 
-  if (mode === 'point') {
-    return {
-      mode,
-      result: await comparePoints(Array.isArray(payload.points) ? payload.points : []),
-    };
-  }
+    if (mode === 'point') {
+      return {
+        mode,
+        result: await comparePoints(Array.isArray(payload.points) ? payload.points : []),
+      };
+    }
 
-  if (mode === 'area') {
-    return {
-      mode,
-      result: await compareAreas(Array.isArray(payload.areas) ? payload.areas : []),
-    };
-  }
+    if (mode === 'area') {
+      return {
+        mode,
+        result: await compareAreas(Array.isArray(payload.areas) ? payload.areas : []),
+      };
+    }
 
-  const error = new Error('Map compare mode must be one of: postcode, point, area.');
-  error.statusCode = 400;
-  throw error;
+    const error = new Error('Map compare mode must be one of: postcode, point, area.');
+    error.statusCode = 400;
+    throw error;
+  });
 }
 
 const server = http.createServer(async (request, response) => {
@@ -3777,6 +3924,7 @@ const server = http.createServer(async (request, response) => {
         entries: analysisResultCache.length,
         maxEntries: ANALYSIS_CACHE_MAX_ENTRIES,
         ttlMs: ANALYSIS_CACHE_TTL_MS,
+        scopes: ['analysis', 'map-feed', 'map-intelligence', 'map-compare'],
         writes: analysisCacheWrites,
       },
       presets: {

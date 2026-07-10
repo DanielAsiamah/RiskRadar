@@ -216,6 +216,7 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
     }
     ```
   - Use `"mode": "point"` with a `points` array, or `"mode": "area"` with an `areas` array, to access the same comparison contract for all three explorer modes from one endpoint.
+- Unified explorer endpoints are cached through the persistent analysis cache when `ANALYSIS_CACHE_ENABLED` is enabled, which helps repeated public map requests return faster.
 - `POST /api/compare-points`
   - Body:
     ```json
