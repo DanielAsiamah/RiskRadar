@@ -161,6 +161,15 @@ npm run android
     ```
 - `GET /api/search-preset?id=<presetId>`
 - `DELETE /api/search-preset?id=<presetId>`
+- `POST /api/run-search-preset`
+  - Body:
+    ```json
+    { "id": "<presetId>", "mode": "analyze" }
+    ```
+  - Or:
+    ```json
+    { "id": "<presetId>", "mode": "feed" }
+    ```
 - `GET /api/location-suggestions?lat=51.4062&lng=0.0186`
 - `GET /health`
 
@@ -180,6 +189,7 @@ The backend is designed to be hosted separately from the Expo app and currently:
 - persists generated postcode and area analyses so they can be listed or reopened later
 - lets saved analysis snapshots be removed cleanly through the backend API
 - persists reusable saved search presets for postcode, point, or area targets
+- allows saved presets to be executed directly through the backend
 
 For backend env vars and cache settings, see [backend/DEPLOYMENT.md](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/backend/DEPLOYMENT.md).
 

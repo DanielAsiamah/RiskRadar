@@ -702,6 +702,80 @@ function deleteSearchPresetById(id) {
   return true;
 }
 
+async function executeSearchPreset(id, mode = 'analyze') {
+  const preset = getSearchPresetById(id);
+
+  if (!preset) {
+    const error = new Error('Search preset not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const payload = preset.payload && typeof preset.payload === 'object' ? preset.payload : {};
+
+  if (preset.type === 'postcode') {
+    const postcodeQuery = String(payload.postcode || payload.query || '').trim();
+
+    if (!postcodeQuery) {
+      const error = new Error('Saved postcode preset is missing a postcode or query value.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return {
+      preset,
+      result: mode === 'feed'
+        ? await fetchPostcodeCrimeFeed(postcodeQuery, payload)
+        : await analyzeLocation(postcodeQuery),
+    };
+  }
+
+  if (preset.type === 'point') {
+    const latitude = Number(payload.latitude ?? payload.lat);
+    const longitude = Number(payload.longitude ?? payload.lng);
+
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      const error = new Error('Saved point preset is missing valid latitude/longitude values.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return {
+      preset,
+      result: await fetchPointCrimeFeed(latitude, longitude, payload),
+    };
+  }
+
+  if (preset.type === 'area') {
+    const points = normalizePolygonPoints(payload.points);
+
+    if (points.length < 3) {
+      const error = new Error('Saved area preset is missing a valid polygon.');
+      error.statusCode = 400;
+      throw error;
+    }
+
+    return {
+      preset,
+      result: mode === 'feed'
+        ? await fetchAreaCrimeFeed(points, payload)
+        : await analyzeArea({
+          label: preset.label,
+          points,
+          month: payload.month,
+          categories: payload.categories,
+          monthCount: payload.monthCount,
+          minimumClusterSize: payload.minimumClusterSize,
+          maxClusters: payload.maxClusters,
+        }),
+    };
+  }
+
+  const error = new Error('Unsupported preset type.');
+  error.statusCode = 400;
+  throw error;
+}
+
 function deriveDistrictFromAddress(address = {}) {
   return (
     address.city ||
@@ -2253,6 +2327,35 @@ const server = http.createServer(async (request, response) => {
         ok: true,
         deletedId: id,
       });
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/run-search-preset') {
+    try {
+      const body = await readJsonBody(request);
+      const id = String(body.id || '').trim();
+      const mode = String(body.mode || 'analyze').trim().toLowerCase();
+
+      if (!id) {
+        const error = new Error('A preset id is required.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      if (!['analyze', 'feed'].includes(mode)) {
+        const error = new Error('Mode must be analyze or feed.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      const result = await executeSearchPreset(id, mode);
+      sendJson(response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
       sendJson(response, statusCode, {
