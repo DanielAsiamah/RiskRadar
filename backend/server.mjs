@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { createCrimeFileSource } from './crime-file-source.mjs';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -40,9 +41,13 @@ const ANALYSIS_CACHE_TTL_MS = Math.max(60 * 1000, Number(process.env.ANALYSIS_CA
 const SEARCH_PRESETS_ENABLED = process.env.SEARCH_PRESETS_ENABLED !== 'false';
 const SEARCH_PRESETS_FILE = process.env.SEARCH_PRESETS_FILE || path.join(DATA_DIR, 'search-presets.json');
 const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.SEARCH_PRESET_MAX_ENTRIES) || 200));
+const CRIME_SOURCE_MODE = String(process.env.CRIME_SOURCE_MODE || 'api').trim().toLowerCase() === 'files' ? 'files' : 'api';
+const CRIME_DATA_ROOT = process.env.CRIME_DATA_ROOT || path.join(process.cwd(), 'backend', 'data', 'police');
+const CRIME_SOURCE_FALLBACK_TO_API = process.env.CRIME_SOURCE_FALLBACK_TO_API !== 'false';
 const SERVER_STARTED_AT = new Date();
 const STARTUP_GRACE_PERIOD_MS = Math.max(0, Number(process.env.STARTUP_GRACE_PERIOD_MS) || 5000);
 const require = createRequire(import.meta.url);
+const crimeFileSource = createCrimeFileSource({ rootDir: CRIME_DATA_ROOT });
 const upstreamCache = new Map();
 const inflightFetches = new Map();
 const rateLimitBuckets = new Map();
@@ -97,6 +102,14 @@ const allowedCorsOrigins = CORS_ALLOW_ORIGIN
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function usingFileCrimeSource() {
+  return CRIME_SOURCE_MODE === 'files';
+}
+
+function hasLocalCrimeFiles() {
+  return crimeFileSource.hasFiles();
 }
 
 function sleep(milliseconds) {
@@ -2133,6 +2146,10 @@ async function resolvePointContext(latitude, longitude) {
 }
 
 async function fetchAvailableCrimeMonths() {
+  if (usingFileCrimeSource() && hasLocalCrimeFiles()) {
+    return crimeFileSource.listAvailableMonths().slice(0, TREND_MONTH_COUNT);
+  }
+
   const response = await fetchJson('https://data.police.uk/api/crimes-street-dates', {}, 12000).catch((error) => {
     if (error.statusCode === 404) {
       return [];
@@ -2149,23 +2166,11 @@ async function fetchAvailableCrimeMonths() {
 }
 
 async function fetchFilterMetadata() {
-  const monthEntries = await fetchJson('https://data.police.uk/api/crimes-street-dates', {}, 12000).catch((error) => {
-    if (error.statusCode === 404) {
-      return [];
-    }
-    throw error;
-  });
-
-  const rawMonths = Array.isArray(monthEntries)
-    ? monthEntries
-    : Array.isArray(monthEntries?.value)
-      ? monthEntries.value
-      : [];
-
-  const months = rawMonths
-    .map((entry) => ({
-      month: String(entry?.date || ''),
-      monthDisplay: formatMonthDisplay(String(entry?.date || '')),
+  const availableMonths = await fetchAvailableCrimeMonths();
+  const months = availableMonths
+    .map((month) => ({
+      month: String(month || ''),
+      monthDisplay: formatMonthDisplay(String(month || '')),
     }))
     .filter((entry) => /^\d{4}-\d{2}$/.test(entry.month));
 
@@ -2225,6 +2230,13 @@ async function fetchNeighbourhoodBoundary(latitude, longitude) {
 }
 
 async function fetchStreetCrimesAtPoint(latitude, longitude, month = '') {
+  if (usingFileCrimeSource() && hasLocalCrimeFiles()) {
+    const localCrimes = crimeFileSource.queryPoint(latitude, longitude, month);
+    if (localCrimes.length || !CRIME_SOURCE_FALLBACK_TO_API) {
+      return localCrimes;
+    }
+  }
+
   const crimesUrl = month
     ? `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}&date=${encodeURIComponent(month)}`
     : `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}`;
@@ -2239,6 +2251,13 @@ async function fetchStreetCrimesAtPoint(latitude, longitude, month = '') {
 }
 
 async function fetchStreetCrimesAtLocation(latitude, longitude, month = '') {
+  if (usingFileCrimeSource() && hasLocalCrimeFiles()) {
+    const localCrimes = crimeFileSource.queryLocation(latitude, longitude, month);
+    if (localCrimes.length || !CRIME_SOURCE_FALLBACK_TO_API) {
+      return localCrimes;
+    }
+  }
+
   const crimesUrl = month
     ? `https://data.police.uk/api/crimes-at-location?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}&date=${encodeURIComponent(month)}`
     : `https://data.police.uk/api/crimes-at-location?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}`;
@@ -2278,6 +2297,16 @@ async function fetchStreetCrimesInPolygon(points, month = '') {
     const error = new Error('At least three valid polygon points are required.');
     error.statusCode = 400;
     throw error;
+  }
+
+  if (usingFileCrimeSource() && hasLocalCrimeFiles()) {
+    const localCrimes = crimeFileSource.queryPolygon(polygonPoints, month);
+    if (localCrimes.length || !CRIME_SOURCE_FALLBACK_TO_API) {
+      return {
+        polygonPoints,
+        crimes: localCrimes,
+      };
+    }
   }
 
   const polyParam = toPolygonParam(polygonPoints);
@@ -3904,6 +3933,15 @@ const server = http.createServer(async (request, response) => {
         stateDriver: STATE_DRIVER,
         sqliteFile: usingSqliteState() ? SQLITE_STATE_FILE : null,
         sqliteBootstrap: stateBootstrapStatus,
+        crimeSource: {
+          mode: CRIME_SOURCE_MODE,
+          fallbackToApi: CRIME_SOURCE_FALLBACK_TO_API,
+          dataRoot: CRIME_DATA_ROOT,
+          localFilesDetected: hasLocalCrimeFiles(),
+          availableMonths: usingFileCrimeSource() && hasLocalCrimeFiles()
+            ? crimeFileSource.listAvailableMonths().slice(0, 12)
+            : [],
+        },
       },
       admin: {
         enabled: Boolean(ADMIN_API_KEY),

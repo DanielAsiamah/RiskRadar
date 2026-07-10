@@ -53,6 +53,8 @@ cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
 npm run api:verify
 ```
 
+`npm run api:verify` now auto-starts the local backend on `127.0.0.1:3001` if it is not already running, so it can be used as a one-command local backend verification pass.
+
 ## Backend public deploy
 
 ### Option 1: Docker
@@ -110,6 +112,40 @@ The backend now supports two state persistence modes:
 SQLite mode keeps the same frontend/API contract and passed local restart testing here, but Node `v22` still marks `node:sqlite` as experimental.
 
 If you are switching an existing backend from `json` to `sqlite`, leave `SQLITE_BOOTSTRAP_FROM_JSON=true` for the first boot. That lets the backend import the current JSON upstream cache, snapshots, presets, and analysis-cache data into SQLite automatically when the database is still empty.
+
+### Crime data source mode
+
+The backend can now serve crime records from either:
+
+- `CRIME_SOURCE_MODE=api`
+  Default mode. Crimes are requested live from `data.police.uk`.
+- `CRIME_SOURCE_MODE=files`
+  Reads local UK police monthly street-level CSV snapshots from `CRIME_DATA_ROOT`.
+
+This is useful if you want a faster or more deployable public setup that is less dependent on the live upstream police API.
+
+Expected local file layout:
+
+```text
+backend/data/police/
+  2026-05/
+    2026-05-metropolitan-street.csv
+    2026-05-city-of-london-street.csv
+  2026-04/
+    2026-04-metropolitan-street.csv
+```
+
+The loader scans recursively for files whose path includes a `YYYY-MM` month and `street.csv`.
+
+Example:
+
+```powershell
+$env:CRIME_SOURCE_MODE='files'
+$env:CRIME_DATA_ROOT='C:\crime-data-uk'
+npm run api
+```
+
+If local files are present but incomplete, leave `CRIME_SOURCE_FALLBACK_TO_API=true` so the backend can fall back to the live police API for missing months.
 
 ### Backend state portability
 
