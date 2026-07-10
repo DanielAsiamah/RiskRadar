@@ -41,6 +41,7 @@ const SEARCH_PRESETS_ENABLED = process.env.SEARCH_PRESETS_ENABLED !== 'false';
 const SEARCH_PRESETS_FILE = process.env.SEARCH_PRESETS_FILE || path.join(DATA_DIR, 'search-presets.json');
 const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.SEARCH_PRESET_MAX_ENTRIES) || 200));
 const SERVER_STARTED_AT = new Date();
+const STARTUP_GRACE_PERIOD_MS = Math.max(0, Number(process.env.STARTUP_GRACE_PERIOD_MS) || 5000);
 const require = createRequire(import.meta.url);
 const upstreamCache = new Map();
 const inflightFetches = new Map();
@@ -960,6 +961,41 @@ function listTopRouteStats(limit = 10) {
       route,
       ...stats,
     }));
+}
+
+function buildReadinessStatus() {
+  const issues = [];
+
+  if (!persistentCacheLoaded) {
+    issues.push('upstream-cache-not-loaded');
+  }
+  if (ANALYSIS_SNAPSHOTS_ENABLED && !analysisSnapshotsLoaded) {
+    issues.push('analysis-snapshots-not-loaded');
+  }
+  if (ANALYSIS_CACHE_ENABLED && !analysisCacheLoaded) {
+    issues.push('analysis-cache-not-loaded');
+  }
+  if (SEARCH_PRESETS_ENABLED && !searchPresetsLoaded) {
+    issues.push('search-presets-not-loaded');
+  }
+  if (usingSqliteState() && stateBootstrapStatus.reason.startsWith('bootstrap-failed')) {
+    issues.push('sqlite-bootstrap-failed');
+  }
+  if (usingSqliteState() && !stateDbReady) {
+    issues.push('sqlite-not-ready');
+  }
+
+  const uptimeMs = Date.now() - SERVER_STARTED_AT.getTime();
+  const inGracePeriod = uptimeMs < STARTUP_GRACE_PERIOD_MS;
+  const ready = issues.length === 0 && !inGracePeriod;
+
+  return {
+    ready,
+    status: ready ? 'ready' : inGracePeriod && issues.length === 0 ? 'warming' : 'not-ready',
+    uptimeMs,
+    gracePeriodMs: STARTUP_GRACE_PERIOD_MS,
+    issues,
+  };
 }
 
 function getAdminToken(request) {
@@ -3165,6 +3201,7 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (request.method === 'GET' && url.pathname === '/health') {
+    const readiness = buildReadinessStatus();
     sendJson(request, response, 200, {
       ok: true,
       service: 'riskradar-api',
@@ -3183,6 +3220,7 @@ const server = http.createServer(async (request, response) => {
       admin: {
         enabled: Boolean(ADMIN_API_KEY),
       },
+      readiness,
       rateLimit: {
         enabled: RATE_LIMIT_ENABLED,
         windowMs: RATE_LIMIT_WINDOW_MS,
@@ -3232,6 +3270,12 @@ const server = http.createServer(async (request, response) => {
         writes: searchPresetWrites,
       },
     });
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/ready') {
+    const readiness = buildReadinessStatus();
+    sendJson(request, response, readiness.ready ? 200 : 503, readiness);
     return;
   }
 

@@ -1,0 +1,138 @@
+const BASE_URL = String(process.env.RISKRADAR_SMOKE_BASE_URL || 'http://127.0.0.1:3001').replace(/\/+$/, '');
+const POSTCODE = String(process.env.RISKRADAR_SMOKE_POSTCODE || 'BR1 5NN').trim();
+const ADMIN_API_KEY = String(process.env.ADMIN_API_KEY || '').trim();
+
+function assert(condition, message) {
+  if (!condition) {
+    throw new Error(message);
+  }
+}
+
+async function requestJson(pathname, options = {}) {
+  const response = await fetch(`${BASE_URL}${pathname}`, {
+    ...options,
+    headers: {
+      Accept: 'application/json',
+      ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(ADMIN_API_KEY ? { 'x-api-key': ADMIN_API_KEY } : {}),
+      ...(options.headers || {}),
+    },
+  });
+
+  const text = await response.text();
+  let json = null;
+  if (text) {
+    json = JSON.parse(text);
+  }
+
+  return {
+    response,
+    json,
+  };
+}
+
+async function main() {
+  const results = [];
+
+  const health = await requestJson('/health');
+  assert(health.response.ok, `/health failed with ${health.response.status}`);
+  assert(health.json?.service === 'riskradar-api', 'Unexpected health service id');
+  results.push({ step: 'health', ok: true });
+
+  const ready = await requestJson('/ready');
+  assert([200, 503].includes(ready.response.status), `/ready returned unexpected status ${ready.response.status}`);
+  assert(ready.json?.status, 'Readiness payload missing status');
+  results.push({ step: 'ready', ok: true, status: ready.json.status });
+
+  const metadata = await requestJson('/api/filter-metadata');
+  assert(metadata.response.ok, `/api/filter-metadata failed with ${metadata.response.status}`);
+  assert(Array.isArray(metadata.json?.categories) && metadata.json.categories.length > 0, 'Filter metadata missing categories');
+  results.push({ step: 'filter-metadata', ok: true, categories: metadata.json.categories.length });
+
+  const analysis = await requestJson('/api/analyze-postcode', {
+    method: 'POST',
+    body: JSON.stringify({ query: POSTCODE }),
+  });
+  assert(analysis.response.ok, `/api/analyze-postcode failed with ${analysis.response.status}`);
+  assert(analysis.json?.postcode, 'Analysis payload missing postcode');
+  assert(Number.isFinite(analysis.json?.crimeData?.crimeScore), 'Analysis payload missing numeric crime score');
+  results.push({
+    step: 'analyze-postcode',
+    ok: true,
+    postcode: analysis.json.postcode,
+    score: analysis.json.crimeData.crimeScore,
+  });
+
+  const monthly = await requestJson('/api/monthly-crime-series', {
+    method: 'POST',
+    body: JSON.stringify({ postcode: POSTCODE, monthCount: 6 }),
+  });
+  assert(monthly.response.ok, `/api/monthly-crime-series failed with ${monthly.response.status}`);
+  assert(Array.isArray(monthly.json?.monthly), 'Monthly crime series missing monthly array');
+  results.push({ step: 'monthly-crime-series', ok: true, months: monthly.json.monthly.length });
+
+  const presetLabel = `Smoke ${Date.now()}`;
+  const preset = await requestJson('/api/search-presets', {
+    method: 'POST',
+    body: JSON.stringify({
+      type: 'postcode',
+      label: presetLabel,
+      payload: { postcode: POSTCODE },
+    }),
+  });
+  assert(preset.response.ok, `/api/search-presets failed with ${preset.response.status}`);
+  assert(preset.json?.id, 'Preset creation did not return an id');
+  results.push({ step: 'create-preset', ok: true, presetId: preset.json.id });
+
+  const runPreset = await requestJson('/api/run-search-preset', {
+    method: 'POST',
+    body: JSON.stringify({
+      id: preset.json.id,
+      mode: 'analyze',
+    }),
+  });
+  assert(runPreset.response.ok, `/api/run-search-preset failed with ${runPreset.response.status}`);
+  assert(runPreset.json?.result?.postcode || runPreset.json?.result?.label, 'Preset execution returned unexpected payload');
+  results.push({ step: 'run-preset', ok: true });
+
+  const deletePreset = await requestJson(`/api/search-preset?id=${encodeURIComponent(preset.json.id)}`, {
+    method: 'DELETE',
+  });
+  assert(deletePreset.response.ok, `/api/search-preset DELETE failed with ${deletePreset.response.status}`);
+  results.push({ step: 'delete-preset', ok: true });
+
+  if (ADMIN_API_KEY) {
+    const adminExport = await requestJson('/api/admin/state-export');
+    assert(adminExport.response.ok, `/api/admin/state-export failed with ${adminExport.response.status}`);
+    assert(adminExport.json?.stores, 'Admin export missing stores payload');
+    results.push({ step: 'admin-export', ok: true });
+  }
+
+  console.log(
+    JSON.stringify(
+      {
+        ok: true,
+        baseUrl: BASE_URL,
+        postcode: POSTCODE,
+        results,
+      },
+      null,
+      2
+    )
+  );
+}
+
+main().catch((error) => {
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        baseUrl: BASE_URL,
+        error: error.message || String(error),
+      },
+      null,
+      2
+    )
+  );
+  process.exitCode = 1;
+});

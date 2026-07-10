@@ -39,6 +39,13 @@ Optional:
 npm run android
 ```
 
+Smoke-test the backend after it boots:
+
+```powershell
+cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
+npm run api:smoke
+```
+
 ## Backend public deploy
 
 ### Option 1: Docker
@@ -62,6 +69,12 @@ Health check:
 curl http://127.0.0.1:3001/health
 ```
 
+Readiness check:
+
+```powershell
+curl http://127.0.0.1:3001/ready
+```
+
 ### Option 2: Render
 
 This repo now includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/render.yaml) for the backend service.
@@ -70,6 +83,7 @@ This repo now includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/
 2. Set `CORS_ALLOW_ORIGIN` to your real frontend origin or app web host.
 3. Deploy the `riskradar-api` service.
 4. Copy the live backend URL into `EXPO_PUBLIC_API_BASE_URL` for your Expo environment.
+5. Set `RISKRADAR_SMOKE_BASE_URL` to that backend URL and run `npm run api:smoke` as a release sanity check.
 
 ### Environment template
 

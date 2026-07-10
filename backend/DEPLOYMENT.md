@@ -8,6 +8,20 @@ This backend is a lightweight Node HTTP server that proxies public UK crime and 
 npm run api
 ```
 
+### Readiness and smoke checks
+
+- `GET /ready`
+  Returns `200` only when the backend has finished its startup grace period and all required state stores are loaded. Returns `503` while warming or if a required store failed to initialize.
+- `npm run api:smoke`
+  Runs an end-to-end backend smoke test against `RISKRADAR_SMOKE_BASE_URL` (default `http://127.0.0.1:3001`).
+
+Example:
+
+```powershell
+$env:RISKRADAR_SMOKE_BASE_URL='https://your-backend-domain.onrender.com'
+npm run api:smoke
+```
+
 ### Run in Docker
 
 ```powershell
