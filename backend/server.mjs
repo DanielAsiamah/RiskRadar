@@ -330,6 +330,51 @@ function getCategoryCount(categories, key) {
   return categories.find((category) => category.category === key)?.count || 0;
 }
 
+function normalizeCategoryFilters(categories) {
+  if (!Array.isArray(categories)) {
+    return [];
+  }
+
+  return [...new Set(
+    categories
+      .map((category) => String(category || '').trim().toLowerCase())
+      .filter(Boolean)
+  )];
+}
+
+function filterCrimesByCategory(crimes, categories) {
+  const normalizedCategories = normalizeCategoryFilters(categories);
+
+  if (!normalizedCategories.length) {
+    return crimes;
+  }
+
+  return crimes.filter((crime) => normalizedCategories.includes(String(crime?.category || '').toLowerCase()));
+}
+
+function sanitizeCrimeRecord(crime) {
+  return {
+    category: String(crime?.category || 'other-crime'),
+    categoryLabel: humanizeCategory(crime?.category || 'other-crime'),
+    month: String(crime?.month || ''),
+    latitude: Number(crime?.location?.latitude),
+    longitude: Number(crime?.location?.longitude),
+    locationStreet: String(crime?.location?.street?.name || 'Unknown street'),
+    outcome: String(crime?.outcome_status?.category || ''),
+  };
+}
+
+function buildCrimeFeedSummary({ label, crimes, categories, radiusMeters }) {
+  if (!crimes.length) {
+    return `No street-level incidents matched the current filters around ${label}.`;
+  }
+
+  const topCategory = categories[0];
+  const radiusLine = Number.isFinite(radiusMeters) ? ` within roughly ${Math.round(radiusMeters)} metres` : '';
+
+  return `${crimes.length} incidents matched around ${label}${radiusLine}. ${topCategory?.count || 0} were ${humanizeCategory(topCategory?.category || 'other-crime').toLowerCase()}.`;
+}
+
 function getDirection(currentValue, previousValue) {
   if (!previousValue && !currentValue) {
     return 'stable';
@@ -475,6 +520,65 @@ async function fetchAvailableCrimeMonths() {
     .map((entry) => entry?.date)
     .filter((date) => /^\d{4}-\d{2}$/.test(String(date || '')))
     .slice(0, TREND_MONTH_COUNT);
+}
+
+async function fetchStreetCrimesAtPoint(latitude, longitude, month = '') {
+  const crimesUrl = month
+    ? `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}&date=${encodeURIComponent(month)}`
+    : `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}`;
+  const crimes = await fetchJson(crimesUrl, {}, 18000).catch((error) => {
+    if (error.statusCode === 404) {
+      return [];
+    }
+    throw error;
+  });
+
+  return Array.isArray(crimes) ? crimes : [];
+}
+
+function toPolygonParam(points) {
+  return points
+    .map((point) => `${point.latitude},${point.longitude}`)
+    .join(':');
+}
+
+function normalizePolygonPoints(points) {
+  if (!Array.isArray(points)) {
+    return [];
+  }
+
+  return points
+    .map((point) => ({
+      latitude: Number(point?.latitude ?? point?.lat),
+      longitude: Number(point?.longitude ?? point?.lng),
+    }))
+    .filter((point) => Number.isFinite(point.latitude) && Number.isFinite(point.longitude));
+}
+
+async function fetchStreetCrimesInPolygon(points, month = '') {
+  const polygonPoints = normalizePolygonPoints(points);
+
+  if (polygonPoints.length < 3) {
+    const error = new Error('At least three valid polygon points are required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const polyParam = toPolygonParam(polygonPoints);
+  const crimesUrl = month
+    ? `https://data.police.uk/api/crimes-street/all-crime?poly=${encodeURIComponent(polyParam)}&date=${encodeURIComponent(month)}`
+    : `https://data.police.uk/api/crimes-street/all-crime?poly=${encodeURIComponent(polyParam)}`;
+  const crimes = await fetchJson(crimesUrl, {}, 18000).catch((error) => {
+    if (error.statusCode === 404) {
+      return [];
+    }
+    throw error;
+  });
+
+  return {
+    polygonPoints,
+    crimes: Array.isArray(crimes) ? crimes : [],
+  };
 }
 
 async function resolveLocation(query) {
@@ -922,15 +1026,7 @@ function buildComparisonSummary(results) {
 }
 
 async function fetchCrimeData(latitude, longitude) {
-  const crimesUrl = `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}`;
-  const crimes = await fetchJson(crimesUrl, {}, 18000).catch((error) => {
-    if (error.statusCode === 404) {
-      return [];
-    }
-    throw error;
-  });
-
-  const safeCrimes = Array.isArray(crimes) ? crimes : [];
+  const safeCrimes = await fetchStreetCrimesAtPoint(latitude, longitude);
   const postcodeCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, POSTCODE_RADIUS_METERS);
   const contextCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, CONTEXT_RADIUS_METERS);
 
@@ -954,6 +1050,57 @@ async function fetchCrimeData(latitude, longitude) {
     contextRadiusMeters: CONTEXT_RADIUS_METERS,
     capExplanation:
       `Live score blends incidents within roughly ${POSTCODE_RADIUS_METERS} metres of the postcode point with a wider ${CONTEXT_RADIUS_METERS} metre context view, so the result stays postcode-led without becoming too brittle around one exact point.`,
+  };
+}
+
+async function fetchPostcodeCrimeFeed(query, options = {}) {
+  const location = await resolveLocation(query);
+  const radiusMeters = clamp(Number(options.radiusMeters) || POSTCODE_RADIUS_METERS, 100, 1500);
+  const categoryFilters = normalizeCategoryFilters(options.categories);
+  const crimes = await fetchStreetCrimesAtPoint(location.latitude, location.longitude, String(options.month || ''));
+  const radiusFilteredCrimes = filterCrimesByRadius(crimes, location.latitude, location.longitude, radiusMeters);
+  const filteredCrimes = filterCrimesByCategory(radiusFilteredCrimes, categoryFilters);
+  const categories = summarizeCrimeCategories(filteredCrimes);
+
+  return {
+    postcode: location.postcode,
+    district: location.admin_district,
+    latitude: location.latitude,
+    longitude: location.longitude,
+    radiusMeters,
+    month: String(options.month || filteredCrimes?.[0]?.month || crimes?.[0]?.month || ''),
+    appliedCategories: categoryFilters,
+    totalCrimes: filteredCrimes.length,
+    summary: buildCrimeFeedSummary({
+      label: location.postcode,
+      crimes: filteredCrimes,
+      categories,
+      radiusMeters,
+    }),
+    categories,
+    crimes: filteredCrimes.map(sanitizeCrimeRecord),
+  };
+}
+
+async function fetchAreaCrimeFeed(points, options = {}) {
+  const { polygonPoints, crimes } = await fetchStreetCrimesInPolygon(points, String(options.month || ''));
+  const categoryFilters = normalizeCategoryFilters(options.categories);
+  const filteredCrimes = filterCrimesByCategory(crimes, categoryFilters);
+  const categories = summarizeCrimeCategories(filteredCrimes);
+  const latestMonth = String(options.month || filteredCrimes?.[0]?.month || crimes?.[0]?.month || '');
+
+  return {
+    polygon: polygonPoints,
+    month: latestMonth,
+    appliedCategories: categoryFilters,
+    totalCrimes: filteredCrimes.length,
+    summary: buildCrimeFeedSummary({
+      label: 'the selected area',
+      crimes: filteredCrimes,
+      categories,
+    }),
+    categories,
+    crimes: filteredCrimes.map(sanitizeCrimeRecord),
   };
 }
 
@@ -1056,13 +1203,7 @@ async function analyzeLocation(query) {
   const location = await resolveLocation(query);
   const crimeData = await fetchCrimeData(location.latitude, location.longitude);
   const trendData = await fetchCrimeHistory(location.latitude, location.longitude);
-  const latestContextCrimesUrl = `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(location.latitude)}&lng=${encodeURIComponent(location.longitude)}`;
-  const latestContextCrimes = await fetchJson(latestContextCrimesUrl, {}, 18000).catch((error) => {
-    if (error.statusCode === 404) {
-      return [];
-    }
-    throw error;
-  });
+  const latestContextCrimes = await fetchStreetCrimesAtPoint(location.latitude, location.longitude);
   const hotspotData = summarizeHotspots({
     district: location.admin_district,
     latitude: location.latitude,
@@ -1209,6 +1350,42 @@ const server = http.createServer(async (request, response) => {
       const body = await readJsonBody(request);
       const queries = Array.isArray(body.postcodes) ? body.postcodes : [];
       const result = await compareLocations(queries);
+      sendJson(response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/postcode-crimes') {
+    try {
+      const body = await readJsonBody(request);
+      const query = body.postcode ?? body.query ?? '';
+      const result = await fetchPostcodeCrimeFeed(query, {
+        month: body.month,
+        radiusMeters: body.radiusMeters,
+        categories: body.categories,
+      });
+      sendJson(response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/area-crimes') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await fetchAreaCrimeFeed(body.points, {
+        month: body.month,
+        categories: body.categories,
+      });
       sendJson(response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
