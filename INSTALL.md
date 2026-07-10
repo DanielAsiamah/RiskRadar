@@ -183,6 +183,19 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
     }
     ```
   - Returns a bundled postcode-map payload with postcode analysis, postcode-radius crimes, exact-location crimes, hotspot clusters, and nearby postcode suggestions.
+- `POST /api/map-intelligence`
+  - Body:
+    ```json
+    {
+      "mode": "postcode",
+      "postcode": "BR1 5NN",
+      "month": "2026-05",
+      "radiusMeters": 900,
+      "minimumClusterSize": 2,
+      "maxClusters": 4
+    }
+    ```
+  - Use `"mode": "point"` with `lat`/`lng`, or `"mode": "area"` with polygon `points`, to access the same bundled intelligence contract for all three explorer modes from one endpoint.
 - `POST /api/compare-points`
   - Body:
     ```json

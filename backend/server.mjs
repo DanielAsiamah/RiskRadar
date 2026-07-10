@@ -2962,6 +2962,35 @@ async function fetchAreaIntelligence(payload = {}) {
   };
 }
 
+async function fetchMapIntelligence(payload = {}) {
+  const mode = String(payload.mode || '').trim().toLowerCase();
+
+  if (mode === 'postcode') {
+    return {
+      mode,
+      result: await fetchPostcodeIntelligence(payload),
+    };
+  }
+
+  if (mode === 'point') {
+    return {
+      mode,
+      result: await fetchPointIntelligence(payload),
+    };
+  }
+
+  if (mode === 'area') {
+    return {
+      mode,
+      result: await fetchAreaIntelligence(payload),
+    };
+  }
+
+  const error = new Error('Map intelligence mode must be one of: postcode, point, area.');
+  error.statusCode = 400;
+  throw error;
+}
+
 async function computeAreaAnalysis(area = {}) {
   const label = String(area.label || '').trim() || 'Selected area';
   const polygonPoints = normalizePolygonPoints(area.points);
@@ -4143,6 +4172,20 @@ const server = http.createServer(async (request, response) => {
     try {
       const body = await readJsonBody(request);
       const result = await fetchAreaIntelligence(body);
+      sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/map-intelligence') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await fetchMapIntelligence(body);
       sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;

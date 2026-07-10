@@ -84,6 +84,25 @@ async function main() {
     hotspotClusters: postcodeIntelligence.json?.hotspotMap?.clusterCount ?? 0,
   });
 
+  const unifiedPostcode = await requestJson('/api/map-intelligence', {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'postcode',
+      postcode: POSTCODE,
+      month: analysis.json?.crimeData?.month,
+      radiusMeters: 900,
+      minimumClusterSize: 2,
+      maxClusters: 4,
+    }),
+  });
+  assert(unifiedPostcode.response.ok, `/api/map-intelligence postcode failed with ${unifiedPostcode.response.status}`);
+  assert(unifiedPostcode.json?.mode === 'postcode', 'Unified postcode intelligence returned unexpected mode');
+  assert(Number.isFinite(unifiedPostcode.json?.result?.analysis?.crimeData?.crimeScore), 'Unified postcode intelligence missing analysis payload');
+  results.push({
+    step: 'map-intelligence-postcode',
+    ok: true,
+  });
+
   const pointAnalysis = await requestJson('/api/analyze-point', {
     method: 'POST',
     body: JSON.stringify({
@@ -167,6 +186,27 @@ async function main() {
     hotspotClusters: pointIntelligence.json?.hotspotMap?.clusterCount ?? 0,
   });
 
+  const unifiedPoint = await requestJson('/api/map-intelligence', {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'point',
+      lat: analysis.json?.postcodeData?.latitude,
+      lng: analysis.json?.postcodeData?.longitude,
+      month: analysis.json?.crimeData?.month,
+      monthCount: 6,
+      radiusMeters: 900,
+      minimumClusterSize: 2,
+      maxClusters: 4,
+    }),
+  });
+  assert(unifiedPoint.response.ok, `/api/map-intelligence point failed with ${unifiedPoint.response.status}`);
+  assert(unifiedPoint.json?.mode === 'point', 'Unified point intelligence returned unexpected mode');
+  assert(Number.isFinite(unifiedPoint.json?.result?.analysis?.crimeData?.crimeScore), 'Unified point intelligence missing analysis payload');
+  results.push({
+    step: 'map-intelligence-point',
+    ok: true,
+  });
+
   const monthly = await requestJson('/api/monthly-crime-series', {
     method: 'POST',
     body: JSON.stringify({ postcode: POSTCODE, monthCount: 6 }),
@@ -223,6 +263,30 @@ async function main() {
     ok: true,
     nearby: areaIntelligence.json.nearby.length,
     hotspotClusters: areaIntelligence.json?.hotspotMap?.clusterCount ?? 0,
+  });
+
+  const unifiedArea = await requestJson('/api/map-intelligence', {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'area',
+      label: 'Smoke Patch',
+      points: [
+        { lat: analysis.json.postcodeData.latitude - 0.002, lng: analysis.json.postcodeData.longitude - 0.002 },
+        { lat: analysis.json.postcodeData.latitude + 0.002, lng: analysis.json.postcodeData.longitude - 0.002 },
+        { lat: analysis.json.postcodeData.latitude + 0.002, lng: analysis.json.postcodeData.longitude + 0.002 },
+        { lat: analysis.json.postcodeData.latitude - 0.002, lng: analysis.json.postcodeData.longitude + 0.002 }
+      ],
+      monthCount: 6,
+      minimumClusterSize: 2,
+      maxClusters: 4,
+    }),
+  });
+  assert(unifiedArea.response.ok, `/api/map-intelligence area failed with ${unifiedArea.response.status}`);
+  assert(unifiedArea.json?.mode === 'area', 'Unified area intelligence returned unexpected mode');
+  assert(Number.isFinite(unifiedArea.json?.result?.analysis?.crimeData?.crimeScore), 'Unified area intelligence missing analysis payload');
+  results.push({
+    step: 'map-intelligence-area',
+    ok: true,
   });
 
   const presetLabel = `Smoke ${Date.now()}`;
