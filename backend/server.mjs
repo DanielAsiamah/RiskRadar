@@ -3654,6 +3654,35 @@ async function comparePoints(points) {
   };
 }
 
+async function compareMapModes(payload = {}) {
+  const mode = String(payload.mode || '').trim().toLowerCase();
+
+  if (mode === 'postcode') {
+    return {
+      mode,
+      result: await compareLocations(Array.isArray(payload.postcodes) ? payload.postcodes : []),
+    };
+  }
+
+  if (mode === 'point') {
+    return {
+      mode,
+      result: await comparePoints(Array.isArray(payload.points) ? payload.points : []),
+    };
+  }
+
+  if (mode === 'area') {
+    return {
+      mode,
+      result: await compareAreas(Array.isArray(payload.areas) ? payload.areas : []),
+    };
+  }
+
+  const error = new Error('Map compare mode must be one of: postcode, point, area.');
+  error.statusCode = 400;
+  throw error;
+}
+
 const server = http.createServer(async (request, response) => {
   if (!request.url) {
     request.routeTag = 'unmatched';
@@ -4309,6 +4338,20 @@ const server = http.createServer(async (request, response) => {
     try {
       const body = await readJsonBody(request);
       const result = await comparePoints(body.points);
+      sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/map-compare') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await compareMapModes(body);
       sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;

@@ -207,6 +207,15 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
     }
     ```
   - Use `"mode": "point"` with `lat`/`lng`, or `"mode": "area"` with polygon `points`, to access the same raw crime-feed contract for all three explorer modes from one endpoint.
+- `POST /api/map-compare`
+  - Body:
+    ```json
+    {
+      "mode": "postcode",
+      "postcodes": ["BR1 5NN", "SW1A 1AA"]
+    }
+    ```
+  - Use `"mode": "point"` with a `points` array, or `"mode": "area"` with an `areas` array, to access the same comparison contract for all three explorer modes from one endpoint.
 - `POST /api/compare-points`
   - Body:
     ```json

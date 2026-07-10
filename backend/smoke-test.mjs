@@ -164,6 +164,21 @@ async function main() {
     points: comparePoints.json.results.length,
   });
 
+  const unifiedComparePostcodes = await requestJson('/api/map-compare', {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'postcode',
+      postcodes: [POSTCODE, 'SW1A 1AA'],
+    }),
+  });
+  assert(unifiedComparePostcodes.response.ok, `/api/map-compare postcode failed with ${unifiedComparePostcodes.response.status}`);
+  assert(unifiedComparePostcodes.json?.mode === 'postcode', 'Unified postcode compare returned unexpected mode');
+  assert(Array.isArray(unifiedComparePostcodes.json?.result?.results), 'Unified postcode compare missing results');
+  results.push({
+    step: 'map-compare-postcode',
+    ok: true,
+  });
+
   const locationCrimes = await requestJson('/api/location-crimes', {
     method: 'POST',
     body: JSON.stringify({
@@ -201,6 +216,34 @@ async function main() {
     ok: true,
     nearby: pointIntelligence.json.nearby.length,
     hotspotClusters: pointIntelligence.json?.hotspotMap?.clusterCount ?? 0,
+  });
+
+  const unifiedComparePoints = await requestJson('/api/map-compare', {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'point',
+      points: [
+        {
+          lat: analysis.json?.postcodeData?.latitude,
+          lng: analysis.json?.postcodeData?.longitude,
+          label: `${analysis.json?.postcode || POSTCODE} anchor`,
+          monthCount: 6,
+        },
+        {
+          lat: analysis.json?.postcodeData?.latitude + 0.003,
+          lng: analysis.json?.postcodeData?.longitude + 0.003,
+          label: 'Nearby comparison point',
+          monthCount: 6,
+        },
+      ],
+    }),
+  });
+  assert(unifiedComparePoints.response.ok, `/api/map-compare point failed with ${unifiedComparePoints.response.status}`);
+  assert(unifiedComparePoints.json?.mode === 'point', 'Unified point compare returned unexpected mode');
+  assert(Array.isArray(unifiedComparePoints.json?.result?.results), 'Unified point compare missing results');
+  results.push({
+    step: 'map-compare-point',
+    ok: true,
   });
 
   const unifiedPointFeed = await requestJson('/api/map-feed', {
@@ -298,6 +341,42 @@ async function main() {
     ok: true,
     nearby: areaIntelligence.json.nearby.length,
     hotspotClusters: areaIntelligence.json?.hotspotMap?.clusterCount ?? 0,
+  });
+
+  const unifiedCompareAreas = await requestJson('/api/map-compare', {
+    method: 'POST',
+    body: JSON.stringify({
+      mode: 'area',
+      areas: [
+        {
+          label: 'Smoke Patch',
+          points: [
+            { lat: analysis.json.postcodeData.latitude - 0.002, lng: analysis.json.postcodeData.longitude - 0.002 },
+            { lat: analysis.json.postcodeData.latitude + 0.002, lng: analysis.json.postcodeData.longitude - 0.002 },
+            { lat: analysis.json.postcodeData.latitude + 0.002, lng: analysis.json.postcodeData.longitude + 0.002 },
+            { lat: analysis.json.postcodeData.latitude - 0.002, lng: analysis.json.postcodeData.longitude + 0.002 }
+          ],
+          monthCount: 6,
+        },
+        {
+          label: 'Wider Patch',
+          points: [
+            { lat: analysis.json.postcodeData.latitude - 0.0035, lng: analysis.json.postcodeData.longitude - 0.0035 },
+            { lat: analysis.json.postcodeData.latitude + 0.0035, lng: analysis.json.postcodeData.longitude - 0.0035 },
+            { lat: analysis.json.postcodeData.latitude + 0.0035, lng: analysis.json.postcodeData.longitude + 0.0035 },
+            { lat: analysis.json.postcodeData.latitude - 0.0035, lng: analysis.json.postcodeData.longitude + 0.0035 }
+          ],
+          monthCount: 6,
+        }
+      ],
+    }),
+  });
+  assert(unifiedCompareAreas.response.ok, `/api/map-compare area failed with ${unifiedCompareAreas.response.status}`);
+  assert(unifiedCompareAreas.json?.mode === 'area', 'Unified area compare returned unexpected mode');
+  assert(Array.isArray(unifiedCompareAreas.json?.result?.results), 'Unified area compare missing results');
+  results.push({
+    step: 'map-compare-area',
+    ok: true,
   });
 
   const unifiedAreaFeed = await requestJson('/api/map-feed', {
