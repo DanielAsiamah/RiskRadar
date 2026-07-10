@@ -19,6 +19,8 @@ npm run api
 - `npm run api:verify`
   Waits for `/ready` to return `200` and then runs the smoke test against `RISKRADAR_SMOKE_BASE_URL`.
 
+The smoke test now covers postcode analysis, point analysis, area analysis, trend data, and preset roundtrips so the richer map-analysis flows are exercised after deploy too.
+
 Example:
 
 ```powershell

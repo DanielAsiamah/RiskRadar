@@ -145,6 +145,27 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
     ```json
     { "postcode": "BR1 5NN" }
     ```
+- `POST /api/analyze-point`
+  - Body:
+    ```json
+    { "lat": 51.431075, "lng": 0.009835, "monthCount": 6 }
+    ```
+- `POST /api/analyze-area`
+  - Body:
+    ```json
+    {
+      "label": "Lewisham Patch",
+      "points": [
+        { "lat": 51.4280, "lng": 0.0035 },
+        { "lat": 51.4365, "lng": 0.0035 },
+        { "lat": 51.4365, "lng": 0.0175 },
+        { "lat": 51.4280, "lng": 0.0175 }
+      ],
+      "monthCount": 6,
+      "minimumClusterSize": 3,
+      "maxClusters": 4
+    }
+    ```
 - `POST /api/compare-postcodes`
   - Body:
     ```json

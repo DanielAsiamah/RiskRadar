@@ -1570,6 +1570,15 @@ function buildPostcodeAnalysisCacheKey(query) {
   });
 }
 
+function buildPointAnalysisCacheKey(payload = {}) {
+  return JSON.stringify({
+    type: 'point',
+    latitude: Number(payload.latitude ?? payload.lat ?? 0).toFixed(6),
+    longitude: Number(payload.longitude ?? payload.lng ?? 0).toFixed(6),
+    monthCount: clamp(Number(payload.monthCount) || TREND_MONTH_COUNT, 3, 12),
+  });
+}
+
 function getCachedAnalysisResult(cacheKey) {
   const entry = analysisResultCache.find((item) => item.key === cacheKey);
 
@@ -1919,6 +1928,28 @@ async function fetchNearbyPostcodes(latitude, longitude, limit = 5) {
       admin_district: entry.admin_district || 'Nearby area',
     }))
     .slice(0, limit);
+}
+
+async function resolvePointContext(latitude, longitude) {
+  const nearbyPostcodes = await fetchNearbyPostcodes(latitude, longitude, 5).catch(() => []);
+  const boundaryData = await fetchNeighbourhoodBoundary(latitude, longitude).catch(() => ({
+    neighbourhood: null,
+    boundary: [],
+  }));
+  const leadPostcode = nearbyPostcodes[0] || null;
+  const district =
+    leadPostcode?.admin_district ||
+    boundaryData?.neighbourhood?.neighbourhood ||
+    boundaryData?.neighbourhood?.force ||
+    'Selected point';
+
+  return {
+    label: leadPostcode?.postcode || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`,
+    postcode: leadPostcode?.postcode || null,
+    district: titleCaseWords(String(district)),
+    nearbyPostcodes,
+    boundaryData,
+  };
 }
 
 async function fetchAvailableCrimeMonths() {
@@ -2746,6 +2777,11 @@ async function computeAreaAnalysis(area = {}) {
       trendData,
     }),
     trendData,
+    premiumInsights: buildPremiumInsights({
+      trendData,
+      areaContext: `${areaContext} ${hotspotPayload.summary}`,
+      hotspotSummary: hotspotPayload.summary,
+    }),
     hotspotData: {
       clusters: hotspotPayload.clusters,
       summary: hotspotPayload.summary,
@@ -2764,6 +2800,103 @@ async function analyzeArea(area = {}) {
   }
 
   const snapshotId = saveAnalysisSnapshot('area', result.label, result);
+  return {
+    ...result,
+    snapshotId,
+  };
+}
+
+async function computePointAnalysis(payload = {}) {
+  const latitude = Number(payload.latitude ?? payload.lat);
+  const longitude = Number(payload.longitude ?? payload.lng);
+
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    const error = new Error('Valid latitude and longitude are required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const monthCount = clamp(Number(payload.monthCount) || TREND_MONTH_COUNT, 3, 12);
+  const pointContext = await resolvePointContext(latitude, longitude);
+  const crimeData = await fetchCrimeData(latitude, longitude);
+  const trendData = await fetchCrimeHistory(latitude, longitude, monthCount);
+  const latestContextCrimes = await fetchStreetCrimesAtPoint(latitude, longitude);
+  const hotspotData = summarizeHotspots({
+    district: pointContext.district,
+    latitude,
+    longitude,
+    crimes: filterCrimesByRadius(
+      Array.isArray(latestContextCrimes) ? latestContextCrimes : [],
+      latitude,
+      longitude,
+      CONTEXT_RADIUS_METERS
+    ),
+  });
+  const scoreFactors = buildScoreFactors({
+    district: pointContext.district,
+    totalCrimes: crimeData.totalCrimes,
+    categories: crimeData.categories,
+    crimeScore: crimeData.crimeScore,
+  });
+  const areaContext = buildAreaContext({
+    district: pointContext.district,
+    totalCrimes: crimeData.totalCrimes,
+    categories: crimeData.categories,
+  });
+  const riskSignals = buildRiskSignals({
+    district: pointContext.district,
+    totalCrimes: crimeData.totalCrimes,
+    categories: crimeData.categories,
+  });
+
+  return {
+    label: pointContext.label,
+    pointData: {
+      latitude,
+      longitude,
+      postcode: pointContext.postcode,
+      admin_district: pointContext.district,
+      nearbyPostcodes: pointContext.nearbyPostcodes,
+      neighbourhood: pointContext.boundaryData.neighbourhood,
+      boundary: pointContext.boundaryData.boundary,
+    },
+    crimeData: {
+      ...crimeData,
+      riskSignals,
+      scoreFactors,
+      capExplanation:
+        `Point analysis uses the same live postcode-led radius blend as postcode search, centred on the selected map coordinate rather than a typed postcode.`,
+    },
+    aiAnalysis: buildAiAnalysis({
+      district: pointContext.district,
+      safetyLevel: crimeData.safetyLevel,
+      totalCrimes: crimeData.totalCrimes,
+      topCategories: crimeData.categories,
+      scoreFactors,
+      areaContext,
+      trendData,
+    }),
+    trendData,
+    premiumInsights: buildPremiumInsights({
+      trendData,
+      areaContext: `${areaContext} ${hotspotData.summary}`,
+      hotspotSummary: hotspotData.summary,
+    }),
+    hotspotData,
+    newsLink: `https://news.google.com/search?q=${encodeURIComponent(`${pointContext.district} police OR crime`)}`,
+  };
+}
+
+async function analyzePoint(payload = {}) {
+  const cacheKey = buildPointAnalysisCacheKey(payload);
+  const cached = ANALYSIS_CACHE_ENABLED ? getCachedAnalysisResult(cacheKey) : null;
+  const result = cached || await computePointAnalysis(payload);
+
+  if (!cached && ANALYSIS_CACHE_ENABLED) {
+    setCachedAnalysisResult(cacheKey, result);
+  }
+
+  const snapshotId = saveAnalysisSnapshot('point', result.label, result);
   return {
     ...result,
     snapshotId,
@@ -3546,6 +3679,42 @@ const server = http.createServer(async (request, response) => {
       const body = await readJsonBody(request);
       const query = body.postcode ?? body.query ?? '';
       const result = await analyzeLocation(query);
+      sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/analyze-point') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await analyzePoint(body);
+      sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/analyze-area') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await analyzeArea({
+        label: body.label,
+        points: body.points,
+        month: body.month,
+        categories: body.categories,
+        monthCount: body.monthCount,
+        minimumClusterSize: body.minimumClusterSize,
+        maxClusters: body.maxClusters,
+      });
       sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;

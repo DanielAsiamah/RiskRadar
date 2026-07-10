@@ -63,6 +63,23 @@ async function main() {
     score: analysis.json.crimeData.crimeScore,
   });
 
+  const pointAnalysis = await requestJson('/api/analyze-point', {
+    method: 'POST',
+    body: JSON.stringify({
+      lat: analysis.json?.postcodeData?.latitude,
+      lng: analysis.json?.postcodeData?.longitude,
+      monthCount: 6,
+    }),
+  });
+  assert(pointAnalysis.response.ok, `/api/analyze-point failed with ${pointAnalysis.response.status}`);
+  assert(Number.isFinite(pointAnalysis.json?.crimeData?.crimeScore), 'Point analysis payload missing numeric crime score');
+  results.push({
+    step: 'analyze-point',
+    ok: true,
+    label: pointAnalysis.json.label,
+    score: pointAnalysis.json.crimeData.crimeScore,
+  });
+
   const monthly = await requestJson('/api/monthly-crime-series', {
     method: 'POST',
     body: JSON.stringify({ postcode: POSTCODE, monthCount: 6 }),
@@ -70,6 +87,30 @@ async function main() {
   assert(monthly.response.ok, `/api/monthly-crime-series failed with ${monthly.response.status}`);
   assert(Array.isArray(monthly.json?.monthly), 'Monthly crime series missing monthly array');
   results.push({ step: 'monthly-crime-series', ok: true, months: monthly.json.monthly.length });
+
+  const areaAnalysis = await requestJson('/api/analyze-area', {
+    method: 'POST',
+    body: JSON.stringify({
+      label: 'Smoke Patch',
+      points: [
+        { lat: analysis.json.postcodeData.latitude - 0.002, lng: analysis.json.postcodeData.longitude - 0.002 },
+        { lat: analysis.json.postcodeData.latitude + 0.002, lng: analysis.json.postcodeData.longitude - 0.002 },
+        { lat: analysis.json.postcodeData.latitude + 0.002, lng: analysis.json.postcodeData.longitude + 0.002 },
+        { lat: analysis.json.postcodeData.latitude - 0.002, lng: analysis.json.postcodeData.longitude + 0.002 }
+      ],
+      monthCount: 6,
+      minimumClusterSize: 3,
+      maxClusters: 4,
+    }),
+  });
+  assert(areaAnalysis.response.ok, `/api/analyze-area failed with ${areaAnalysis.response.status}`);
+  assert(Number.isFinite(areaAnalysis.json?.crimeData?.crimeScore), 'Area analysis payload missing numeric crime score');
+  results.push({
+    step: 'analyze-area',
+    ok: true,
+    label: areaAnalysis.json.label,
+    score: areaAnalysis.json.crimeData.crimeScore,
+  });
 
   const presetLabel = `Smoke ${Date.now()}`;
   const preset = await requestJson('/api/search-presets', {
