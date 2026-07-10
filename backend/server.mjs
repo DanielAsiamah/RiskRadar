@@ -326,6 +326,23 @@ function humanizeCategory(value) {
   return titleCaseWords(String(value || 'other-crime').replace(/-/g, ' '));
 }
 
+const SUPPORTED_CRIME_CATEGORIES = [
+  'anti-social-behaviour',
+  'bicycle-theft',
+  'burglary',
+  'criminal-damage-arson',
+  'drugs',
+  'other-crime',
+  'other-theft',
+  'possession-of-weapons',
+  'public-order',
+  'robbery',
+  'shoplifting',
+  'theft-from-the-person',
+  'vehicle-crime',
+  'violent-crime',
+];
+
 function getCategoryCount(categories, key) {
   return categories.find((category) => category.category === key)?.count || 0;
 }
@@ -550,6 +567,41 @@ async function fetchAvailableCrimeMonths() {
     .map((entry) => entry?.date)
     .filter((date) => /^\d{4}-\d{2}$/.test(String(date || '')))
     .slice(0, TREND_MONTH_COUNT);
+}
+
+async function fetchFilterMetadata() {
+  const monthEntries = await fetchJson('https://data.police.uk/api/crimes-street-dates', {}, 12000).catch((error) => {
+    if (error.statusCode === 404) {
+      return [];
+    }
+    throw error;
+  });
+
+  const rawMonths = Array.isArray(monthEntries)
+    ? monthEntries
+    : Array.isArray(monthEntries?.value)
+      ? monthEntries.value
+      : [];
+
+  const months = rawMonths
+    .map((entry) => ({
+      month: String(entry?.date || ''),
+      monthDisplay: formatMonthDisplay(String(entry?.date || '')),
+    }))
+    .filter((entry) => /^\d{4}-\d{2}$/.test(entry.month));
+
+  return {
+    months,
+    categories: SUPPORTED_CRIME_CATEGORIES.map((category) => ({
+      category,
+      label: humanizeCategory(category),
+    })),
+    defaults: {
+      postcodeRadiusMeters: POSTCODE_RADIUS_METERS,
+      contextRadiusMeters: CONTEXT_RADIUS_METERS,
+      trendMonthCount: TREND_MONTH_COUNT,
+    },
+  };
 }
 
 async function locateNeighbourhood(latitude, longitude) {
@@ -1745,6 +1797,19 @@ const server = http.createServer(async (request, response) => {
         persistentWrites: persistentCacheWrites,
       },
     });
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/filter-metadata') {
+    try {
+      const result = await fetchFilterMetadata();
+      sendJson(response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
     return;
   }
 

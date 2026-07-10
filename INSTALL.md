@@ -149,6 +149,7 @@ npm run android
     }
     ```
 - `GET /api/point-boundary?lat=51.431075&lng=0.009835`
+- `GET /api/filter-metadata`
 - `GET /api/location-suggestions?lat=51.4062&lng=0.0186`
 - `GET /health`
 
@@ -164,6 +165,7 @@ The backend is designed to be hosted separately from the Expo app and currently:
 - exposes reusable monthly crime series data for postcode or area trend graphs
 - exposes area comparison output with score, trend, and hotspot comparison data
 - exposes arbitrary click-point crime feeds and neighbourhood boundary data for map tap workflows
+- exposes current month/category filter metadata for explorer controls
 
 For backend env vars and cache settings, see [backend/DEPLOYMENT.md](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/backend/DEPLOYMENT.md).
 
