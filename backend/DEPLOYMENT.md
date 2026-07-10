@@ -34,6 +34,14 @@ npm run api
   JSON file used for persisted analysis snapshots. Default: `backend/cache/analysis-snapshots.json`
 - `ANALYSIS_SNAPSHOT_MAX_ENTRIES`
   Maximum number of saved analysis snapshots retained on disk. Default: `200`
+- `ANALYSIS_CACHE_ENABLED`
+  Enables disk-backed caching for computed postcode and area analysis results. Default: `true`
+- `ANALYSIS_CACHE_FILE`
+  JSON file used for persisted computed analysis cache entries. Default: `backend/cache/analysis-cache.json`
+- `ANALYSIS_CACHE_MAX_ENTRIES`
+  Maximum number of computed analysis cache entries retained on disk. Default: `200`
+- `ANALYSIS_CACHE_TTL_MS`
+  Cache lifetime for computed analysis results in milliseconds. Default: `7200000`
 - `SEARCH_PRESETS_ENABLED`
   Enables disk-backed saved target presets across backend restarts. Default: `true`
 - `SEARCH_PRESETS_FILE`

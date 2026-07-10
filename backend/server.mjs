@@ -17,17 +17,24 @@ const PERSISTENT_CACHE_FILE = process.env.PERSISTENT_CACHE_FILE || path.join(pro
 const ANALYSIS_SNAPSHOTS_ENABLED = process.env.ANALYSIS_SNAPSHOTS_ENABLED !== 'false';
 const ANALYSIS_SNAPSHOTS_FILE = process.env.ANALYSIS_SNAPSHOTS_FILE || path.join(process.cwd(), 'backend', 'cache', 'analysis-snapshots.json');
 const ANALYSIS_SNAPSHOT_MAX_ENTRIES = Math.min(1000, Math.max(20, Number(process.env.ANALYSIS_SNAPSHOT_MAX_ENTRIES) || 200));
+const ANALYSIS_CACHE_ENABLED = process.env.ANALYSIS_CACHE_ENABLED !== 'false';
+const ANALYSIS_CACHE_FILE = process.env.ANALYSIS_CACHE_FILE || path.join(process.cwd(), 'backend', 'cache', 'analysis-cache.json');
+const ANALYSIS_CACHE_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.ANALYSIS_CACHE_MAX_ENTRIES) || 200));
+const ANALYSIS_CACHE_TTL_MS = Math.max(60 * 1000, Number(process.env.ANALYSIS_CACHE_TTL_MS) || 2 * 60 * 60 * 1000);
 const SEARCH_PRESETS_ENABLED = process.env.SEARCH_PRESETS_ENABLED !== 'false';
 const SEARCH_PRESETS_FILE = process.env.SEARCH_PRESETS_FILE || path.join(process.cwd(), 'backend', 'cache', 'search-presets.json');
 const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.SEARCH_PRESET_MAX_ENTRIES) || 200));
 const upstreamCache = new Map();
 const analysisSnapshots = [];
+const analysisResultCache = [];
 const searchPresets = [];
 let persistentCacheWrites = 0;
 let persistentCacheWriteQueued = false;
 let persistentCacheLoaded = false;
 let analysisSnapshotWrites = 0;
 let analysisSnapshotsLoaded = false;
+let analysisCacheWrites = 0;
+let analysisCacheLoaded = false;
 let searchPresetWrites = 0;
 let searchPresetsLoaded = false;
 
@@ -85,6 +92,14 @@ function ensureAnalysisSnapshotDir() {
   }
 
   fs.mkdirSync(path.dirname(ANALYSIS_SNAPSHOTS_FILE), { recursive: true });
+}
+
+function ensureAnalysisCacheDir() {
+  if (!ANALYSIS_CACHE_ENABLED) {
+    return;
+  }
+
+  fs.mkdirSync(path.dirname(ANALYSIS_CACHE_FILE), { recursive: true });
 }
 
 function ensureSearchPresetDir() {
@@ -158,6 +173,32 @@ function saveAnalysisSnapshots() {
     analysisSnapshotWrites += 1;
   } catch (error) {
     console.error('Failed to persist analysis snapshots:', error);
+  }
+}
+
+function saveAnalysisCache() {
+  if (!ANALYSIS_CACHE_ENABLED) {
+    return;
+  }
+
+  try {
+    ensureAnalysisCacheDir();
+    fs.writeFileSync(
+      ANALYSIS_CACHE_FILE,
+      JSON.stringify(
+        {
+          version: 1,
+          savedAt: new Date().toISOString(),
+          entries: analysisResultCache,
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+    analysisCacheWrites += 1;
+  } catch (error) {
+    console.error('Failed to persist analysis result cache:', error);
   }
 }
 
@@ -242,6 +283,37 @@ function loadAnalysisSnapshots() {
   } catch (error) {
     console.error('Failed to load analysis snapshots:', error);
     analysisSnapshotsLoaded = true;
+  }
+}
+
+function loadAnalysisCache() {
+  if (!ANALYSIS_CACHE_ENABLED) {
+    analysisCacheLoaded = true;
+    return;
+  }
+
+  try {
+    if (!fs.existsSync(ANALYSIS_CACHE_FILE)) {
+      analysisCacheLoaded = true;
+      return;
+    }
+
+    const raw = fs.readFileSync(ANALYSIS_CACHE_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+    const now = Date.now();
+
+    analysisResultCache.splice(
+      0,
+      analysisResultCache.length,
+      ...entries
+        .filter((entry) => entry?.key && Number(entry?.expiresAt) > now)
+        .slice(0, ANALYSIS_CACHE_MAX_ENTRIES)
+    );
+    analysisCacheLoaded = true;
+  } catch (error) {
+    console.error('Failed to load analysis result cache:', error);
+    analysisCacheLoaded = true;
   }
 }
 
@@ -571,6 +643,70 @@ function buildTrendSummary(monthly) {
     },
     summary,
   };
+}
+
+function cloneJsonValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function buildAreaAnalysisCacheKey(area = {}) {
+  return JSON.stringify({
+    type: 'area',
+    label: String(area.label || '').trim(),
+    month: String(area.month || ''),
+    categories: normalizeCategoryFilters(area.categories),
+    monthCount: Number(area.monthCount) || TREND_MONTH_COUNT,
+    minimumClusterSize: Number(area.minimumClusterSize) || 3,
+    maxClusters: Number(area.maxClusters) || 8,
+    points: normalizePolygonPoints(area.points),
+  });
+}
+
+function buildPostcodeAnalysisCacheKey(query) {
+  return JSON.stringify({
+    type: 'postcode',
+    query: String(query || '').trim().toUpperCase(),
+  });
+}
+
+function getCachedAnalysisResult(cacheKey) {
+  const entry = analysisResultCache.find((item) => item.key === cacheKey);
+
+  if (!entry) {
+    return null;
+  }
+
+  if (entry.expiresAt <= Date.now()) {
+    const index = analysisResultCache.findIndex((item) => item.key === cacheKey);
+    if (index !== -1) {
+      analysisResultCache.splice(index, 1);
+      saveAnalysisCache();
+    }
+    return null;
+  }
+
+  return cloneJsonValue(entry.value);
+}
+
+function setCachedAnalysisResult(cacheKey, value) {
+  const entry = {
+    key: cacheKey,
+    value: cloneJsonValue(value),
+    expiresAt: Date.now() + ANALYSIS_CACHE_TTL_MS,
+  };
+  const existingIndex = analysisResultCache.findIndex((item) => item.key === cacheKey);
+
+  if (existingIndex !== -1) {
+    analysisResultCache.splice(existingIndex, 1);
+  }
+
+  analysisResultCache.unshift(entry);
+
+  if (analysisResultCache.length > ANALYSIS_CACHE_MAX_ENTRIES) {
+    analysisResultCache.length = ANALYSIS_CACHE_MAX_ENTRIES;
+  }
+
+  saveAnalysisCache();
 }
 
 function createSnapshotId(prefix = 'snapshot') {
@@ -1634,7 +1770,7 @@ async function fetchAreaCrimeFeed(points, options = {}) {
   };
 }
 
-async function analyzeArea(area = {}) {
+async function computeAreaAnalysis(area = {}) {
   const label = String(area.label || '').trim() || 'Selected area';
   const polygonPoints = normalizePolygonPoints(area.points);
 
@@ -1680,7 +1816,7 @@ async function analyzeArea(area = {}) {
     categories: contextCategories,
   });
 
-  const result = {
+  return {
     label,
     areaData: {
       polygon: polygonPoints,
@@ -1715,8 +1851,18 @@ async function analyzeArea(area = {}) {
     },
     summary: latestAreaFeed.summary,
   };
+}
 
-  const snapshotId = saveAnalysisSnapshot('area', label, result);
+async function analyzeArea(area = {}) {
+  const cacheKey = buildAreaAnalysisCacheKey(area);
+  const cached = ANALYSIS_CACHE_ENABLED ? getCachedAnalysisResult(cacheKey) : null;
+  const result = cached || await computeAreaAnalysis(area);
+
+  if (!cached && ANALYSIS_CACHE_ENABLED) {
+    setCachedAnalysisResult(cacheKey, result);
+  }
+
+  const snapshotId = saveAnalysisSnapshot('area', result.label, result);
   return {
     ...result,
     snapshotId,
@@ -1979,7 +2125,7 @@ async function fetchCrimeHistory(latitude, longitude, monthCount = TREND_MONTH_C
   };
 }
 
-async function analyzeLocation(query) {
+async function computeLocationAnalysis(query) {
   const location = await resolveLocation(query);
   const crimeData = await fetchCrimeData(location.latitude, location.longitude);
   const trendData = await fetchCrimeHistory(location.latitude, location.longitude);
@@ -2012,7 +2158,7 @@ async function analyzeLocation(query) {
     categories: crimeData.categories,
   });
 
-  const result = {
+  return {
     postcode: location.postcode,
     crimeData: {
       ...crimeData,
@@ -2043,8 +2189,18 @@ async function analyzeLocation(query) {
     hotspotData,
     newsLink: `https://news.google.com/search?q=${encodeURIComponent(`${location.admin_district} police OR crime`)}`,
   };
+}
 
-  const snapshotId = saveAnalysisSnapshot('postcode', location.postcode, result);
+async function analyzeLocation(query) {
+  const cacheKey = buildPostcodeAnalysisCacheKey(query);
+  const cached = ANALYSIS_CACHE_ENABLED ? getCachedAnalysisResult(cacheKey) : null;
+  const result = cached || await computeLocationAnalysis(query);
+
+  if (!cached && ANALYSIS_CACHE_ENABLED) {
+    setCachedAnalysisResult(cacheKey, result);
+  }
+
+  const snapshotId = saveAnalysisSnapshot('postcode', result.postcode, result);
   return {
     ...result,
     snapshotId,
@@ -2146,6 +2302,15 @@ const server = http.createServer(async (request, response) => {
         entries: analysisSnapshots.length,
         maxEntries: ANALYSIS_SNAPSHOT_MAX_ENTRIES,
         writes: analysisSnapshotWrites,
+      },
+      analysisCache: {
+        enabled: ANALYSIS_CACHE_ENABLED,
+        loaded: analysisCacheLoaded,
+        file: ANALYSIS_CACHE_FILE,
+        entries: analysisResultCache.length,
+        maxEntries: ANALYSIS_CACHE_MAX_ENTRIES,
+        ttlMs: ANALYSIS_CACHE_TTL_MS,
+        writes: analysisCacheWrites,
       },
       presets: {
         enabled: SEARCH_PRESETS_ENABLED,
@@ -2544,6 +2709,7 @@ const server = http.createServer(async (request, response) => {
 
 loadPersistentCache();
 loadAnalysisSnapshots();
+loadAnalysisCache();
 loadSearchPresets();
 
 server.listen(PORT, HOST, () => {
