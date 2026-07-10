@@ -116,11 +116,11 @@ Send the admin key either as `x-api-key: <key>` or `Authorization: Bearer <key>`
 - `json`
   Keeps the existing file-per-store persistence model and is the default.
 - `sqlite`
-  Stores analysis snapshots, saved presets, and analysis cache in one SQLite database file while leaving the upstream cache in JSON. This is useful when you want a more database-like deploy path without changing the frontend contract.
+  Stores upstream cache, analysis snapshots, saved presets, and analysis cache in one SQLite database file. This is useful when you want a more database-like deploy path without changing the frontend contract.
 
 SQLite support comes from Node's built-in `node:sqlite` module and is still marked experimental by Node `v22`, so expect an experimental warning when this mode is enabled.
 
-If you switch an existing deployment from `json` to `sqlite`, the backend can automatically import the current JSON snapshots, presets, and analysis cache into the new SQLite database on first startup while `SQLITE_BOOTSTRAP_FROM_JSON=true`. The `/health` endpoint reports whether that bootstrap ran through `storage.sqliteBootstrap`.
+If you switch an existing deployment from `json` to `sqlite`, the backend can automatically import the current JSON upstream cache, snapshots, presets, and analysis cache into the new SQLite database on first startup while `SQLITE_BOOTSTRAP_FROM_JSON=true`. The `/health` endpoint reports whether that bootstrap ran through `storage.sqliteBootstrap`.
 
 ### Why caching matters
 

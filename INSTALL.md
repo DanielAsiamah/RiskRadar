@@ -82,11 +82,11 @@ The backend now supports two state persistence modes:
 - `STATE_DRIVER=json`
   Default mode using JSON files in `RISKRADAR_DATA_DIR`
 - `STATE_DRIVER=sqlite`
-  Stores snapshots, saved presets, and analysis cache in one SQLite database file defined by `SQLITE_STATE_FILE`
+  Stores upstream cache, snapshots, saved presets, and analysis cache in one SQLite database file defined by `SQLITE_STATE_FILE`
 
 SQLite mode keeps the same frontend/API contract and passed local restart testing here, but Node `v22` still marks `node:sqlite` as experimental.
 
-If you are switching an existing backend from `json` to `sqlite`, leave `SQLITE_BOOTSTRAP_FROM_JSON=true` for the first boot. That lets the backend import the current JSON snapshots, presets, and analysis-cache data into SQLite automatically when the database is still empty.
+If you are switching an existing backend from `json` to `sqlite`, leave `SQLITE_BOOTSTRAP_FROM_JSON=true` for the first boot. That lets the backend import the current JSON upstream cache, snapshots, presets, and analysis-cache data into SQLite automatically when the database is still empty.
 
 ### Backend state portability
 

@@ -67,6 +67,7 @@ const stateBootstrapStatus = {
   imported: false,
   reason: usingSqliteState() ? 'pending' : 'not-applicable',
   counts: {
+    upstreamCache: 0,
     analysisSnapshots: 0,
     analysisCache: 0,
     searchPresets: 0,
@@ -191,6 +192,12 @@ function initStateDatabase() {
       label TEXT NOT NULL,
       payload_json TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS upstream_cache (
+      cache_key TEXT PRIMARY KEY,
+      expires_at INTEGER NOT NULL,
+      cached_at INTEGER NOT NULL,
+      value_json TEXT NOT NULL
+    );
     CREATE TABLE IF NOT EXISTS analysis_cache (
       cache_key TEXT PRIMARY KEY,
       expires_at INTEGER NOT NULL,
@@ -204,6 +211,7 @@ function initStateDatabase() {
       payload_json TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_analysis_snapshots_created_at ON analysis_snapshots (created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_upstream_cache_expires_at ON upstream_cache (expires_at DESC);
     CREATE INDEX IF NOT EXISTS idx_analysis_cache_expires_at ON analysis_cache (expires_at DESC);
     CREATE INDEX IF NOT EXISTS idx_search_presets_created_at ON search_presets (created_at DESC);
   `);
@@ -264,28 +272,68 @@ function bootstrapSqliteStateFromJsonIfNeeded() {
   }
 
   stateBootstrapStatus.attempted = true;
-
-  const hasExistingRows =
-    countSqliteTableRows('analysis_snapshots') > 0 ||
-    countSqliteTableRows('analysis_cache') > 0 ||
-    countSqliteTableRows('search_presets') > 0;
-
-  if (hasExistingRows) {
-    stateBootstrapStatus.reason = 'sqlite-already-populated';
-    return;
-  }
-
+  const upstreamCacheRowCount = countSqliteTableRows('upstream_cache');
+  const snapshotRowCount = countSqliteTableRows('analysis_snapshots');
+  const analysisCacheRowCount = countSqliteTableRows('analysis_cache');
+  const searchPresetRowCount = countSqliteTableRows('search_presets');
   const snapshotEntries = ANALYSIS_SNAPSHOTS_ENABLED ? readJsonStoreFile(ANALYSIS_SNAPSHOTS_FILE) : [];
   const analysisCacheEntries = ANALYSIS_CACHE_ENABLED ? readJsonStoreFile(ANALYSIS_CACHE_FILE) : [];
   const searchPresetEntries = SEARCH_PRESETS_ENABLED ? readJsonStoreFile(SEARCH_PRESETS_FILE) : [];
+  const upstreamCacheEntries = PERSISTENT_CACHE_ENABLED ? readJsonStoreFile(PERSISTENT_CACHE_FILE) : [];
 
-  if (!snapshotEntries.length && !analysisCacheEntries.length && !searchPresetEntries.length) {
-    stateBootstrapStatus.reason = 'no-json-state-found';
+  const shouldImportUpstreamCache = PERSISTENT_CACHE_ENABLED && upstreamCacheRowCount === 0 && upstreamCacheEntries.length > 0;
+  const shouldImportSnapshots = ANALYSIS_SNAPSHOTS_ENABLED && snapshotRowCount === 0 && snapshotEntries.length > 0;
+  const shouldImportAnalysisCache = ANALYSIS_CACHE_ENABLED && analysisCacheRowCount === 0 && analysisCacheEntries.length > 0;
+  const shouldImportSearchPresets = SEARCH_PRESETS_ENABLED && searchPresetRowCount === 0 && searchPresetEntries.length > 0;
+
+  if (!shouldImportUpstreamCache && !shouldImportSnapshots && !shouldImportAnalysisCache && !shouldImportSearchPresets) {
+    const hasAnyExistingRows =
+      upstreamCacheRowCount > 0 ||
+      snapshotRowCount > 0 ||
+      analysisCacheRowCount > 0 ||
+      searchPresetRowCount > 0;
+    stateBootstrapStatus.reason = hasAnyExistingRows ? 'sqlite-already-populated' : 'no-json-state-found';
     return;
   }
 
   try {
-    if (snapshotEntries.length && ANALYSIS_SNAPSHOTS_ENABLED) {
+    if (shouldImportUpstreamCache) {
+      const now = Date.now();
+      const staleCutoff = now - STALE_CACHE_MAX_AGE_MS;
+      const filteredUpstreamEntries = upstreamCacheEntries
+        .filter((entry) => {
+          const key = String(entry?.key || '').trim();
+          const expiresAt = Number(entry?.expiresAt) || 0;
+          const cachedAt = Number(entry?.cachedAt) || expiresAt || now;
+
+          if (!key) {
+            return false;
+          }
+
+          if (expiresAt > now) {
+            return true;
+          }
+
+          return STALE_IF_ERROR_ENABLED && cachedAt >= staleCutoff;
+        })
+        .slice(0, CACHE_MAX_ENTRIES);
+      const insertUpstream = stateDb.prepare(
+        'INSERT INTO upstream_cache (cache_key, expires_at, cached_at, value_json) VALUES (?, ?, ?, ?)'
+      );
+      replaceSqliteTableRows('upstream_cache', filteredUpstreamEntries, (entry) => {
+        const expiresAt = Number(entry.expiresAt) || 0;
+        const cachedAt = Number(entry.cachedAt) || expiresAt || now;
+        insertUpstream.run(
+          String(entry.key),
+          expiresAt,
+          cachedAt,
+          JSON.stringify(entry.value ?? null)
+        );
+      });
+      stateBootstrapStatus.counts.upstreamCache = filteredUpstreamEntries.length;
+    }
+
+    if (shouldImportSnapshots) {
       const insertSnapshot = stateDb.prepare(
         'INSERT INTO analysis_snapshots (id, created_at, type, label, payload_json) VALUES (?, ?, ?, ?, ?)'
       );
@@ -301,7 +349,7 @@ function bootstrapSqliteStateFromJsonIfNeeded() {
       stateBootstrapStatus.counts.analysisSnapshots = Math.min(snapshotEntries.length, ANALYSIS_SNAPSHOT_MAX_ENTRIES);
     }
 
-    if (analysisCacheEntries.length && ANALYSIS_CACHE_ENABLED) {
+    if (shouldImportAnalysisCache) {
       const now = Date.now();
       const filteredCacheEntries = analysisCacheEntries
         .filter((entry) => entry?.key && Number(entry?.expiresAt) > now)
@@ -319,7 +367,7 @@ function bootstrapSqliteStateFromJsonIfNeeded() {
       stateBootstrapStatus.counts.analysisCache = filteredCacheEntries.length;
     }
 
-    if (searchPresetEntries.length && SEARCH_PRESETS_ENABLED) {
+    if (shouldImportSearchPresets) {
       const insertPreset = stateDb.prepare(
         'INSERT INTO search_presets (id, created_at, type, label, payload_json) VALUES (?, ?, ?, ?, ?)'
       );
@@ -336,6 +384,7 @@ function bootstrapSqliteStateFromJsonIfNeeded() {
     }
 
     stateBootstrapStatus.imported =
+      stateBootstrapStatus.counts.upstreamCache > 0 ||
       stateBootstrapStatus.counts.analysisSnapshots > 0 ||
       stateBootstrapStatus.counts.analysisCache > 0 ||
       stateBootstrapStatus.counts.searchPresets > 0;
@@ -358,6 +407,27 @@ function serializeCacheEntries() {
 
 function schedulePersistentCacheWrite() {
   if (!PERSISTENT_CACHE_ENABLED || persistentCacheWriteQueued) {
+    return;
+  }
+
+  if (usingSqliteState()) {
+    try {
+      initStateDatabase();
+      const insert = stateDb.prepare(
+        'INSERT INTO upstream_cache (cache_key, expires_at, cached_at, value_json) VALUES (?, ?, ?, ?)'
+      );
+      replaceSqliteTableRows('upstream_cache', serializeCacheEntries(), (entry) => {
+        insert.run(
+          entry.key,
+          entry.expiresAt,
+          Number(entry.cachedAt) || Number(entry.expiresAt) || Date.now(),
+          JSON.stringify(entry.value ?? null)
+        );
+      });
+      persistentCacheWrites += 1;
+    } catch (error) {
+      console.error('Failed to persist upstream cache:', error);
+    }
     return;
   }
 
@@ -520,6 +590,35 @@ function loadPersistentCache() {
   }
 
   try {
+    if (usingSqliteState()) {
+      initStateDatabase();
+      const now = Date.now();
+      const staleCutoff = now - STALE_CACHE_MAX_AGE_MS;
+      const rows = stateDb
+        .prepare(
+          'SELECT cache_key, expires_at, cached_at, value_json FROM upstream_cache ORDER BY expires_at DESC LIMIT ?'
+        )
+        .all(CACHE_MAX_ENTRIES);
+
+      for (const row of rows) {
+        const expiresAt = Number(row.expires_at) || 0;
+        const cachedAt = Number(row.cached_at) || expiresAt || now;
+
+        if (expiresAt <= now && (!STALE_IF_ERROR_ENABLED || cachedAt < staleCutoff)) {
+          continue;
+        }
+
+        upstreamCache.set(row.cache_key, {
+          value: JSON.parse(row.value_json),
+          expiresAt,
+          cachedAt,
+        });
+      }
+
+      persistentCacheLoaded = true;
+      return;
+    }
+
     if (!fs.existsSync(PERSISTENT_CACHE_FILE)) {
       persistentCacheLoaded = true;
       return;
