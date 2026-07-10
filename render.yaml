@@ -12,7 +12,11 @@ services:
         value: 0.0.0.0
       - key: PORT
         value: 3001
+      - key: RISKRADAR_DATA_DIR
+        value: /opt/render/project/src/backend/cache
       - key: CORS_ALLOW_ORIGIN
+        sync: false
+      - key: ADMIN_API_KEY
         sync: false
       - key: RATE_LIMIT_MAX_REQUESTS
         value: 180

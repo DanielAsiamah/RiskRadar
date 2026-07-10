@@ -25,6 +25,14 @@ The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskr
   Backend port. Default: `3001`
 - `HOST`
   Bind host. Default: `0.0.0.0`
+- `RISKRADAR_DATA_DIR`
+  Base directory for persisted backend cache and saved state files. Default: `backend/cache`
+- `ADMIN_API_KEY`
+  Enables protected admin state-management endpoints when set. Default: disabled
+- `MAX_REQUEST_BODY_BYTES`
+  Maximum JSON request size for standard API routes. Default: `32768`
+- `ADMIN_MAX_REQUEST_BODY_BYTES`
+  Maximum JSON request size for admin state imports. Default: `2097152`
 - `UPSTREAM_TIMEOUT_MS`
   Timeout for public API requests. Default: `15000`
 - `UPSTREAM_RETRY_COUNT`
@@ -75,6 +83,27 @@ The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskr
   JSON file used for persisted search presets. Default: `backend/cache/search-presets.json`
 - `SEARCH_PRESET_MAX_ENTRIES`
   Maximum number of saved presets retained on disk. Default: `200`
+
+### Admin state endpoints
+
+When `ADMIN_API_KEY` is configured, the backend exposes protected operational endpoints:
+
+- `GET /api/admin/state-export`
+  Returns the current backend state for snapshots, analysis cache, and presets. Add `?includeUpstreamCache=true` only when you explicitly want the full upstream cache export too.
+- `POST /api/admin/state-import`
+  Accepts an exported state payload plus `mode: "replace"` or `mode: "merge"`.
+- `POST /api/admin/state-clear`
+  Clears one or more backend stores. Example body:
+  ```json
+  {
+    "upstreamCache": true,
+    "analysisSnapshots": false,
+    "analysisCache": true,
+    "searchPresets": false
+  }
+  ```
+
+Send the admin key either as `x-api-key: <key>` or `Authorization: Bearer <key>`.
 
 ### Why caching matters
 

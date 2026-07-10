@@ -5,6 +5,8 @@ import path from 'node:path';
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
 const DEFAULT_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS || 15000);
+const MAX_REQUEST_BODY_BYTES = Math.max(8 * 1024, Number(process.env.MAX_REQUEST_BODY_BYTES) || 32 * 1024);
+const ADMIN_MAX_REQUEST_BODY_BYTES = Math.max(MAX_REQUEST_BODY_BYTES, Number(process.env.ADMIN_MAX_REQUEST_BODY_BYTES) || 2 * 1024 * 1024);
 const UPSTREAM_RETRY_COUNT = Math.max(0, Math.min(3, Number(process.env.UPSTREAM_RETRY_COUNT) || 1));
 const UPSTREAM_RETRY_DELAY_MS = Math.max(100, Number(process.env.UPSTREAM_RETRY_DELAY_MS) || 350);
 const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 15 * 60 * 1000);
@@ -20,17 +22,19 @@ const CORS_ALLOW_ORIGIN = process.env.CORS_ALLOW_ORIGIN || '*';
 const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false';
 const RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000);
 const RATE_LIMIT_MAX_REQUESTS = Math.max(20, Number(process.env.RATE_LIMIT_MAX_REQUESTS) || 180);
+const DATA_DIR = process.env.RISKRADAR_DATA_DIR || path.join(process.cwd(), 'backend', 'cache');
+const ADMIN_API_KEY = String(process.env.ADMIN_API_KEY || '').trim();
 const PERSISTENT_CACHE_ENABLED = process.env.PERSISTENT_CACHE_ENABLED !== 'false';
-const PERSISTENT_CACHE_FILE = process.env.PERSISTENT_CACHE_FILE || path.join(process.cwd(), 'backend', 'cache', 'upstream-cache.json');
+const PERSISTENT_CACHE_FILE = process.env.PERSISTENT_CACHE_FILE || path.join(DATA_DIR, 'upstream-cache.json');
 const ANALYSIS_SNAPSHOTS_ENABLED = process.env.ANALYSIS_SNAPSHOTS_ENABLED !== 'false';
-const ANALYSIS_SNAPSHOTS_FILE = process.env.ANALYSIS_SNAPSHOTS_FILE || path.join(process.cwd(), 'backend', 'cache', 'analysis-snapshots.json');
+const ANALYSIS_SNAPSHOTS_FILE = process.env.ANALYSIS_SNAPSHOTS_FILE || path.join(DATA_DIR, 'analysis-snapshots.json');
 const ANALYSIS_SNAPSHOT_MAX_ENTRIES = Math.min(1000, Math.max(20, Number(process.env.ANALYSIS_SNAPSHOT_MAX_ENTRIES) || 200));
 const ANALYSIS_CACHE_ENABLED = process.env.ANALYSIS_CACHE_ENABLED !== 'false';
-const ANALYSIS_CACHE_FILE = process.env.ANALYSIS_CACHE_FILE || path.join(process.cwd(), 'backend', 'cache', 'analysis-cache.json');
+const ANALYSIS_CACHE_FILE = process.env.ANALYSIS_CACHE_FILE || path.join(DATA_DIR, 'analysis-cache.json');
 const ANALYSIS_CACHE_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.ANALYSIS_CACHE_MAX_ENTRIES) || 200));
 const ANALYSIS_CACHE_TTL_MS = Math.max(60 * 1000, Number(process.env.ANALYSIS_CACHE_TTL_MS) || 2 * 60 * 60 * 1000);
 const SEARCH_PRESETS_ENABLED = process.env.SEARCH_PRESETS_ENABLED !== 'false';
-const SEARCH_PRESETS_FILE = process.env.SEARCH_PRESETS_FILE || path.join(process.cwd(), 'backend', 'cache', 'search-presets.json');
+const SEARCH_PRESETS_FILE = process.env.SEARCH_PRESETS_FILE || path.join(DATA_DIR, 'search-presets.json');
 const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.SEARCH_PRESET_MAX_ENTRIES) || 200));
 const SERVER_STARTED_AT = new Date();
 const upstreamCache = new Map();
@@ -536,6 +540,212 @@ function listTopRouteStats(limit = 10) {
     }));
 }
 
+function getAdminToken(request) {
+  const apiKeyHeader = String(request.headers['x-api-key'] || '').trim();
+  if (apiKeyHeader) {
+    return apiKeyHeader;
+  }
+
+  const authorization = String(request.headers.authorization || '').trim();
+  if (/^Bearer\s+/i.test(authorization)) {
+    return authorization.replace(/^Bearer\s+/i, '').trim();
+  }
+
+  return '';
+}
+
+function requireAdmin(request) {
+  if (!ADMIN_API_KEY) {
+    const error = new Error('Admin endpoints are disabled because ADMIN_API_KEY is not configured.');
+    error.statusCode = 503;
+    throw error;
+  }
+
+  if (getAdminToken(request) !== ADMIN_API_KEY) {
+    const error = new Error('Admin API key is required.');
+    error.statusCode = 401;
+    throw error;
+  }
+}
+
+function cloneJsonValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function toBooleanQueryFlag(value, defaultValue = false) {
+  if (value == null) {
+    return defaultValue;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) {
+    return true;
+  }
+  if (['0', 'false', 'no', 'off'].includes(normalized)) {
+    return false;
+  }
+  return defaultValue;
+}
+
+function exportBackendState(options = {}) {
+  cleanupExpiredUpstreamCache();
+  const includeUpstreamCache = options.includeUpstreamCache === true;
+  const upstreamEntries = serializeCacheEntries();
+
+  return {
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    dataDir: DATA_DIR,
+    stores: {
+      upstreamCache: {
+        enabled: PERSISTENT_CACHE_ENABLED,
+        included: includeUpstreamCache,
+        entryCount: upstreamEntries.length,
+        entries: includeUpstreamCache ? upstreamEntries : [],
+      },
+      analysisSnapshots: {
+        enabled: ANALYSIS_SNAPSHOTS_ENABLED,
+        entries: cloneJsonValue(analysisSnapshots),
+      },
+      analysisCache: {
+        enabled: ANALYSIS_CACHE_ENABLED,
+        entries: cloneJsonValue(analysisResultCache),
+      },
+      searchPresets: {
+        enabled: SEARCH_PRESETS_ENABLED,
+        entries: cloneJsonValue(searchPresets),
+      },
+    },
+  };
+}
+
+function replaceUpstreamCacheEntries(entries = []) {
+  upstreamCache.clear();
+  const now = Date.now();
+  const staleCutoff = now - STALE_CACHE_MAX_AGE_MS;
+
+  for (const entry of entries) {
+    const key = String(entry?.key || '').trim();
+    const expiresAt = Number(entry?.expiresAt) || 0;
+    const cachedAt = Number(entry?.cachedAt) || expiresAt || now;
+
+    if (!key || !entry?.value) {
+      continue;
+    }
+
+    if (expiresAt <= now && (!STALE_IF_ERROR_ENABLED || cachedAt < staleCutoff)) {
+      continue;
+    }
+
+    upstreamCache.set(key, {
+      value: entry.value,
+      expiresAt,
+      cachedAt,
+    });
+  }
+
+  pruneCacheIfNeeded();
+  schedulePersistentCacheWrite();
+}
+
+function replaceArrayStore(target, entries, maxEntries) {
+  target.splice(0, target.length, ...entries.slice(0, maxEntries));
+}
+
+function importBackendState(payload = {}, mode = 'replace') {
+  const stores = payload?.stores || {};
+  const mergeMode = mode === 'merge';
+
+  if (stores.upstreamCache?.entries) {
+    const entries = Array.isArray(stores.upstreamCache.entries) ? stores.upstreamCache.entries : [];
+    if (mergeMode) {
+      replaceUpstreamCacheEntries([...serializeCacheEntries(), ...entries]);
+    } else {
+      replaceUpstreamCacheEntries(entries);
+    }
+  }
+
+  if (stores.analysisSnapshots?.entries && ANALYSIS_SNAPSHOTS_ENABLED) {
+    const entries = Array.isArray(stores.analysisSnapshots.entries) ? stores.analysisSnapshots.entries : [];
+    replaceArrayStore(
+      analysisSnapshots,
+      mergeMode ? [...entries, ...analysisSnapshots] : entries,
+      ANALYSIS_SNAPSHOT_MAX_ENTRIES
+    );
+    saveAnalysisSnapshots();
+  }
+
+  if (stores.analysisCache?.entries && ANALYSIS_CACHE_ENABLED) {
+    const entries = Array.isArray(stores.analysisCache.entries) ? stores.analysisCache.entries : [];
+    replaceArrayStore(
+      analysisResultCache,
+      mergeMode ? [...entries, ...analysisResultCache] : entries,
+      ANALYSIS_CACHE_MAX_ENTRIES
+    );
+    saveAnalysisCache();
+  }
+
+  if (stores.searchPresets?.entries && SEARCH_PRESETS_ENABLED) {
+    const entries = Array.isArray(stores.searchPresets.entries) ? stores.searchPresets.entries : [];
+    replaceArrayStore(
+      searchPresets,
+      mergeMode ? [...entries, ...searchPresets] : entries,
+      SEARCH_PRESET_MAX_ENTRIES
+    );
+    saveSearchPresets();
+  }
+
+  return {
+    ok: true,
+    mode: mergeMode ? 'merge' : 'replace',
+    importedAt: new Date().toISOString(),
+    counts: {
+      upstreamCache: upstreamCache.size,
+      analysisSnapshots: analysisSnapshots.length,
+      analysisCache: analysisResultCache.length,
+      searchPresets: searchPresets.length,
+    },
+  };
+}
+
+function clearBackendState(options = {}) {
+  const clearUpstreamCache = options.upstreamCache !== false;
+  const clearAnalysisSnapshots = options.analysisSnapshots !== false;
+  const clearAnalysisCache = options.analysisCache !== false;
+  const clearSearchPresets = options.searchPresets !== false;
+
+  if (clearUpstreamCache) {
+    upstreamCache.clear();
+    schedulePersistentCacheWrite();
+  }
+
+  if (clearAnalysisSnapshots) {
+    analysisSnapshots.splice(0, analysisSnapshots.length);
+    saveAnalysisSnapshots();
+  }
+
+  if (clearAnalysisCache) {
+    analysisResultCache.splice(0, analysisResultCache.length);
+    saveAnalysisCache();
+  }
+
+  if (clearSearchPresets) {
+    searchPresets.splice(0, searchPresets.length);
+    saveSearchPresets();
+  }
+
+  return {
+    ok: true,
+    clearedAt: new Date().toISOString(),
+    cleared: {
+      upstreamCache: clearUpstreamCache,
+      analysisSnapshots: clearAnalysisSnapshots,
+      analysisCache: clearAnalysisCache,
+      searchPresets: clearSearchPresets,
+    },
+  };
+}
+
 function getClientAddress(request) {
   const forwarded = String(request.headers['x-forwarded-for'] || '').split(',')[0].trim();
 
@@ -580,14 +790,14 @@ function enforceRateLimit(request, pathname) {
   return Math.max(1, Math.ceil((existing.resetAt - now) / 1000));
 }
 
-function readJsonBody(request) {
+function readJsonBody(request, maxBytes = MAX_REQUEST_BODY_BYTES) {
   return new Promise((resolve, reject) => {
     let body = '';
 
     request.on('data', (chunk) => {
       body += chunk;
 
-      if (body.length > 1024 * 32) {
+      if (body.length > maxBytes) {
         reject(new Error('Request body too large.'));
         request.destroy();
       }
@@ -880,10 +1090,6 @@ function buildTrendSummary(monthly) {
     },
     summary,
   };
-}
-
-function cloneJsonValue(value) {
-  return JSON.parse(JSON.stringify(value));
 }
 
 function buildAreaAnalysisCacheKey(area = {}) {
@@ -2546,6 +2752,12 @@ const server = http.createServer(async (request, response) => {
       cors: {
         allowOrigin: CORS_ALLOW_ORIGIN,
       },
+      storage: {
+        dataDir: DATA_DIR,
+      },
+      admin: {
+        enabled: Boolean(ADMIN_API_KEY),
+      },
       rateLimit: {
         enabled: RATE_LIMIT_ENABLED,
         windowMs: RATE_LIMIT_WINDOW_MS,
@@ -2595,6 +2807,62 @@ const server = http.createServer(async (request, response) => {
         writes: searchPresetWrites,
       },
     });
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/admin/state-export') {
+    try {
+      requireAdmin(request);
+      sendJson(
+        request,
+        response,
+        200,
+        exportBackendState({
+          includeUpstreamCache: toBooleanQueryFlag(url.searchParams.get('includeUpstreamCache'), false),
+        })
+      );
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/admin/state-import') {
+    try {
+      requireAdmin(request);
+      const body = await readJsonBody(request, ADMIN_MAX_REQUEST_BODY_BYTES);
+      const mode = String(body.mode || 'replace').trim().toLowerCase();
+
+      if (!['replace', 'merge'].includes(mode)) {
+        const error = new Error('Import mode must be replace or merge.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      sendJson(request, response, 200, importBackendState(body, mode));
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/admin/state-clear') {
+    try {
+      requireAdmin(request);
+      const body = await readJsonBody(request);
+      sendJson(request, response, 200, clearBackendState(body));
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
     return;
   }
 

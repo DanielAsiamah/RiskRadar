@@ -75,6 +75,26 @@ This repo now includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/
 
 Use [.env.example](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/.env.example) as the starting point for production configuration.
 
+### Backend state portability
+
+The backend now supports protected state export/import/clear operations when `ADMIN_API_KEY` is set. This makes it much easier to:
+
+- migrate cache and saved backend state between hosts
+- clear only the stores you want after bad or stale data
+- inspect what is currently persisted without logging into the machine
+
+Example export:
+
+```powershell
+curl -H "x-api-key: YOUR_ADMIN_KEY" http://127.0.0.1:3001/api/admin/state-export
+```
+
+Full export including upstream cache only when needed:
+
+```powershell
+curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-export?includeUpstreamCache=true"
+```
+
 ## How the app connects
 
 - The Expo front end auto-detects the local dev host and talks to the backend on port `3001`
@@ -207,6 +227,9 @@ Use [.env.example](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/.en
     { "id": "<presetId>", "mode": "feed" }
     ```
 - `GET /api/location-suggestions?lat=51.4062&lng=0.0186`
+- `GET /api/admin/state-export`
+- `POST /api/admin/state-import`
+- `POST /api/admin/state-clear`
 - `GET /health`
 
 ## Deployment notes
@@ -231,6 +254,7 @@ The backend is designed to be hosted separately from the Expo app and currently:
 - persists reusable saved search presets for postcode, point, or area targets
 - allows saved presets to be executed directly through the backend
 - exposes request, route, cache, retry, and rate-limit metrics through `/health`
+- supports protected state export, import, and targeted clearing for safer production operations
 
 For backend env vars and cache settings, see [backend/DEPLOYMENT.md](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/backend/DEPLOYMENT.md).
 
