@@ -10,6 +10,9 @@ export interface CrimeData {
   }[];
   capExplanation?: string;
   riskSignals?: string[];
+  contextCrimeCount?: number;
+  postcodeRadiusMeters?: number;
+  contextRadiusMeters?: number;
   scoreFactors?: {
     label: string;
     impact: 'up' | 'down' | 'neutral';

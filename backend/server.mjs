@@ -2,6 +2,12 @@ import http from 'node:http';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
+const DEFAULT_TIMEOUT_MS = Number(process.env.UPSTREAM_TIMEOUT_MS || 15000);
+const CACHE_TTL_MS = Number(process.env.CACHE_TTL_MS || 15 * 60 * 1000);
+const GEOCODE_CACHE_TTL_MS = Number(process.env.GEOCODE_CACHE_TTL_MS || 24 * 60 * 60 * 1000);
+const CRIME_CACHE_TTL_MS = Number(process.env.CRIME_CACHE_TTL_MS || 6 * 60 * 60 * 1000);
+const CACHE_MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES || 500);
+const upstreamCache = new Map();
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -25,6 +31,54 @@ function distanceInMeters(lat1, lon1, lat2, lon2) {
     Math.sin(dLon / 2) * Math.sin(dLon / 2);
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   return earthRadius * c;
+}
+
+function getCacheTtlMs(url) {
+  if (url.includes('data.police.uk')) {
+    return CRIME_CACHE_TTL_MS;
+  }
+
+  if (url.includes('postcodes.io') || url.includes('nominatim.openstreetmap.org')) {
+    return GEOCODE_CACHE_TTL_MS;
+  }
+
+  return CACHE_TTL_MS;
+}
+
+function pruneCacheIfNeeded() {
+  if (upstreamCache.size <= CACHE_MAX_ENTRIES) {
+    return;
+  }
+
+  const entries = [...upstreamCache.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+  const overflow = upstreamCache.size - CACHE_MAX_ENTRIES;
+
+  for (let index = 0; index < overflow; index += 1) {
+    upstreamCache.delete(entries[index][0]);
+  }
+}
+
+function getCachedResponse(cacheKey) {
+  const entry = upstreamCache.get(cacheKey);
+
+  if (!entry) {
+    return null;
+  }
+
+  if (entry.expiresAt <= Date.now()) {
+    upstreamCache.delete(cacheKey);
+    return null;
+  }
+
+  return entry.value;
+}
+
+function setCachedResponse(cacheKey, value, ttlMs) {
+  upstreamCache.set(cacheKey, {
+    value,
+    expiresAt: Date.now() + ttlMs,
+  });
+  pruneCacheIfNeeded();
 }
 
 function sendJson(response, statusCode, payload) {
@@ -67,7 +121,16 @@ function readJsonBody(request) {
   });
 }
 
-async function fetchJson(url, options = {}, timeoutMs = 15000) {
+async function fetchJson(url, options = {}, timeoutMs = DEFAULT_TIMEOUT_MS) {
+  const method = options.method || 'GET';
+  const cacheKey = `${method}:${url}`;
+  const ttlMs = getCacheTtlMs(url);
+  const cached = getCachedResponse(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -98,6 +161,10 @@ async function fetchJson(url, options = {}, timeoutMs = 15000) {
       const error = new Error(`Upstream request failed: ${upstreamMessage}`);
       error.statusCode = response.status >= 500 ? 502 : response.status;
       throw error;
+    }
+
+    if (method === 'GET' && response.ok) {
+      setCachedResponse(cacheKey, parsed, ttlMs);
     }
 
     return parsed;
@@ -377,58 +444,70 @@ function scoreCrime(categories, totalCrimes) {
     getCategoryCount(categories, 'shoplifting') +
     getCategoryCount(categories, 'bicycle-theft');
   const topCategoryShare = (categories[0]?.count || 0) / totalCrimes;
+  const violentShare = violentCount / totalCrimes;
+  const robberyAndWeaponsCount = robberyCount + weaponsCount;
 
-  // Threshold scoring keeps high scores rare and rewards specific high-harm patterns
-  // rather than letting dense city centres climb mainly because they are busy.
+  // Threshold scoring keeps high scores rare, but still leaves room for meaningful
+  // separation between postcodes once crimes are filtered to a tight local radius.
   const robberyPoints = thresholdPoints(robberyCount, [
-    [5, 1],
-    [15, 2],
-    [30, 3],
-    [50, 5],
-  ]);
-  const weaponsPoints = thresholdPoints(weaponsCount, [
     [2, 1],
     [5, 2],
-    [10, 3],
+    [10, 4],
+    [20, 6],
+  ]);
+  const weaponsPoints = thresholdPoints(weaponsCount, [
+    [1, 1],
+    [3, 2],
+    [6, 4],
   ]);
   const violentPoints = thresholdPoints(violentCount, [
-    [40, 1],
-    [90, 2],
-    [160, 3],
-    [260, 4],
+    [10, 1],
+    [20, 2],
+    [35, 3],
+    [60, 4],
+    [100, 5],
   ]);
   const burglaryPoints = thresholdPoints(burglaryCount, [
-    [15, 1],
-    [35, 2],
-    [70, 3],
+    [3, 1],
+    [8, 2],
+    [15, 3],
   ]);
   const antiSocialPoints = thresholdPoints(antiSocialCount, [
-    [90, 1],
-    [180, 2],
-    [320, 3],
+    [5, 1],
+    [15, 2],
+    [35, 3],
+    [70, 4],
   ]);
   const vehiclePoints = thresholdPoints(vehicleCrimeCount, [
-    [25, 1],
-    [60, 2],
-    [110, 3],
+    [5, 1],
+    [12, 2],
+    [25, 3],
   ]);
   const drugsPoints = thresholdPoints(drugsCount, [
+    [3, 1],
+    [8, 2],
+    [15, 3],
+  ]);
+  const theftPoints = thresholdPoints(theftCount, [
     [10, 1],
     [25, 2],
     [50, 3],
-  ]);
-  const theftPoints = thresholdPoints(theftCount, [
-    [150, 1],
-    [350, 2],
-    [650, 3],
+    [90, 4],
   ]);
   const totalVolumePoints = thresholdPoints(totalCrimes, [
-    [300, 1],
-    [700, 2],
-    [1400, 3],
-    [2600, 4],
+    [25, 1],
+    [50, 2],
+    [100, 3],
+    [180, 4],
+    [300, 5],
   ]);
-  const concentrationPoints = topCategoryShare >= 0.4 ? 2 : topCategoryShare >= 0.3 ? 1 : 0;
+  const concentrationPoints = topCategoryShare >= 0.45 ? 2 : topCategoryShare >= 0.32 ? 1 : 0;
+  const violentSharePoints = violentShare >= 0.4 ? 2 : violentShare >= 0.25 ? 1 : 0;
+  const harmClusterPoints = thresholdPoints(robberyAndWeaponsCount, [
+    [2, 1],
+    [6, 2],
+    [12, 3],
+  ]);
 
   const score =
     4 +
@@ -441,17 +520,19 @@ function scoreCrime(categories, totalCrimes) {
     drugsPoints +
     theftPoints +
     totalVolumePoints +
-    concentrationPoints;
+    concentrationPoints +
+    violentSharePoints +
+    harmClusterPoints;
 
-  return clamp(score, 1, 60);
+  return clamp(score, 1, 70);
 }
 
 function getSafetyLevel(score) {
-  if (score >= 55) return 'SEVERE';
-  if (score >= 45) return 'HIGH';
-  if (score >= 30) return 'ELEVATED';
-  if (score >= 18) return 'MODERATE';
-  if (score >= 8) return 'NORMAL URBAN CAUTION';
+  if (score >= 58) return 'SEVERE';
+  if (score >= 42) return 'HIGH';
+  if (score >= 28) return 'ELEVATED';
+  if (score >= 15) return 'MODERATE';
+  if (score >= 7) return 'NORMAL URBAN CAUTION';
   return 'LOW RISK';
 }
 
@@ -629,6 +710,22 @@ function buildAiAnalysis({ district, safetyLevel, totalCrimes, topCategories, sc
   };
 }
 
+function buildComparisonSummary(results) {
+  if (!results.length) {
+    return 'No postcode comparisons were generated.';
+  }
+
+  const sorted = [...results].sort((a, b) => b.crimeData.crimeScore - a.crimeData.crimeScore);
+  const highest = sorted[0];
+  const lowest = sorted[sorted.length - 1];
+
+  if (sorted.length === 1) {
+    return `${highest.postcodeData.postcode} currently scores ${highest.crimeData.crimeScore}/100 in the latest postcode-level comparison.`;
+  }
+
+  return `${highest.postcodeData.postcode} is highest at ${highest.crimeData.crimeScore}/100, while ${lowest.postcodeData.postcode} is lowest at ${lowest.crimeData.crimeScore}/100 in this postcode-level comparison.`;
+}
+
 async function fetchCrimeData(latitude, longitude) {
   const crimesUrl = `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}`;
   const crimes = await fetchJson(crimesUrl, {}, 18000).catch((error) => {
@@ -638,9 +735,10 @@ async function fetchCrimeData(latitude, longitude) {
     throw error;
   });
 
-  const searchRadiusMeters = 400;
+  const postcodeRadiusMeters = 400;
+  const contextRadiusMeters = 900;
   const safeCrimes = Array.isArray(crimes) ? crimes : [];
-  const filteredCrimes = safeCrimes.filter((crime) => {
+  const postcodeCrimes = safeCrimes.filter((crime) => {
     const incidentLat = Number(crime?.location?.latitude);
     const incidentLon = Number(crime?.location?.longitude);
 
@@ -648,23 +746,40 @@ async function fetchCrimeData(latitude, longitude) {
       return false;
     }
 
-    return distanceInMeters(latitude, longitude, incidentLat, incidentLon) <= searchRadiusMeters;
+    return distanceInMeters(latitude, longitude, incidentLat, incidentLon) <= postcodeRadiusMeters;
   });
 
-  const categories = summarizeCrimeCategories(filteredCrimes);
-  const totalCrimes = filteredCrimes.length;
-  const month = filteredCrimes?.[0]?.month || safeCrimes?.[0]?.month || null;
-  const crimeScore = scoreCrime(categories, totalCrimes);
+  const contextCrimes = safeCrimes.filter((crime) => {
+    const incidentLat = Number(crime?.location?.latitude);
+    const incidentLon = Number(crime?.location?.longitude);
+
+    if (!Number.isFinite(incidentLat) || !Number.isFinite(incidentLon)) {
+      return false;
+    }
+
+    return distanceInMeters(latitude, longitude, incidentLat, incidentLon) <= contextRadiusMeters;
+  });
+
+  const postcodeCategories = summarizeCrimeCategories(postcodeCrimes);
+  const contextCategories = summarizeCrimeCategories(contextCrimes);
+  const postcodeCrimeScore = scoreCrime(postcodeCategories, postcodeCrimes.length);
+  const contextCrimeScore = scoreCrime(contextCategories, contextCrimes.length);
+  const blendedCrimeScore = Math.round(postcodeCrimeScore * 0.65 + contextCrimeScore * 0.35);
+  const totalCrimes = postcodeCrimes.length;
+  const month = postcodeCrimes?.[0]?.month || contextCrimes?.[0]?.month || safeCrimes?.[0]?.month || null;
 
   return {
     totalCrimes,
-    crimeScore,
-    safetyLevel: getSafetyLevel(crimeScore),
+    crimeScore: blendedCrimeScore,
+    safetyLevel: getSafetyLevel(blendedCrimeScore),
     month: month || '',
     monthDisplay: formatMonthDisplay(month),
-    categories,
+    categories: postcodeCategories,
+    contextCrimeCount: contextCrimes.length,
+    postcodeRadiusMeters,
+    contextRadiusMeters,
     capExplanation:
-      `Live score is now filtered to incidents within roughly ${searchRadiusMeters} metres of the postcode point, then scored with hard category thresholds so the result reflects the postcode area rather than a whole city.`,
+      `Live score blends incidents within roughly ${postcodeRadiusMeters} metres of the postcode point with a wider ${contextRadiusMeters} metre context view, so the result stays postcode-led without becoming too brittle around one exact point.`,
   };
 }
 
@@ -803,6 +918,36 @@ async function analyzeLocation(query) {
   };
 }
 
+async function compareLocations(queries) {
+  const normalizedQueries = [...new Set(
+    queries
+      .map((query) => normalizeQuery(query))
+      .filter(Boolean)
+  )].slice(0, 5);
+
+  if (!normalizedQueries.length) {
+    const error = new Error('At least one postcode or place is required for comparison.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const results = [];
+
+  // Keep comparison fetches sequential to avoid spiking public API rate limits.
+  for (const query of normalizedQueries) {
+    // eslint-disable-next-line no-await-in-loop
+    results.push(await analyzeLocation(query));
+  }
+
+  const sorted = [...results].sort((a, b) => b.crimeData.crimeScore - a.crimeData.crimeScore);
+
+  return {
+    comparedAt: new Date().toISOString(),
+    summary: buildComparisonSummary(sorted),
+    results: sorted,
+  };
+}
+
 const server = http.createServer(async (request, response) => {
   if (!request.url) {
     sendJson(response, 404, { error: 'Not found.' });
@@ -826,6 +971,10 @@ const server = http.createServer(async (request, response) => {
       ok: true,
       service: 'riskradar-api',
       timestamp: new Date().toISOString(),
+      cache: {
+        entries: upstreamCache.size,
+        maxEntries: CACHE_MAX_ENTRIES,
+      },
     });
     return;
   }
@@ -835,6 +984,21 @@ const server = http.createServer(async (request, response) => {
       const body = await readJsonBody(request);
       const query = body.postcode ?? body.query ?? '';
       const result = await analyzeLocation(query);
+      sendJson(response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/compare-postcodes') {
+    try {
+      const body = await readJsonBody(request);
+      const queries = Array.isArray(body.postcodes) ? body.postcodes : [];
+      const result = await compareLocations(queries);
       sendJson(response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
