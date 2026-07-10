@@ -225,6 +225,23 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
       "categories": ["robbery", "violent-crime"]
     }
     ```
+- `POST /api/area-intelligence`
+  - Body:
+    ```json
+    {
+      "label": "Town centre patch",
+      "points": [
+        { "lat": 51.5007, "lng": -0.1246 },
+        { "lat": 51.5035, "lng": -0.1246 },
+        { "lat": 51.5035, "lng": -0.118 },
+        { "lat": 51.5007, "lng": -0.118 }
+      ],
+      "monthCount": 6,
+      "minimumClusterSize": 2,
+      "maxClusters": 4
+    }
+    ```
+  - Returns a bundled area-map payload with polygon analysis, filtered area crimes, hotspot clusters, center point, and nearby postcode suggestions.
 - `POST /api/map-hotspots`
   - Body:
     ```json

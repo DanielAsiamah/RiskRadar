@@ -2865,6 +2865,53 @@ async function fetchAreaCrimeFeed(points, options = {}) {
   };
 }
 
+async function fetchAreaIntelligence(payload = {}) {
+  const label = String(payload.label || '').trim() || 'Selected area';
+  const polygonPoints = normalizePolygonPoints(payload.points);
+
+  if (polygonPoints.length < 3) {
+    const error = new Error(`Area "${label}" must include at least three valid polygon points.`);
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const areaCenter = averageCoordinates(polygonPoints);
+  const [analysis, areaFeed, hotspotMap, nearbyPostcodes] = await Promise.all([
+    analyzeArea({
+      label,
+      points: polygonPoints,
+      month: payload.month,
+      categories: payload.categories,
+      monthCount: payload.monthCount,
+      minimumClusterSize: payload.minimumClusterSize,
+      maxClusters: payload.maxClusters,
+    }),
+    fetchAreaCrimeFeed(polygonPoints, {
+      month: payload.month,
+      categories: payload.categories,
+    }),
+    fetchHotspotMap({
+      points: polygonPoints,
+      month: payload.month,
+      categories: payload.categories,
+      minimumClusterSize: payload.minimumClusterSize,
+      maxClusters: payload.maxClusters,
+    }),
+    fetchNearbyPostcodes(areaCenter.latitude, areaCenter.longitude).catch(() => []),
+  ]);
+
+  return {
+    fetchedAt: new Date().toISOString(),
+    label,
+    polygon: polygonPoints,
+    center: areaCenter,
+    analysis,
+    areaFeed,
+    hotspotMap,
+    nearby: nearbyPostcodes,
+  };
+}
+
 async function computeAreaAnalysis(area = {}) {
   const label = String(area.label || '').trim() || 'Selected area';
   const polygonPoints = normalizePolygonPoints(area.points);
@@ -4018,6 +4065,20 @@ const server = http.createServer(async (request, response) => {
         month: body.month,
         categories: body.categories,
       });
+      sendJson(request, response, 200, result);
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/area-intelligence') {
+    try {
+      const body = await readJsonBody(request);
+      const result = await fetchAreaIntelligence(body);
       sendJson(request, response, 200, result);
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;

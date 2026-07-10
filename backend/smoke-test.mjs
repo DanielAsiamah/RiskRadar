@@ -178,6 +178,32 @@ async function main() {
     score: areaAnalysis.json.crimeData.crimeScore,
   });
 
+  const areaIntelligence = await requestJson('/api/area-intelligence', {
+    method: 'POST',
+    body: JSON.stringify({
+      label: 'Smoke Patch',
+      points: [
+        { lat: analysis.json.postcodeData.latitude - 0.002, lng: analysis.json.postcodeData.longitude - 0.002 },
+        { lat: analysis.json.postcodeData.latitude + 0.002, lng: analysis.json.postcodeData.longitude - 0.002 },
+        { lat: analysis.json.postcodeData.latitude + 0.002, lng: analysis.json.postcodeData.longitude + 0.002 },
+        { lat: analysis.json.postcodeData.latitude - 0.002, lng: analysis.json.postcodeData.longitude + 0.002 }
+      ],
+      monthCount: 6,
+      minimumClusterSize: 2,
+      maxClusters: 4,
+    }),
+  });
+  assert(areaIntelligence.response.ok, `/api/area-intelligence failed with ${areaIntelligence.response.status}`);
+  assert(Number.isFinite(areaIntelligence.json?.analysis?.crimeData?.crimeScore), 'Area intelligence missing analysis payload');
+  assert(Array.isArray(areaIntelligence.json?.nearby), 'Area intelligence missing nearby suggestions');
+  assert(Array.isArray(areaIntelligence.json?.hotspotMap?.clusters), 'Area intelligence missing hotspot clusters');
+  results.push({
+    step: 'area-intelligence',
+    ok: true,
+    nearby: areaIntelligence.json.nearby.length,
+    hotspotClusters: areaIntelligence.json?.hotspotMap?.clusterCount ?? 0,
+  });
+
   const presetLabel = `Smoke ${Date.now()}`;
   const preset = await requestJson('/api/search-presets', {
     method: 'POST',
