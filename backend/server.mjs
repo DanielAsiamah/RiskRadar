@@ -32,9 +32,11 @@ const ANALYSIS_CACHE_TTL_MS = Math.max(60 * 1000, Number(process.env.ANALYSIS_CA
 const SEARCH_PRESETS_ENABLED = process.env.SEARCH_PRESETS_ENABLED !== 'false';
 const SEARCH_PRESETS_FILE = process.env.SEARCH_PRESETS_FILE || path.join(process.cwd(), 'backend', 'cache', 'search-presets.json');
 const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.SEARCH_PRESET_MAX_ENTRIES) || 200));
+const SERVER_STARTED_AT = new Date();
 const upstreamCache = new Map();
 const inflightFetches = new Map();
 const rateLimitBuckets = new Map();
+const routeStats = new Map();
 const analysisSnapshots = [];
 const analysisResultCache = [];
 const searchPresets = [];
@@ -47,6 +49,12 @@ let analysisCacheWrites = 0;
 let analysisCacheLoaded = false;
 let searchPresetWrites = 0;
 let searchPresetsLoaded = false;
+const requestStats = {
+  total: 0,
+  errors: 0,
+  rateLimited: 0,
+  notFound: 0,
+};
 const allowedCorsOrigins = CORS_ALLOW_ORIGIN
   .split(',')
   .map((origin) => origin.trim())
@@ -472,12 +480,60 @@ function buildCorsHeaders(request) {
 }
 
 function sendJson(request, response, statusCode, payload, extraHeaders = {}) {
+  recordResponseMetrics(request, statusCode);
   response.writeHead(statusCode, {
     'Content-Type': 'application/json; charset=utf-8',
     ...buildCorsHeaders(request),
     ...extraHeaders,
   });
   response.end(JSON.stringify(payload));
+}
+
+function recordResponseMetrics(request, statusCode) {
+  if (request.__metricsRecorded) {
+    return;
+  }
+
+  request.__metricsRecorded = true;
+  requestStats.total += 1;
+
+  if (statusCode >= 400) {
+    requestStats.errors += 1;
+  }
+
+  if (statusCode === 404) {
+    requestStats.notFound += 1;
+  }
+
+  if (statusCode === 429) {
+    requestStats.rateLimited += 1;
+  }
+
+  const routeKey = String(request.routeTag || request.url || 'unknown');
+  const existing = routeStats.get(routeKey) || {
+    hits: 0,
+    errors: 0,
+    lastStatusCode: 0,
+    lastRequestAt: '',
+  };
+
+  existing.hits += 1;
+  if (statusCode >= 400) {
+    existing.errors += 1;
+  }
+  existing.lastStatusCode = statusCode;
+  existing.lastRequestAt = new Date().toISOString();
+  routeStats.set(routeKey, existing);
+}
+
+function listTopRouteStats(limit = 10) {
+  return [...routeStats.entries()]
+    .sort((a, b) => b[1].hits - a[1].hits)
+    .slice(0, limit)
+    .map(([route, stats]) => ({
+      route,
+      ...stats,
+    }));
 }
 
 function getClientAddress(request) {
@@ -2447,11 +2503,13 @@ async function compareAreas(areas) {
 
 const server = http.createServer(async (request, response) => {
   if (!request.url) {
+    request.routeTag = 'unmatched';
     sendJson(request, response, 404, { error: 'Not found.' });
     return;
   }
 
   const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
+  request.routeTag = `${request.method || 'GET'} ${url.pathname}`;
 
   if (request.method === 'OPTIONS') {
     response.writeHead(204, {
@@ -2463,6 +2521,7 @@ const server = http.createServer(async (request, response) => {
 
   const retryAfterSeconds = enforceRateLimit(request, url.pathname);
   if (retryAfterSeconds) {
+    request.routeTag = `RATE_LIMIT ${url.pathname}`;
     sendJson(
       request,
       response,
@@ -2482,6 +2541,8 @@ const server = http.createServer(async (request, response) => {
       ok: true,
       service: 'riskradar-api',
       timestamp: new Date().toISOString(),
+      startedAt: SERVER_STARTED_AT.toISOString(),
+      uptimeSeconds: Math.floor((Date.now() - SERVER_STARTED_AT.getTime()) / 1000),
       cors: {
         allowOrigin: CORS_ALLOW_ORIGIN,
       },
@@ -2490,6 +2551,10 @@ const server = http.createServer(async (request, response) => {
         windowMs: RATE_LIMIT_WINDOW_MS,
         maxRequests: RATE_LIMIT_MAX_REQUESTS,
         trackedClients: rateLimitBuckets.size,
+      },
+      requests: {
+        ...requestStats,
+        topRoutes: listTopRouteStats(10),
       },
       cache: {
         entries: upstreamCache.size,
@@ -2913,6 +2978,7 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  request.routeTag = `UNMATCHED ${request.method || 'GET'} ${url.pathname}`;
   sendJson(request, response, 404, { error: 'Not found.' });
 });
 

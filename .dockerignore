@@ -1,0 +1,10 @@
+.git
+.expo
+node_modules
+npm-debug.log
+backend/cache/*.json
+backend/cache/*.log
+coverage
+dist
+android
+ios

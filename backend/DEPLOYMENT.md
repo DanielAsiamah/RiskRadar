@@ -8,6 +8,17 @@ This backend is a lightweight Node HTTP server that proxies public UK crime and 
 npm run api
 ```
 
+### Run in Docker
+
+```powershell
+docker build -t riskradar-api .
+docker run --rm -p 3001:3001 --env-file .env.example riskradar-api
+```
+
+### Render blueprint
+
+The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/render.yaml) so the backend can be deployed as a Render Blueprint web service with `/health` as the health check path.
+
 ### Environment variables
 
 - `PORT`
@@ -87,3 +98,5 @@ Caching helps:
 ### Production note
 
 The backend now supports simple disk-backed upstream caching, stale-cache fallback, upstream request deduping, basic rate limiting, saved analysis snapshots, and saved search presets for one-instance deployments. For broader public deployment, this should eventually move from local disk and in-memory limits to a shared cache or database-backed layer so multiple server instances can reuse upstream results, protect rate limits, and share saved reports and saved targets safely.
+
+The `/health` endpoint now also exposes uptime, request totals, route hit summaries, retry settings, and active rate-limit tracking so production issues can be diagnosed quickly after deployment.

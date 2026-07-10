@@ -39,6 +39,42 @@ Optional:
 npm run android
 ```
 
+## Backend public deploy
+
+### Option 1: Docker
+
+Build the backend image from the repo root:
+
+```powershell
+cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
+docker build -t riskradar-api .
+```
+
+Run it locally or on any VPS/container host:
+
+```powershell
+docker run --rm -p 3001:3001 --env-file .env.example riskradar-api
+```
+
+Health check:
+
+```powershell
+curl http://127.0.0.1:3001/health
+```
+
+### Option 2: Render
+
+This repo now includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/render.yaml) for the backend service.
+
+1. Create a new Render Blueprint from this repository.
+2. Set `CORS_ALLOW_ORIGIN` to your real frontend origin or app web host.
+3. Deploy the `riskradar-api` service.
+4. Copy the live backend URL into `EXPO_PUBLIC_API_BASE_URL` for your Expo environment.
+
+### Environment template
+
+Use [.env.example](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/.env.example) as the starting point for production configuration.
+
 ## How the app connects
 
 - The Expo front end auto-detects the local dev host and talks to the backend on port `3001`
@@ -194,6 +230,7 @@ The backend is designed to be hosted separately from the Expo app and currently:
 - lets saved analysis snapshots be removed cleanly through the backend API
 - persists reusable saved search presets for postcode, point, or area targets
 - allows saved presets to be executed directly through the backend
+- exposes request, route, cache, retry, and rate-limit metrics through `/health`
 
 For backend env vars and cache settings, see [backend/DEPLOYMENT.md](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/backend/DEPLOYMENT.md).
 
