@@ -36,6 +36,9 @@ async function main() {
   assert(metadata.response.ok, `Failed to prewarm /api/filter-metadata: ${metadata.response.status}`);
   warmed.push({ step: 'filter-metadata', ok: true });
 
+  const healthBefore = await requestJson('/health');
+  assert(healthBefore.response.ok, `Failed to read /health before prewarm: ${healthBefore.response.status}`);
+
   for (const postcode of PREWARM_POSTCODES) {
     const analysis = await requestJson('/api/analyze-postcode', {
       method: 'POST',
@@ -55,6 +58,37 @@ async function main() {
     });
     assert(hotspots.response.ok, `Failed to prewarm map-hotspots for ${postcode}: ${hotspots.response.status}`);
 
+    const intelligence = await requestJson('/api/map-intelligence', {
+      method: 'POST',
+      body: JSON.stringify({
+        mode: 'postcode',
+        postcode,
+        radiusMeters: 900,
+        minimumClusterSize: 2,
+        maxClusters: 4,
+      }),
+    });
+    assert(intelligence.response.ok, `Failed to prewarm map-intelligence for ${postcode}: ${intelligence.response.status}`);
+
+    const feed = await requestJson('/api/map-feed', {
+      method: 'POST',
+      body: JSON.stringify({
+        mode: 'postcode',
+        postcode,
+        radiusMeters: 900,
+      }),
+    });
+    assert(feed.response.ok, `Failed to prewarm map-feed for ${postcode}: ${feed.response.status}`);
+
+    const compare = await requestJson('/api/map-compare', {
+      method: 'POST',
+      body: JSON.stringify({
+        mode: 'postcode',
+        postcodes: [postcode, PREWARM_POSTCODES[0]],
+      }),
+    });
+    assert(compare.response.ok, `Failed to prewarm map-compare for ${postcode}: ${compare.response.status}`);
+
     warmed.push({
       step: 'postcode',
       ok: true,
@@ -62,8 +96,14 @@ async function main() {
       score: analysis.json?.crimeData?.crimeScore ?? null,
       trendMonths: Array.isArray(monthly.json?.monthly) ? monthly.json.monthly.length : 0,
       hotspotClusters: Array.isArray(hotspots.json?.clusters) ? hotspots.json.clusters.length : 0,
+      unifiedHotspotClusters: intelligence.json?.result?.hotspotMap?.clusterCount ?? null,
+      feedCrimes: Array.isArray(feed.json?.result?.crimes) ? feed.json.result.crimes.length : 0,
+      compareResults: Array.isArray(compare.json?.result?.results) ? compare.json.result.results.length : 0,
     });
   }
+
+  const healthAfter = await requestJson('/health');
+  assert(healthAfter.response.ok, `Failed to read /health after prewarm: ${healthAfter.response.status}`);
 
   console.log(
     JSON.stringify(
@@ -71,6 +111,8 @@ async function main() {
         ok: true,
         baseUrl: BASE_URL,
         postcodes: PREWARM_POSTCODES,
+        cacheBefore: healthBefore.json?.analysisCache || null,
+        cacheAfter: healthAfter.json?.analysisCache || null,
         warmed,
       },
       null,

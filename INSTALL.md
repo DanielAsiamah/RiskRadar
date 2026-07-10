@@ -92,6 +92,7 @@ This repo now includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/
 4. Copy the live backend URL into `EXPO_PUBLIC_API_BASE_URL` for your Expo environment.
 5. Set `RISKRADAR_SMOKE_BASE_URL` to that backend URL and run `npm run api:smoke` as a release sanity check.
 6. Optionally set `RISKRADAR_PREWARM_BASE_URL` and run `npm run api:prewarm` to warm common backend responses immediately after deploy.
+7. Check `/health` after prewarm to confirm `analysisCache.stats` and scoped unified endpoint cache activity are moving as expected.
 
 ### Environment template
 
@@ -217,6 +218,7 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
     ```
   - Use `"mode": "point"` with a `points` array, or `"mode": "area"` with an `areas` array, to access the same comparison contract for all three explorer modes from one endpoint.
 - Unified explorer endpoints are cached through the persistent analysis cache when `ANALYSIS_CACHE_ENABLED` is enabled, which helps repeated public map requests return faster.
+- `/health` now exposes `analysisCache.stats` so you can see hit/miss activity for `analysis`, `map-feed`, `map-intelligence`, and `map-compare`.
 - `POST /api/compare-points`
   - Body:
     ```json

@@ -80,6 +80,16 @@ const requestStats = {
   rateLimited: 0,
   notFound: 0,
 };
+const analysisCacheStats = {
+  hits: 0,
+  misses: 0,
+  scopes: {
+    analysis: { hits: 0, misses: 0 },
+    'map-feed': { hits: 0, misses: 0 },
+    'map-intelligence': { hits: 0, misses: 0 },
+    'map-compare': { hits: 0, misses: 0 },
+  },
+};
 const allowedCorsOrigins = CORS_ALLOW_ORIGIN
   .split(',')
   .map((origin) => origin.trim())
@@ -1754,10 +1764,23 @@ function setCachedAnalysisResult(cacheKey, value) {
 }
 
 async function getOrComputeCachedResult(cacheKey, compute) {
+  const scope =
+    typeof cacheKey === 'string' && cacheKey.includes('"type":"map-feed"')
+      ? 'map-feed'
+      : typeof cacheKey === 'string' && cacheKey.includes('"type":"map-intelligence"')
+        ? 'map-intelligence'
+        : typeof cacheKey === 'string' && cacheKey.includes('"type":"map-compare"')
+          ? 'map-compare'
+          : 'analysis';
   const cached = ANALYSIS_CACHE_ENABLED ? getCachedAnalysisResult(cacheKey) : null;
   if (cached) {
+    analysisCacheStats.hits += 1;
+    analysisCacheStats.scopes[scope].hits += 1;
     return cached;
   }
+
+  analysisCacheStats.misses += 1;
+  analysisCacheStats.scopes[scope].misses += 1;
 
   const result = await compute();
 
@@ -3925,6 +3948,7 @@ const server = http.createServer(async (request, response) => {
         maxEntries: ANALYSIS_CACHE_MAX_ENTRIES,
         ttlMs: ANALYSIS_CACHE_TTL_MS,
         scopes: ['analysis', 'map-feed', 'map-intelligence', 'map-compare'],
+        stats: cloneJsonValue(analysisCacheStats),
         writes: analysisCacheWrites,
       },
       presets: {
