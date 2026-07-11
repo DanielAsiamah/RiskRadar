@@ -60,6 +60,13 @@ cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
 npm run api:crime-dataset-summary
 ```
 
+Inspect score-calibration bands from imported snapshot data:
+
+```powershell
+cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
+npm run api:crime-score-calibration
+```
+
 Wait for readiness and then run the full smoke check:
 
 ```powershell
@@ -181,6 +188,7 @@ You can also inspect the active provider from:
 
 - `GET /api/crime-source-status`
 - `GET /api/crime-dataset-summary`
+- `GET /api/crime-score-calibration`
 - `GET /health`
   - `storage.crimeSource`
 

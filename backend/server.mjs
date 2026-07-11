@@ -131,6 +131,15 @@ function buildCrimeDatasetSummary(options = {}) {
   };
 }
 
+function buildCrimeScoreCalibrationSummary(options = {}) {
+  return {
+    mode: CRIME_SOURCE_MODE,
+    fallbackToApi: CRIME_SOURCE_FALLBACK_TO_API,
+    dataRoot: CRIME_DATA_ROOT,
+    calibration: crimeFileSource.summarizeCalibration(options),
+  };
+}
+
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
@@ -4179,6 +4188,23 @@ const server = http.createServer(async (request, response) => {
       const month = String(url.searchParams.get('month') || '').trim();
       const monthLimit = clamp(Number(url.searchParams.get('monthLimit')) || TREND_MONTH_COUNT, 1, 24);
       sendJson(request, response, 200, buildCrimeDatasetSummary({
+        month,
+        monthLimit,
+      }));
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/crime-score-calibration') {
+    try {
+      const month = String(url.searchParams.get('month') || '').trim();
+      const monthLimit = clamp(Number(url.searchParams.get('monthLimit')) || TREND_MONTH_COUNT, 1, 24);
+      sendJson(request, response, 200, buildCrimeScoreCalibrationSummary({
         month,
         monthLimit,
       }));

@@ -163,6 +163,27 @@ function pointInPolygon(latitude, longitude, polygon) {
   return inside;
 }
 
+function percentile(sortedValues, quantile) {
+  if (!sortedValues.length) {
+    return 0;
+  }
+
+  if (sortedValues.length === 1) {
+    return sortedValues[0];
+  }
+
+  const index = (sortedValues.length - 1) * quantile;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+
+  if (lower === upper) {
+    return sortedValues[lower];
+  }
+
+  const weight = index - lower;
+  return sortedValues[lower] * (1 - weight) + sortedValues[upper] * weight;
+}
+
 export function createCrimeFileSource(options = {}) {
   const rootDir = path.resolve(String(options.rootDir || path.join(process.cwd(), 'backend', 'data', 'police')));
   const fileCache = new Map();
@@ -353,6 +374,118 @@ export function createCrimeFileSource(options = {}) {
     return summary;
   }
 
+  function summarizeCalibration(options = {}) {
+    const requestedMonth = normalizeMonth(options.month);
+    const monthLimit = Math.max(1, Math.min(24, Number(options.monthLimit) || 6));
+    const selectedMonths = requestedMonth
+      ? [requestedMonth]
+      : listAvailableMonths().slice(0, monthLimit);
+    const cacheKey = JSON.stringify({
+      type: 'calibration',
+      month: requestedMonth || '',
+      monthLimit,
+      selectedMonths,
+    });
+
+    if (summaryCache.has(cacheKey)) {
+      return summaryCache.get(cacheKey);
+    }
+
+    const locationTotals = [];
+    const categoryTotals = new Map();
+    const locationMonthSummaries = [];
+
+    for (const month of selectedMonths) {
+      const crimes = readMonth(month);
+      const monthLocations = new Map();
+
+      for (const crime of crimes) {
+        const latitude = Number(crime.location.latitude);
+        const longitude = Number(crime.location.longitude);
+        const category = String(crime.category || 'other-crime');
+        const locationKey = Number.isFinite(latitude) && Number.isFinite(longitude)
+          ? `${latitude.toFixed(5)}:${longitude.toFixed(5)}`
+          : `unknown:${category}`;
+
+        const entry = monthLocations.get(locationKey) || {
+          count: 0,
+          latitude,
+          longitude,
+          categories: new Map(),
+        };
+
+        entry.count += 1;
+        entry.categories.set(category, (entry.categories.get(category) || 0) + 1);
+        monthLocations.set(locationKey, entry);
+        categoryTotals.set(category, (categoryTotals.get(category) || 0) + 1);
+      }
+
+      const monthCounts = [...monthLocations.values()].map((entry) => entry.count).sort((left, right) => left - right);
+      const topLocations = [...monthLocations.values()]
+        .sort((left, right) => right.count - left.count)
+        .slice(0, 5)
+        .map((entry) => ({
+          latitude: entry.latitude,
+          longitude: entry.longitude,
+          count: entry.count,
+          topCategories: [...entry.categories.entries()]
+            .map(([category, count]) => ({ category, count }))
+            .sort((left, right) => right.count - left.count)
+            .slice(0, 3),
+        }));
+
+      for (const count of monthCounts) {
+        locationTotals.push(count);
+      }
+
+      locationMonthSummaries.push({
+        month,
+        exactLocationCount: monthLocations.size,
+        incidentCount: crimes.length,
+        distribution: {
+          min: monthCounts[0] || 0,
+          p50: Math.round(percentile(monthCounts, 0.5) * 100) / 100,
+          p75: Math.round(percentile(monthCounts, 0.75) * 100) / 100,
+          p90: Math.round(percentile(monthCounts, 0.9) * 100) / 100,
+          p95: Math.round(percentile(monthCounts, 0.95) * 100) / 100,
+          max: monthCounts[monthCounts.length - 1] || 0,
+        },
+        topLocations,
+      });
+    }
+
+    const sortedTotals = [...locationTotals].sort((left, right) => left - right);
+    const sortedCategories = [...categoryTotals.entries()]
+      .map(([category, count]) => ({ category, count }))
+      .sort((left, right) => right.count - left.count);
+
+    const calibration = {
+      rootDir,
+      requestedMonth: requestedMonth || null,
+      monthLimit,
+      monthsAnalyzed: selectedMonths.length,
+      sampledExactLocations: sortedTotals.length,
+      totalIncidents: sortedTotals.reduce((sum, value) => sum + value, 0),
+      locationIncidentDistribution: {
+        min: sortedTotals[0] || 0,
+        p50: Math.round(percentile(sortedTotals, 0.5) * 100) / 100,
+        p75: Math.round(percentile(sortedTotals, 0.75) * 100) / 100,
+        p90: Math.round(percentile(sortedTotals, 0.9) * 100) / 100,
+        p95: Math.round(percentile(sortedTotals, 0.95) * 100) / 100,
+        p99: Math.round(percentile(sortedTotals, 0.99) * 100) / 100,
+        max: sortedTotals[sortedTotals.length - 1] || 0,
+      },
+      topCategories: sortedCategories.slice(0, 10),
+      months: locationMonthSummaries,
+      scoringHint: sortedTotals.length
+        ? `Exact-location incident counts sit around p50=${Math.round(percentile(sortedTotals, 0.5) * 100) / 100}, p90=${Math.round(percentile(sortedTotals, 0.9) * 100) / 100}, and p95=${Math.round(percentile(sortedTotals, 0.95) * 100) / 100} across the loaded snapshot set.`
+        : 'No local snapshot data is loaded yet.',
+    };
+
+    summaryCache.set(cacheKey, calibration);
+    return calibration;
+  }
+
   function pickMonth(month) {
     const normalizedMonth = normalizeMonth(month);
     if (normalizedMonth) {
@@ -441,6 +574,7 @@ export function createCrimeFileSource(options = {}) {
       };
     },
     listAvailableMonths,
+    summarizeCalibration,
     summarizeDataset,
     queryPoint,
     queryLocation,

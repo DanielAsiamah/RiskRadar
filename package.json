@@ -23,6 +23,7 @@
   "scripts": {
     "api": "node backend/server.mjs",
     "api:crime-dataset-summary": "node backend/crime-dataset-summary.mjs",
+    "api:crime-score-calibration": "node backend/crime-score-calibration.mjs",
     "api:crime-source-check": "node backend/crime-source-check.mjs",
     "api:import-crime-snapshots": "node backend/import-crime-snapshots.mjs",
     "api:prewarm": "node backend/prewarm.mjs",
