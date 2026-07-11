@@ -4,7 +4,11 @@ services:
     runtime: docker
     plan: starter
     autoDeploy: true
-    healthCheckPath: /health
+    healthCheckPath: /ready
+    disk:
+      name: riskradar-data
+      mountPath: /var/data/riskradar
+      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
@@ -13,7 +17,7 @@ services:
       - key: PORT
         value: 3001
       - key: RISKRADAR_DATA_DIR
-        value: /opt/render/project/src/backend/cache
+        value: /var/data/riskradar
       - key: STATE_DRIVER
         value: json
       - key: SQLITE_BOOTSTRAP_FROM_JSON
@@ -30,6 +34,8 @@ services:
         value: 15000
       - key: UPSTREAM_RETRY_COUNT
         value: 1
+      - key: MONTHLY_FETCH_CONCURRENCY
+        value: 2
       - key: STALE_IF_ERROR_ENABLED
         value: true
       - key: PERSISTENT_CACHE_ENABLED

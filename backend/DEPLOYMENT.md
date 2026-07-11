@@ -73,6 +73,8 @@ The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskr
   Extra retry attempts for throttled or flaky upstream responses. Default: `1`
 - `UPSTREAM_RETRY_DELAY_MS`
   Base backoff delay between upstream retries in milliseconds. Default: `350`
+- `MONTHLY_FETCH_CONCURRENCY`
+  Maximum historical months fetched in parallel. Enforced range: `1` to `4`. Default: `2`
 - `CACHE_TTL_MS`
   Fallback cache TTL for generic upstream responses. Default: `900000`
 - `GEOCODE_CACHE_TTL_MS`
@@ -117,6 +119,12 @@ The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskr
   JSON file used for persisted search presets. Default: `backend/cache/search-presets.json`
 - `SEARCH_PRESET_MAX_ENTRIES`
   Maximum number of saved presets retained on disk. Default: `200`
+- `CRIME_SOURCE_MODE`
+  Crime provider mode: `api` for live UK Police requests or `files` for imported monthly street CSV files. Default: `api`
+- `CRIME_SOURCE_FALLBACK_TO_API`
+  In file mode, permits live API fallback when a requested month is not available locally. Default: `true`
+- `CRIME_DATA_ROOT`
+  Root directory containing imported monthly police street CSV snapshots. Default: `backend/data/police`
 
 ### Admin state endpoints
 

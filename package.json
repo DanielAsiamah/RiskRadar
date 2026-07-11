@@ -1,6 +1,15 @@
 {
   "name": "riskradar-expo",
   "version": "1.0.0",
+  "description": "Open-source UK postcode, point, and area crime intelligence explorer.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DanielAsiamah/RiskRadar.git"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  },
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -31,6 +40,9 @@
     "api:prewarm": "node backend/prewarm.mjs",
     "api:smoke": "node backend/smoke-test.mjs",
     "api:verify": "node backend/verify.mjs",
+    "test": "npm run typecheck && npm run test:backend",
+    "test:backend": "node --check backend/server.mjs && node --test backend/*.test.mjs",
+    "typecheck": "tsc --noEmit",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
