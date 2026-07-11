@@ -50,6 +50,7 @@ const CRIME_SOURCE_FALLBACK_TO_API = process.env.CRIME_SOURCE_FALLBACK_TO_API !=
 const ANALYSIS_CACHE_SCHEMA_VERSION = 'monthly-quality-v1';
 const SERVER_STARTED_AT = new Date();
 const STARTUP_GRACE_PERIOD_MS = Math.max(0, Number(process.env.STARTUP_GRACE_PERIOD_MS) || 5000);
+const SHUTDOWN_TIMEOUT_MS = Math.max(1000, Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000);
 const require = createRequire(import.meta.url);
 const crimeFileSource = createCrimeFileSource({ rootDir: CRIME_DATA_ROOT });
 const upstreamCache = new Map();
@@ -61,6 +62,7 @@ const analysisResultCache = [];
 const searchPresets = [];
 let persistentCacheWrites = 0;
 let persistentCacheWriteQueued = false;
+let persistentCacheWriteTimer = null;
 let persistentCacheLoaded = false;
 let analysisSnapshotWrites = 0;
 let analysisSnapshotsLoaded = false;
@@ -71,6 +73,7 @@ let searchPresetsLoaded = false;
 let DatabaseSyncCtor = null;
 let stateDb = null;
 let stateDbReady = false;
+let isShuttingDown = false;
 const stateBootstrapStatus = {
   enabled: SQLITE_BOOTSTRAP_FROM_JSON,
   attempted: false,
@@ -466,8 +469,8 @@ function serializeCacheEntries() {
   }));
 }
 
-function schedulePersistentCacheWrite() {
-  if (!PERSISTENT_CACHE_ENABLED || persistentCacheWriteQueued) {
+function persistUpstreamCacheNow() {
+  if (!PERSISTENT_CACHE_ENABLED) {
     return;
   }
 
@@ -492,27 +495,44 @@ function schedulePersistentCacheWrite() {
     return;
   }
 
-  persistentCacheWriteQueued = true;
+  ensurePersistentCacheDir();
+  fs.writeFileSync(
+    PERSISTENT_CACHE_FILE,
+    JSON.stringify(
+      {
+        version: 1,
+        savedAt: new Date().toISOString(),
+        entries: serializeCacheEntries(),
+      },
+      null,
+      2
+    ),
+    'utf8'
+  );
+  persistentCacheWrites += 1;
+}
 
-  setTimeout(() => {
+function schedulePersistentCacheWrite() {
+  if (!PERSISTENT_CACHE_ENABLED || persistentCacheWriteQueued) {
+    return;
+  }
+
+  if (usingSqliteState()) {
+    try {
+      persistUpstreamCacheNow();
+    } catch (error) {
+      console.error('Failed to persist upstream cache:', error);
+    }
+    return;
+  }
+
+  persistentCacheWriteQueued = true;
+  persistentCacheWriteTimer = setTimeout(() => {
     persistentCacheWriteQueued = false;
+    persistentCacheWriteTimer = null;
 
     try {
-      ensurePersistentCacheDir();
-      fs.writeFileSync(
-        PERSISTENT_CACHE_FILE,
-        JSON.stringify(
-          {
-            version: 1,
-            savedAt: new Date().toISOString(),
-            entries: serializeCacheEntries(),
-          },
-          null,
-          2
-        ),
-        'utf8'
-      );
-      persistentCacheWrites += 1;
+      persistUpstreamCacheNow();
     } catch (error) {
       console.error('Failed to persist upstream cache:', error);
     }
@@ -1026,6 +1046,10 @@ function listTopRouteStats(limit = 10) {
 function buildReadinessStatus() {
   const issues = [];
 
+  if (isShuttingDown) {
+    issues.push('server-shutting-down');
+  }
+
   if (!persistentCacheLoaded) {
     issues.push('upstream-cache-not-loaded');
   }
@@ -1051,7 +1075,7 @@ function buildReadinessStatus() {
 
   return {
     ready,
-    status: ready ? 'ready' : inGracePeriod && issues.length === 0 ? 'warming' : 'not-ready',
+    status: isShuttingDown ? 'shutting-down' : ready ? 'ready' : inGracePeriod && issues.length === 0 ? 'warming' : 'not-ready',
     uptimeMs,
     gracePeriodMs: STARTUP_GRACE_PERIOD_MS,
     issues,
@@ -3814,6 +3838,11 @@ const server = http.createServer(async (request, response) => {
   const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
   request.routeTag = `${request.method || 'GET'} ${url.pathname}`;
 
+  if (isShuttingDown && url.pathname !== '/health' && url.pathname !== '/ready') {
+    sendJson(request, response, 503, { error: 'Server is shutting down. Please retry shortly.' }, { 'Retry-After': '5' });
+    return;
+  }
+
   if (request.method === 'OPTIONS') {
     response.writeHead(204, {
       ...buildCorsHeaders(request),
@@ -4567,4 +4596,71 @@ loadSearchPresets();
 
 server.listen(PORT, HOST, () => {
   console.log(`RiskRadar API listening on http://${HOST}:${PORT}`);
+});
+
+function flushStateForShutdown() {
+  if (persistentCacheWriteTimer) {
+    clearTimeout(persistentCacheWriteTimer);
+    persistentCacheWriteTimer = null;
+    persistentCacheWriteQueued = false;
+  }
+
+  persistUpstreamCacheNow();
+  saveAnalysisSnapshots();
+  saveAnalysisCache();
+  saveSearchPresets();
+}
+
+function closeStateDatabase() {
+  if (stateDb && typeof stateDb.close === 'function') {
+    stateDb.close();
+  }
+  stateDb = null;
+  stateDbReady = false;
+}
+
+function shutdown(signal) {
+  if (isShuttingDown) {
+    return;
+  }
+
+  isShuttingDown = true;
+  console.log(`RiskRadar API received ${signal}; draining requests.`);
+
+  const forceTimer = setTimeout(() => {
+    console.error(`RiskRadar API shutdown exceeded ${SHUTDOWN_TIMEOUT_MS}ms; forcing remaining connections closed.`);
+    server.closeAllConnections();
+  }, SHUTDOWN_TIMEOUT_MS);
+  forceTimer.unref();
+
+  server.close((closeError) => {
+    clearTimeout(forceTimer);
+    let exitCode = closeError ? 1 : 0;
+
+    try {
+      flushStateForShutdown();
+      closeStateDatabase();
+    } catch (error) {
+      exitCode = 1;
+      console.error('RiskRadar API failed to flush state during shutdown:', error);
+    }
+
+    if (closeError) {
+      console.error('RiskRadar API server close failed:', closeError);
+    }
+
+    console.log(`RiskRadar API shutdown complete with exit code ${exitCode}.`);
+    process.exitCode = exitCode;
+    if (process.connected) {
+      process.disconnect();
+    }
+  });
+}
+
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));
+process.on('message', (message) => {
+  if (message?.type === 'riskradar:shutdown') {
+    shutdown(String(message.signal || 'IPC'));
+  }
 });

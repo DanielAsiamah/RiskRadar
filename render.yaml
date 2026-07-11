@@ -5,6 +5,7 @@ services:
     plan: starter
     autoDeploy: true
     healthCheckPath: /ready
+    maxShutdownDelaySeconds: 15
     disk:
       name: riskradar-data
       mountPath: /var/data/riskradar

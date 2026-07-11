@@ -53,6 +53,8 @@ The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskr
   Backend port. Default: `3001`
 - `HOST`
   Bind host. Default: `0.0.0.0`
+- `SHUTDOWN_TIMEOUT_MS`
+  Maximum time allowed for active requests to drain before remaining connections are force-closed. State is flushed before exit. Default: `10000`
 - `RISKRADAR_DATA_DIR`
   Base directory for persisted backend cache and saved state files. Default: `backend/cache`
 - `STATE_DRIVER`
