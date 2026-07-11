@@ -4,7 +4,7 @@ This project is an Expo app with a lightweight Node backend that proxies public 
 
 ## Requirements
 
-- Node.js 20 or newer
+- Node.js 22.13 or newer
 - npm
 - Expo Go on a phone, or an Android/iOS simulator
 
@@ -80,7 +80,7 @@ npm run api:verify
 
 ### Option 1: Docker
 
-Build the backend image from the repo root:
+Build the combined web app and API image from the repo root:
 
 ```powershell
 cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo

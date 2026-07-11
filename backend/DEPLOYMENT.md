@@ -1,6 +1,6 @@
-## Backend Deployment Notes
+## RiskRadar Deployment Notes
 
-This backend is a lightweight Node HTTP server that proxies public UK crime and postcode APIs for the Expo app.
+RiskRadar uses a lightweight Node HTTP server that proxies public UK crime and postcode APIs. In production, the same process also serves the exported Expo web app.
 
 ### Run locally
 
@@ -45,7 +45,7 @@ docker run --rm -p 3001:3001 --env-file .env.example riskradar-api
 
 ### Render blueprint
 
-The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/render.yaml) so the backend can be deployed as a Render Blueprint web service with `/health` as the health check path.
+The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/render.yaml) so the combined app and API can be deployed as a Render Blueprint web service with `/ready` as the health check path.
 
 ### Environment variables
 
@@ -53,6 +53,12 @@ The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskr
   Backend port. Default: `3001`
 - `HOST`
   Bind host. Default: `0.0.0.0`
+- `WEB_APP_ENABLED`
+  Serves the exported Expo web app from the backend process when `index.html` exists. Default: `true`
+- `WEB_DIST_DIR`
+  Directory containing the exported Expo web app. Default: `dist`
+- `EMBED_ALLOW_ORIGINS`
+  Comma-separated external origins allowed to iframe the `/embed` route. Same-origin embedding is always allowed.
 - `SHUTDOWN_TIMEOUT_MS`
   Maximum time allowed for active requests to drain before remaining connections are force-closed. State is flushed before exit. Default: `10000`
 - `RISKRADAR_DATA_DIR`
