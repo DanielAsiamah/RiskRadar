@@ -7,6 +7,7 @@ export default function CrimeMapCanvas({
   markers,
   selectedPoint,
   areaPoints,
+  boundaryPoints,
   radiusMeters,
   onMapPress,
 }: CrimeMapCanvasProps) {
@@ -47,6 +48,9 @@ export default function CrimeMapCanvas({
       )}
       {areaPoints.length >= 2 && (
         <Polygon coordinates={areaPoints} fillColor="rgba(79,70,229,0.14)" strokeColor="#4f46e5" strokeWidth={3} />
+      )}
+      {boundaryPoints.length >= 3 && (
+        <Polygon coordinates={boundaryPoints} fillColor="rgba(14,165,233,0.04)" strokeColor="#0284c7" strokeWidth={2} />
       )}
       {areaPoints.map((point, index) => (
         <Marker key={`area-${index}`} coordinate={point} title={`Area point ${index + 1}`} pinColor="#4f46e5" />

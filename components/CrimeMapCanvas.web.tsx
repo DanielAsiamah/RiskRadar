@@ -23,6 +23,7 @@ export default function CrimeMapCanvas({
   markers,
   selectedPoint,
   areaPoints,
+  boundaryPoints,
   radiusMeters,
   onMapPress,
 }: CrimeMapCanvasProps) {
@@ -48,6 +49,9 @@ export default function CrimeMapCanvas({
         )}
         {areaPoints.length >= 2 && (
           <Polygon positions={areaPoints.map((point) => [point.latitude, point.longitude])} pathOptions={{ color: '#4f46e5', fillOpacity: 0.14 }} />
+        )}
+        {boundaryPoints.length >= 3 && (
+          <Polygon positions={boundaryPoints.map((point) => [point.latitude, point.longitude])} pathOptions={{ color: '#0284c7', fillOpacity: 0.04, weight: 2 }} />
         )}
         {areaPoints.map((point, index) => (
           <CircleMarker key={`area-${index}`} center={[point.latitude, point.longitude]} radius={6} pathOptions={{ color: '#4f46e5', fillColor: 'white', fillOpacity: 1 }} />

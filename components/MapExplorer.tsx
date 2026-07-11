@@ -7,6 +7,7 @@ import CrimeMapCanvas from './CrimeMapCanvas';
 import { CrimeMapMarker, MapCoordinate } from './map-types';
 
 type MapMode = 'postcode' | 'point' | 'area';
+type PointSearchMode = 'radius' | 'exact';
 
 interface FilterMetadata {
   months: { month: string; monthDisplay: string }[];
@@ -25,6 +26,7 @@ interface CrimeFeed {
   month: string;
   totalCrimes: number;
   summary: string;
+  locationStreet?: string;
   categories: { category: string; count: number }[];
   crimes: {
     category: string;
@@ -42,12 +44,15 @@ const modeLabels: Record<MapMode, string> = { postcode: 'Postcode', point: 'Clic
 
 export default function MapExplorer({ onBack }: { onBack: () => void }) {
   const [mode, setMode] = useState<MapMode>('postcode');
+  const [pointSearchMode, setPointSearchMode] = useState<PointSearchMode>('radius');
   const [postcode, setPostcode] = useState('BR1 5NN');
   const [metadata, setMetadata] = useState<FilterMetadata | null>(null);
   const [month, setMonth] = useState('');
   const [category, setCategory] = useState('');
   const [selectedPoint, setSelectedPoint] = useState<MapCoordinate | null>(null);
   const [areaPoints, setAreaPoints] = useState<MapCoordinate[]>([]);
+  const [boundaryPoints, setBoundaryPoints] = useState<MapCoordinate[]>([]);
+  const [neighbourhoodName, setNeighbourhoodName] = useState('');
   const [center, setCenter] = useState<MapCoordinate>(UK_CENTER);
   const [feed, setFeed] = useState<CrimeFeed | null>(null);
   const [loading, setLoading] = useState(false);
@@ -62,9 +67,21 @@ export default function MapExplorer({ onBack }: { onBack: () => void }) {
       .catch((reason) => setError(reason.message));
   }, []);
 
-  const loadFeed = async (override?: { point?: MapCoordinate; points?: MapCoordinate[] }) => {
+  const loadBoundary = async (coordinate: MapCoordinate) => {
+    try {
+      const value = await fetchBoundary(coordinate);
+      setBoundaryPoints(value.boundary ?? []);
+      setNeighbourhoodName(value.neighbourhood?.name || value.neighbourhood?.neighbourhood || '');
+    } catch {
+      setBoundaryPoints([]);
+      setNeighbourhoodName('');
+    }
+  };
+
+  const loadFeed = async (override?: { point?: MapCoordinate; points?: MapCoordinate[]; searchMode?: PointSearchMode }) => {
     const point = override?.point ?? selectedPoint;
     const points = override?.points ?? areaPoints;
+    const effectivePointSearchMode = override?.searchMode ?? pointSearchMode;
     if (mode === 'postcode' && !postcode.trim()) return setError('Enter a postcode or UK place.');
     if (mode === 'point' && !point) return setError('Tap anywhere on the map to select a point.');
     if (mode === 'area' && points.length < 3) return setError('Tap at least three map points to create an area.');
@@ -82,18 +99,25 @@ export default function MapExplorer({ onBack }: { onBack: () => void }) {
         categories: category ? [category] : [],
         radiusMeters: metadata?.defaults.postcodeRadiusMeters ?? 400,
       };
-      const response = await apiRequest<{ mode: MapMode; result: CrimeFeed }>('/api/map-feed', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      setFeed(response.result);
-      const nextCenter = response.result.latitude != null && response.result.longitude != null
-        ? { latitude: response.result.latitude, longitude: response.result.longitude }
-        : response.result.point ?? (response.result.polygon?.length ? averagePoint(response.result.polygon) : point);
+      const result = mode === 'point' && effectivePointSearchMode === 'exact'
+        ? await apiRequest<CrimeFeed>('/api/location-crimes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })
+        : (await apiRequest<{ mode: MapMode; result: CrimeFeed }>('/api/map-feed', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          })).result;
+      setFeed(result);
+      const nextCenter = result.latitude != null && result.longitude != null
+        ? { latitude: result.latitude, longitude: result.longitude }
+        : result.point ?? (result.polygon?.length ? averagePoint(result.polygon) : point);
       if (nextCenter) {
         setCenter(nextCenter);
         if (mode === 'postcode') setSelectedPoint(nextCenter);
+        void loadBoundary(nextCenter);
       }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to load map incidents.');
@@ -117,6 +141,8 @@ export default function MapExplorer({ onBack }: { onBack: () => void }) {
     setError(null);
     setSelectedPoint(null);
     setAreaPoints([]);
+    setBoundaryPoints([]);
+    setNeighbourhoodName('');
   };
 
   const markers: CrimeMapMarker[] = (feed?.crimes ?? [])
@@ -160,6 +186,25 @@ export default function MapExplorer({ onBack }: { onBack: () => void }) {
           </View>
         )}
 
+        {mode === 'point' && (
+          <View style={tw`flex-row bg-slate-100 p-1 rounded-2xl mb-4`}>
+            {(['radius', 'exact'] as PointSearchMode[]).map((item) => (
+              <TouchableOpacity
+                key={item}
+                onPress={() => {
+                  setPointSearchMode(item);
+                  if (selectedPoint) void loadFeed({ point: selectedPoint, searchMode: item });
+                }}
+                style={tw`flex-1 py-3 rounded-xl ${pointSearchMode === item ? 'bg-white' : ''}`}
+              >
+                <Text style={tw`text-xs font-bold text-center ${pointSearchMode === item ? 'text-indigo-600' : 'text-slate-500'}`}>
+                  {item === 'radius' ? 'Nearby radius' : 'Exact location'}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={tw`gap-2 mb-3`}>
           {metadata?.months.slice(0, 12).map((item) => (
             <TouchableOpacity key={item.month} onPress={() => setMonth(item.month)} style={tw`px-4 py-3 rounded-full ${month === item.month ? 'bg-slate-900' : 'bg-slate-100'}`}>
@@ -187,7 +232,8 @@ export default function MapExplorer({ onBack }: { onBack: () => void }) {
             markers={markers}
             selectedPoint={selectedPoint}
             areaPoints={areaPoints}
-            radiusMeters={feed?.radiusMeters ?? feed?.point?.radiusMeters ?? metadata?.defaults.postcodeRadiusMeters}
+            boundaryPoints={boundaryPoints}
+            radiusMeters={mode === 'point' && pointSearchMode === 'exact' ? undefined : feed?.radiusMeters ?? feed?.point?.radiusMeters ?? metadata?.defaults.postcodeRadiusMeters}
             onMapPress={onMapPress}
           />
           {loading && <View style={tw`absolute inset-0 bg-white/70 items-center justify-center`}><ActivityIndicator size="large" color="#4f46e5" /></View>}
@@ -213,6 +259,8 @@ export default function MapExplorer({ onBack }: { onBack: () => void }) {
               <View style={tw`flex-1`}>
                 <Text style={tw`text-xs font-bold uppercase tracking-widest text-slate-400`}>Selected location</Text>
                 <Text selectable style={tw`text-lg font-black text-slate-900 mt-1`}>{feed.postcode || feed.district || (mode === 'area' ? 'Custom area' : 'Map point')}</Text>
+                {feed.locationStreet ? <Text selectable style={tw`text-xs text-slate-500 mt-1`}>{feed.locationStreet}</Text> : null}
+                {neighbourhoodName ? <Text selectable style={tw`text-xs font-bold text-sky-600 mt-1`}>Police boundary: {neighbourhoodName}</Text> : null}
               </View>
               <Text style={tw`text-2xl font-black text-indigo-600`}>{feed.totalCrimes}</Text>
             </View>
@@ -228,6 +276,13 @@ export default function MapExplorer({ onBack }: { onBack: () => void }) {
       </ScrollView>
     </View>
   );
+}
+
+async function fetchBoundary(coordinate: MapCoordinate) {
+  return apiRequest<{
+    neighbourhood: { name?: string; neighbourhood?: string } | null;
+    boundary: MapCoordinate[];
+  }>(`/api/point-boundary?lat=${encodeURIComponent(coordinate.latitude)}&lng=${encodeURIComponent(coordinate.longitude)}`, {}, 20_000);
 }
 
 function Instruction({ icon, text }: { icon: React.ReactNode; text: string }) {

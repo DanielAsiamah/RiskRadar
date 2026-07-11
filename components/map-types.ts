@@ -14,6 +14,7 @@ export interface CrimeMapCanvasProps {
   markers: CrimeMapMarker[];
   selectedPoint?: MapCoordinate | null;
   areaPoints: MapCoordinate[];
+  boundaryPoints: MapCoordinate[];
   radiusMeters?: number;
   onMapPress: (coordinate: MapCoordinate) => void;
 }
