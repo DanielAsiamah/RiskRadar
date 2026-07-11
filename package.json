@@ -13,21 +13,23 @@
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
-    "expo": "~54.0.0",
-    "expo-constants": "~18.0.13",
-    "expo-location": "~19.0.8",
-    "expo-status-bar": "~3.0.8",
+    "expo": "^56.0.0",
+    "expo-constants": "~56.0.20",
+    "expo-location": "~56.0.20",
+    "expo-status-bar": "~56.0.4",
     "lucide-react-native": "^1.22.0",
-    "react": "^19.1.0",
-    "react-native": "^0.81.5",
-    "react-native-maps": "1.20.1",
-    "react-native-safe-area-context": "~5.6.0",
-    "react-native-svg": "15.12.1",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "react-native": "0.85.3",
+    "react-native-maps": "1.27.2",
+    "react-native-safe-area-context": "~5.7.0",
+    "react-native-svg": "15.15.4",
+    "react-native-web": "^0.21.2",
     "twrnc": "^4.16.0"
   },
   "devDependencies": {
-    "@types/react": "~19.1.10",
-    "typescript": "~5.9.2"
+    "@types/react": "~19.2.10",
+    "typescript": "~6.0.3"
   },
   "scripts": {
     "api": "node backend/server.mjs",
@@ -42,7 +44,7 @@
     "api:verify": "node backend/verify.mjs",
     "test": "npm run typecheck && npm run test:backend",
     "test:backend": "node --check backend/server.mjs && node --test backend/*.test.mjs",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "node --stack-size=8192 node_modules/typescript/bin/tsc --noEmit",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
