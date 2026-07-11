@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { apiCatalog } from './api-catalog.mjs';
 
 test('documents every public HTTP route', async () => {
   const [serverSource, installGuide] = await Promise.all([
@@ -12,6 +13,22 @@ test('documents every public HTTP route', async () => {
   assert.ok(routes.length > 20, 'Expected the server route extractor to find public routes.');
   for (const route of new Set(routes)) {
     assert.ok(installGuide.includes(route), `${route} is public but missing from INSTALL.md`);
+  }
+});
+
+test('catalogues every method and path implemented by the router', async () => {
+  const serverSource = await readFile('backend/server.mjs', 'utf8');
+  const implemented = [...serverSource.matchAll(/request\.method === '([^']+)' && url\.pathname === '([^']+)'/g)]
+    .map((match) => `${match[1]} ${match[2]}`)
+    .sort();
+  const catalogued = apiCatalog.endpoints
+    .map((item) => `${item.method} ${item.path}`)
+    .sort();
+
+  assert.deepEqual(catalogued, implemented);
+  for (const item of apiCatalog.endpoints) {
+    assert.ok(item.summary.length >= 20, `${item.method} ${item.path} needs a useful summary`);
+    assert.ok(['public', 'admin'].includes(item.access));
   }
 });
 

@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { createCrimeFileSource } from './crime-file-source.mjs';
 import { blendPostcodeScore, calculateCrimeScore, crimeScoreModel } from './crime-score.mjs';
 import { mapSettledWithConcurrency } from './bounded-concurrency.mjs';
+import { apiCatalog } from './api-catalog.mjs';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -4158,6 +4159,13 @@ const server = http.createServer(async (request, response) => {
         error: error.message || 'Unexpected backend error.',
       });
     }
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/docs') {
+    sendJson(request, response, 200, apiCatalog, {
+      'Cache-Control': 'public, max-age=3600',
+    });
     return;
   }
 

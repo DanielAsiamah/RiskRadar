@@ -82,6 +82,7 @@ The repository includes:
 - `render.yaml` for a Render Blueprint deployment
 - `.env.example` for frontend and backend environment settings
 - `/health` for diagnostics and `/ready` for deployment readiness
+- `/api/docs` for a machine-readable catalogue of all API operations
 
 See [INSTALL.md](./INSTALL.md) for complete local, Docker, Render, website embedding, environment, static-data, SQLite, and API instructions. Backend-specific operational notes are in [backend/DEPLOYMENT.md](./backend/DEPLOYMENT.md).
 

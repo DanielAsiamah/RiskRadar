@@ -250,6 +250,9 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 
 ## Backend endpoints
 
+- `GET /api/docs`
+  Returns a machine-readable catalogue of every public API operation, its purpose, access level, and expected input.
+
 - `POST /api/analyze-postcode`
   - Body:
     ```json
