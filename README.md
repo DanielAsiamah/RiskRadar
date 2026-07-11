@@ -49,7 +49,14 @@ cd RiskRadar
 npm run start
 ```
 
-The backend listens on `http://0.0.0.0:3001`. Set `EXPO_PUBLIC_API_BASE_URL` when the phone or deployed frontend must reach the backend through another hostname.
+The backend listens on `http://0.0.0.0:3001`. Set `EXPO_PUBLIC_API_BASE_URL` when a phone or separately hosted frontend must reach the backend through another hostname.
+
+For a production-style single-service run, export the web app and start the API, then open `http://localhost:3001`:
+
+```powershell
+npm run build:web
+npm run api
+```
 
 ## Verify
 
@@ -71,7 +78,7 @@ The live verifier starts a local backend when needed and exercises postcode, poi
 
 The repository includes:
 
-- `Dockerfile` for the backend API
+- `Dockerfile` for one web app and API service
 - `render.yaml` for a Render Blueprint deployment
 - `.env.example` for frontend and backend environment settings
 - `/health` for diagnostics and `/ready` for deployment readiness

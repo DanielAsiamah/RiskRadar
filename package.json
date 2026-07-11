@@ -48,6 +48,7 @@
     "test": "npm run typecheck && npm run test:backend",
     "test:backend": "node --check backend/server.mjs && node --test backend/*.test.mjs",
     "typecheck": "node --stack-size=8192 node_modules/typescript/bin/tsc --noEmit",
+    "build:web": "expo export --platform web --output-dir dist",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",

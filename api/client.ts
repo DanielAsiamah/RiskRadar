@@ -6,6 +6,10 @@ function getApiBaseUrl() {
   const configuredBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
   if (configuredBaseUrl) return configuredBaseUrl.replace(/\/+$/, '');
 
+  if (process.env.EXPO_OS === 'web' && typeof globalThis.location?.origin === 'string') {
+    return globalThis.location.origin;
+  }
+
   const hostUri = Constants.expoConfig?.hostUri || Constants.platform?.web?.hostUri;
   const host = hostUri?.replace(/^https?:\/\//, '').split(':')[0];
   return host ? `http://${host}:${API_PORT}` : `http://localhost:${API_PORT}`;

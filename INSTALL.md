@@ -107,12 +107,12 @@ curl http://127.0.0.1:3001/ready
 
 ### Option 2: Render
 
-This repo now includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/render.yaml) for the backend service.
+This repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/render.yaml) for one public service that hosts both the Expo web app and backend API. The Docker build exports the frontend, and the Node server serves it from `/` while API routes remain under `/api/*`.
 
 1. Create a new Render Blueprint from this repository.
-2. Set `CORS_ALLOW_ORIGIN` to your real frontend origin or app web host.
-3. Deploy the `riskradar-api` service.
-4. Copy the live backend URL into `EXPO_PUBLIC_API_BASE_URL` for your Expo environment.
+2. Set `CORS_ALLOW_ORIGIN` to the service URL, or leave `*` while testing.
+3. Deploy the `riskradar-api` service. It now serves both the app and API despite the existing service name.
+4. Open the service URL to use the web app. No separate frontend host or `EXPO_PUBLIC_API_BASE_URL` is required.
 5. Set `RISKRADAR_SMOKE_BASE_URL` to that backend URL and run `npm run api:smoke` as a release sanity check.
 6. Optionally set `RISKRADAR_PREWARM_BASE_URL` and run `npm run api:prewarm` to warm common backend responses immediately after deploy.
 7. Check `/health` after prewarm to confirm `analysisCache.stats` and scoped unified endpoint cache activity are moving as expected.
@@ -224,6 +224,7 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 - The Expo front end auto-detects the local dev host and talks to the backend on port `3001`
 - You can override the backend base URL with:
   - `EXPO_PUBLIC_API_BASE_URL`
+- A production web build uses its own origin automatically when this variable is not set.
 - You can override the backend port with:
   - `EXPO_PUBLIC_API_PORT`
 
@@ -502,9 +503,9 @@ For backend env vars and cache settings, see [backend/DEPLOYMENT.md](C:/Users/ch
 
 For a public deployment:
 
-1. Host the Node backend on a small VPS, Render, Railway, Fly.io, or similar.
-2. Set `EXPO_PUBLIC_API_BASE_URL` in the Expo environment to the public backend URL.
+1. Deploy the included Docker image on Render, Railway, Fly.io, a VPS, or similar. It hosts the web app and API together.
+2. Set `EXPO_PUBLIC_API_BASE_URL` only if you intentionally host the Expo frontend on another domain.
 3. Set `CORS_ALLOW_ORIGIN` to your production app origin instead of `*` once the final host is known.
 4. Tune `RATE_LIMIT_MAX_REQUESTS` and cache env vars for your traffic profile.
 5. Replace in-memory cache with a persistent/shared cache or stored crime snapshots as traffic grows.
-6. Build a web or native release from Expo once the backend URL is stable.
+6. Build native releases from Expo once the backend URL is stable; the Docker image already builds the web release.

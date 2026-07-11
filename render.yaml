@@ -15,6 +15,10 @@ services:
         value: production
       - key: HOST
         value: 0.0.0.0
+      - key: WEB_APP_ENABLED
+        value: true
+      - key: WEB_DIST_DIR
+        value: /app/dist
       - key: PORT
         value: 3001
       - key: RISKRADAR_DATA_DIR

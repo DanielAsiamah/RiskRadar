@@ -1,12 +1,29 @@
-FROM node:22-alpine
+FROM node:22-alpine AS web-builder
 
 WORKDIR /app
 
-ENV NODE_ENV=production
-ENV HOST=0.0.0.0
-ENV PORT=3001
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY app.json index.ts App.tsx tsconfig.json types.ts ./
+COPY api ./api
+COPY assets ./assets
+COPY components ./components
+COPY types ./types
+
+RUN npx expo export --platform web --output-dir dist
+
+FROM node:22-alpine AS runtime
+
+WORKDIR /app
+
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=3001 \
+    WEB_DIST_DIR=/app/dist
 
 COPY --chown=node:node backend ./backend
+COPY --from=web-builder --chown=node:node /app/dist ./dist
 
 RUN mkdir -p /app/backend/cache && chown -R node:node /app
 

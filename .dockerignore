@@ -5,6 +5,6 @@ npm-debug.log
 backend/cache/*.json
 backend/cache/*.log
 coverage
-dist
+dist*
 android
 ios

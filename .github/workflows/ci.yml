@@ -28,3 +28,6 @@ jobs:
 
       - name: Run deterministic checks
         run: npm test
+
+      - name: Export production web app
+        run: npm run build:web

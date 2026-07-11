@@ -51,6 +51,8 @@ const ANALYSIS_CACHE_SCHEMA_VERSION = 'monthly-quality-v1';
 const SERVER_STARTED_AT = new Date();
 const STARTUP_GRACE_PERIOD_MS = Math.max(0, Number(process.env.STARTUP_GRACE_PERIOD_MS) || 5000);
 const SHUTDOWN_TIMEOUT_MS = Math.max(1000, Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000);
+const WEB_DIST_DIR = path.resolve(process.env.WEB_DIST_DIR || path.join(process.cwd(), 'dist'));
+const WEB_APP_ENABLED = process.env.WEB_APP_ENABLED !== 'false' && fs.existsSync(path.join(WEB_DIST_DIR, 'index.html'));
 const require = createRequire(import.meta.url);
 const crimeFileSource = createCrimeFileSource({ rootDir: CRIME_DATA_ROOT });
 const upstreamCache = new Map();
@@ -114,6 +116,61 @@ function clampEnvironmentInteger(value, fallback, minimum, maximum) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+const STATIC_CONTENT_TYPES = new Map([
+  ['.css', 'text/css; charset=utf-8'],
+  ['.html', 'text/html; charset=utf-8'],
+  ['.ico', 'image/x-icon'],
+  ['.jpeg', 'image/jpeg'],
+  ['.jpg', 'image/jpeg'],
+  ['.js', 'text/javascript; charset=utf-8'],
+  ['.json', 'application/json; charset=utf-8'],
+  ['.map', 'application/json; charset=utf-8'],
+  ['.png', 'image/png'],
+  ['.svg', 'image/svg+xml'],
+  ['.webp', 'image/webp'],
+  ['.woff', 'font/woff'],
+  ['.woff2', 'font/woff2'],
+]);
+
+function resolveWebAsset(pathname) {
+  if (!WEB_APP_ENABLED) return null;
+
+  let decodedPath;
+  try {
+    decodedPath = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+
+  const requestedPath = decodedPath === '/' ? 'index.html' : decodedPath.replace(/^\/+/, '');
+  const assetPath = path.resolve(WEB_DIST_DIR, requestedPath);
+  const insideWebRoot = assetPath === WEB_DIST_DIR || assetPath.startsWith(`${WEB_DIST_DIR}${path.sep}`);
+
+  if (insideWebRoot && fs.existsSync(assetPath) && fs.statSync(assetPath).isFile()) return assetPath;
+  if (!path.extname(requestedPath)) return path.join(WEB_DIST_DIR, 'index.html');
+  return null;
+}
+
+function serveWebAsset(request, response, pathname) {
+  if (!['GET', 'HEAD'].includes(request.method || 'GET')) return false;
+  const assetPath = resolveWebAsset(pathname);
+  if (!assetPath) return false;
+
+  const extension = path.extname(assetPath).toLowerCase();
+  const stats = fs.statSync(assetPath);
+  response.writeHead(200, {
+    'Content-Type': STATIC_CONTENT_TYPES.get(extension) || 'application/octet-stream',
+    'Content-Length': stats.size,
+    'Cache-Control': extension === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+  });
+
+  if (request.method === 'HEAD') response.end();
+  else fs.createReadStream(assetPath).pipe(response);
+  return true;
 }
 
 function usingFileCrimeSource() {
@@ -4582,6 +4639,11 @@ const server = http.createServer(async (request, response) => {
         error: error.message || 'Unexpected backend error.',
       });
     }
+    return;
+  }
+
+  if (serveWebAsset(request, response, url.pathname)) {
+    request.routeTag = `WEB ${request.method || 'GET'} ${url.pathname}`;
     return;
   }
 
