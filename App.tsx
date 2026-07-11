@@ -9,6 +9,7 @@ import { PostcodeResult } from './types';
 import Landing from './components/Landing';
 import Scanner from './components/Scanner';
 import Results from './components/Results';
+import MapExplorer from './components/MapExplorer';
 import { apiRequest } from './api/client';
 
 interface NearbySuggestion {
@@ -17,7 +18,7 @@ interface NearbySuggestion {
 }
 
 export default function App() {
-  const [appState, setAppState] = useState<'HOME' | 'SCANNING' | 'RESULTS' | 'PAYWALL'>('HOME');
+  const [appState, setAppState] = useState<'HOME' | 'SCANNING' | 'RESULTS' | 'MAP' | 'PAYWALL'>('HOME');
   const [postcodeInput, setPostcodeInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PostcodeResult | null>(null);
@@ -160,8 +161,11 @@ export default function App() {
             nearbySuggestions={nearbySuggestions}
             useCurrentLocation={handleUseCurrentLocation}
             findingNearby={findingNearby}
+            openMapExplorer={() => setAppState('MAP')}
           />
         )}
+
+        {appState === 'MAP' && <MapExplorer onBack={() => setAppState('HOME')} />}
         
         {appState === 'SCANNING' && (
           <Scanner 

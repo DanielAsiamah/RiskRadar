@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView } from 'react-native';
-import { Search, MapPin, Compass, LocateFixed } from 'lucide-react-native';
+import { Search, MapPin, Compass, LocateFixed, Map } from 'lucide-react-native';
 import tw from 'twrnc';
 
 interface NearbySuggestion {
@@ -19,6 +19,7 @@ interface LandingProps {
   nearbySuggestions?: NearbySuggestion[];
   useCurrentLocation: () => void;
   findingNearby: boolean;
+  openMapExplorer: () => void;
 }
 
 export default function Landing({
@@ -31,6 +32,7 @@ export default function Landing({
   nearbySuggestions = [],
   useCurrentLocation,
   findingNearby,
+  openMapExplorer,
 }: LandingProps) {
   return (
     <KeyboardAvoidingView style={tw`flex-1 bg-white`} behavior={process.env.EXPO_OS === 'ios' ? 'padding' : undefined}>
@@ -76,6 +78,14 @@ export default function Landing({
         >
           <Search size={20} color="white" />
           <Text style={tw`text-white font-bold text-lg`}>Check Risk</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={openMapExplorer}
+          style={tw`mt-3 h-14 rounded-2xl bg-slate-900 flex-row items-center justify-center gap-3`}
+        >
+          <Map size={18} color="white" />
+          <Text style={tw`text-white font-bold`}>Open Crime Explorer</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
