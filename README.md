@@ -83,7 +83,7 @@ The repository includes:
 - `.env.example` for frontend and backend environment settings
 - `/health` for diagnostics and `/ready` for deployment readiness
 
-See [INSTALL.md](./INSTALL.md) for complete local, Docker, Render, environment, static-data, SQLite, and API instructions. Backend-specific operational notes are in [backend/DEPLOYMENT.md](./backend/DEPLOYMENT.md).
+See [INSTALL.md](./INSTALL.md) for complete local, Docker, Render, website embedding, environment, static-data, SQLite, and API instructions. Backend-specific operational notes are in [backend/DEPLOYMENT.md](./backend/DEPLOYMENT.md).
 
 ## Data and scoring
 

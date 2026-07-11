@@ -117,6 +117,26 @@ This repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/risk
 6. Optionally set `RISKRADAR_PREWARM_BASE_URL` and run `npm run api:prewarm` to warm common backend responses immediately after deploy.
 7. Check `/health` after prewarm to confirm `analysisCache.stats` and scoped unified endpoint cache activity are moving as expected.
 
+### Embed on a website
+
+The deployed app is available at `/embed` as well as `/`. Set `EMBED_ALLOW_ORIGINS` to a comma-separated list of websites allowed to place RiskRadar in an iframe. Same-origin framing is always allowed; external websites are blocked unless listed.
+
+```env
+EMBED_ALLOW_ORIGINS=https://www.yourwebsite.com,https://*.yourwebsite.com
+```
+
+Then add this to your website, replacing the hostname with your deployment URL:
+
+```html
+<iframe
+  src="https://riskradar.example.com/embed"
+  title="RiskRadar UK crime explorer"
+  loading="lazy"
+  allow="geolocation"
+  style="width:100%;min-height:820px;border:0;border-radius:24px"
+></iframe>
+```
+
 ### Environment template
 
 Use [.env.example](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/.env.example) as the starting point for production configuration.

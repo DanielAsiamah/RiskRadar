@@ -53,6 +53,7 @@ const STARTUP_GRACE_PERIOD_MS = Math.max(0, Number(process.env.STARTUP_GRACE_PER
 const SHUTDOWN_TIMEOUT_MS = Math.max(1000, Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000);
 const WEB_DIST_DIR = path.resolve(process.env.WEB_DIST_DIR || path.join(process.cwd(), 'dist'));
 const WEB_APP_ENABLED = process.env.WEB_APP_ENABLED !== 'false' && fs.existsSync(path.join(WEB_DIST_DIR, 'index.html'));
+const EMBED_FRAME_ANCESTORS = buildFrameAncestors(process.env.EMBED_ALLOW_ORIGINS);
 const require = createRequire(import.meta.url);
 const crimeFileSource = createCrimeFileSource({ rootDir: CRIME_DATA_ROOT });
 const upstreamCache = new Map();
@@ -118,6 +119,14 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function buildFrameAncestors(value) {
+  const sources = String(value || '')
+    .split(',')
+    .map((source) => source.trim())
+    .filter((source) => source === "'self'" || source === '*' || /^https?:\/\/(?:\*\.)?[a-z0-9.-]+(?::\d+)?$/i.test(source));
+  return [...new Set(["'self'", ...sources])].join(' ');
+}
+
 const STATIC_CONTENT_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.html', 'text/html; charset=utf-8'],
@@ -166,6 +175,7 @@ function serveWebAsset(request, response, pathname) {
     'Cache-Control': extension === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Content-Security-Policy': `frame-ancestors ${EMBED_FRAME_ANCESTORS}`,
   });
 
   if (request.method === 'HEAD') response.end();

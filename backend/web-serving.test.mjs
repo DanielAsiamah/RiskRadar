@@ -22,6 +22,7 @@ test('serves the web app and API from one process', { timeout: 20000 }, async ()
       HOST: '127.0.0.1',
       WEB_APP_ENABLED: 'true',
       WEB_DIST_DIR: webDir,
+      EMBED_ALLOW_ORIGINS: 'https://example.com,https://*.example.org,invalid-value',
       RISKRADAR_DATA_DIR: dataDir,
       STARTUP_GRACE_PERIOD_MS: '0',
     },
@@ -48,7 +49,7 @@ test('serves the web app and API from one process', { timeout: 20000 }, async ()
     const baseUrl = `http://127.0.0.1:${port}`;
     const [rootResponse, routeResponse, assetResponse, healthResponse, missingResponse] = await Promise.all([
       fetch(`${baseUrl}/`),
-      fetch(`${baseUrl}/explorer`),
+      fetch(`${baseUrl}/embed`),
       fetch(`${baseUrl}/app.js`, { method: 'HEAD' }),
       fetch(`${baseUrl}/health`),
       fetch(`${baseUrl}/missing.js`),
@@ -56,6 +57,10 @@ test('serves the web app and API from one process', { timeout: 20000 }, async ()
 
     assert.equal(rootResponse.status, 200);
     assert.match(rootResponse.headers.get('content-type') || '', /^text\/html/);
+    assert.equal(
+      rootResponse.headers.get('content-security-policy'),
+      "frame-ancestors 'self' https://example.com https://*.example.org"
+    );
     assert.equal(await routeResponse.text(), '<!doctype html><div id="root">RiskRadar</div>');
     assert.equal(assetResponse.status, 200);
     assert.match(assetResponse.headers.get('cache-control') || '', /immutable/);
