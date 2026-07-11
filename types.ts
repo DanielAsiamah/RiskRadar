@@ -13,6 +13,23 @@ export interface CrimeData {
   contextCrimeCount?: number;
   postcodeRadiusMeters?: number;
   contextRadiusMeters?: number;
+  scoreMethod?: {
+    id?: string;
+    name?: string;
+    modelCap?: number;
+  };
+  scoreBreakdown?: {
+    localScore: number;
+    contextScore: number;
+    contextAdjustment: number;
+    factors: {
+      category: string;
+      label: string;
+      count: number;
+      points: number;
+      rule?: string;
+    }[];
+  };
   scoreFactors?: {
     label: string;
     impact: 'up' | 'down' | 'neutral';
@@ -27,6 +44,7 @@ export interface TrendPoint {
   violentCrimes: number;
   antiSocialCrimes: number;
   robberyCrimes: number;
+  dataAvailable?: boolean;
 }
 
 export interface TrendData {
@@ -39,6 +57,12 @@ export interface TrendData {
     robberyCrimes: 'rising' | 'cooling' | 'stable';
   };
   summary: string;
+  dataQuality?: {
+    complete: boolean;
+    requestedMonths: number;
+    loadedMonths: number;
+    failedMonths: string[];
+  };
 }
 
 export interface PremiumInsight {

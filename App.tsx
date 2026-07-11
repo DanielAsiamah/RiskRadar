@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import Constants from 'expo-constants';
 import * as Location from 'expo-location';
 import tw from 'twrnc';
 
@@ -10,49 +9,11 @@ import { PostcodeResult } from './types';
 import Landing from './components/Landing';
 import Scanner from './components/Scanner';
 import Results from './components/Results';
-
-const API_PORT = process.env.EXPO_PUBLIC_API_PORT || '3001';
-
-function getApiBaseUrl() {
-  const configuredBaseUrl = process.env.EXPO_PUBLIC_API_BASE_URL?.trim();
-  if (configuredBaseUrl) {
-    return configuredBaseUrl.replace(/\/+$/, '');
-  }
-
-  const hostUri =
-    Constants.expoConfig?.hostUri ||
-    Constants.platform?.web?.hostUri ||
-    null;
-
-  if (hostUri) {
-    const [host] = hostUri.split(':');
-    if (host) {
-      return `http://${host}:${API_PORT}`;
-    }
-  }
-
-  return `http://localhost:${API_PORT}`;
-}
-
-const API_BASE = getApiBaseUrl();
+import { apiRequest } from './api/client';
 
 interface NearbySuggestion {
   postcode: string;
   admin_district: string;
-}
-
-async function parseJsonResponse(response: Response) {
-  const responseText = await response.text();
-
-  if (!responseText) {
-    return null;
-  }
-
-  try {
-    return JSON.parse(responseText);
-  } catch {
-    throw new Error('The API returned an invalid JSON response. Make sure the backend server is running.');
-  }
 }
 
 export default function App() {
@@ -62,9 +23,10 @@ export default function App() {
   const [result, setResult] = useState<PostcodeResult | null>(null);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [searchCount, setSearchCount] = useState<number>(0);
-  const [scanDuration, setScanDuration] = useState<number>(10000);
+  const [scanDuration, setScanDuration] = useState<number>(2200);
   const [nearbySuggestions, setNearbySuggestions] = useState<NearbySuggestion[]>([]);
   const [findingNearby, setFindingNearby] = useState(false);
+  const searchRequestId = useRef(0);
 
   // Load state on mount
   useEffect(() => {
@@ -98,26 +60,18 @@ export default function App() {
     setError(null);
     setResult(null);
 
-    // Keep the scan premium, but much snappier than before.
-    const targetDuration = Math.floor(Math.random() * (7600 - 5200 + 1)) + 5200;
+    const targetDuration = 2200;
     setScanDuration(targetDuration);
+    const requestId = ++searchRequestId.current;
 
     try {
       const startTime = Date.now();
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 35000);
-      const response = await fetch(`${API_BASE}/api/analyze-postcode`, {
+      const data = await apiRequest<PostcodeResult>('/api/analyze-postcode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ postcode: postcodeInput.trim() }),
-        signal: controller.signal,
-      }).finally(() => clearTimeout(timeout));
-
-      const data = await parseJsonResponse(response);
-
-      if (!response.ok) {
-        throw new Error(data?.error || 'Failed to fetch postcode data.');
-      }
+      });
+      if (requestId !== searchRequestId.current) return;
 
       setResult(data);
 
@@ -136,17 +90,14 @@ export default function App() {
       const elapsed = Date.now() - startTime;
       const remainingTime = targetDuration - elapsed;
 
-      // Navigate to results when scan animation fully completes
+      // Keep a brief reveal animation without delaying a slow network response.
       setTimeout(() => {
-        setAppState('RESULTS');
-      }, Math.max(300, remainingTime + 350));
+        if (requestId === searchRequestId.current) setAppState('RESULTS');
+      }, Math.max(100, remainingTime));
 
     } catch (err: any) {
-      if (err?.name === 'AbortError') {
-        setError('The search request timed out. Check that the backend server is running and reachable from this device.');
-      } else {
-        setError(err.message || 'An unexpected error occurred. Please try again.');
-      }
+      if (requestId !== searchRequestId.current) return;
+      setError(err.message || 'An unexpected error occurred. Please try again.');
       setAppState('HOME');
     }
   };
@@ -171,15 +122,11 @@ export default function App() {
         accuracy: Location.Accuracy.Balanced,
       });
 
-      const response = await fetch(
-        `${API_BASE}/api/location-suggestions?lat=${encodeURIComponent(location.coords.latitude)}&lng=${encodeURIComponent(location.coords.longitude)}`
+      const data = await apiRequest<{ nearby?: NearbySuggestion[] }>(
+        `/api/location-suggestions?lat=${encodeURIComponent(location.coords.latitude)}&lng=${encodeURIComponent(location.coords.longitude)}`,
+        {},
+        20_000,
       );
-
-      const data = await parseJsonResponse(response);
-
-      if (!response.ok) {
-        throw new Error(data?.error || 'Unable to load nearby postcode suggestions.');
-      }
 
       const nearby = Array.isArray(data?.nearby) ? data.nearby : [];
       setNearbySuggestions(nearby);

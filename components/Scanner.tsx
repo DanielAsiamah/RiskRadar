@@ -16,7 +16,7 @@ const loadingMessages = [
   "Finalising report"
 ];
 
-export default function Scanner({ postcode, duration = 10000 }: ScannerProps) {
+export default function Scanner({ postcode, duration = 2200 }: ScannerProps) {
   const [step, setStep] = useState(0);
   const [displayProgress, setDisplayProgress] = useState(0);
   const [dots, setDots] = useState('');
@@ -27,7 +27,7 @@ export default function Scanner({ postcode, duration = 10000 }: ScannerProps) {
     Animated.loop(
       Animated.timing(orbitValue, {
         toValue: 1,
-        duration: 5200,
+        duration: 3200,
         easing: Easing.linear,
         useNativeDriver: true,
       })
@@ -48,7 +48,7 @@ export default function Scanner({ postcode, duration = 10000 }: ScannerProps) {
   useEffect(() => {
     const interval = setInterval(() => {
       setStep((prev) => Math.min(prev + 1, loadingMessages.length - 1));
-    }, 1100);
+    }, Math.max(420, duration / loadingMessages.length));
     return () => clearInterval(interval);
   }, []);
 
@@ -70,12 +70,7 @@ export default function Scanner({ postcode, duration = 10000 }: ScannerProps) {
       if (!isRunning) return;
 
       const elapsed = Date.now() - startTime;
-      const targetBase = Math.min(100, (elapsed / duration) * 100);
-
-      let actualTarget = targetBase;
-      if (targetBase > 72 && targetBase < 90) {
-        actualTarget = 72 + (targetBase - 72) * 0.45;
-      }
+      const actualTarget = Math.min(100, (elapsed / duration) * 100);
 
       if (currentProgress < actualTarget) {
         currentProgress += Math.max(0.35, (actualTarget - currentProgress) * 0.18);

@@ -1,16 +1,15 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { Shield, RefreshCw, AlertTriangle, Building2, Search, ChevronDown, TrendingUp, Map } from 'lucide-react-native';
+import { Shield, AlertTriangle, Search, ChevronDown, Info } from 'lucide-react-native';
 import tw from 'twrnc';
-import { PostcodeResult, PremiumInsight } from '../types';
+import { PostcodeResult } from '../types';
 import AnimatedRiskScore from './AnimatedRiskScore';
+import { HotspotView, TrendChart } from './IntelligenceCharts';
 
 interface ResultsProps {
   result: PostcodeResult;
   onReset: () => void;
 }
-
-type InsightId = PremiumInsight['id'];
 
 export default function Results({ result, onReset }: ResultsProps) {
   const [showDetails, setShowDetails] = useState(false);
@@ -27,16 +26,9 @@ export default function Results({ result, onReset }: ResultsProps) {
 
   const badge = getBadge(result.crimeData.crimeScore);
 
-  const getInsightIcon = (id: InsightId, size = 24) => {
-    if (id === 'trend') return <TrendingUp size={size} color={tw.color('indigo-600')} />;
-    if (id === 'category-trend') return <RefreshCw size={size} color={tw.color('indigo-600')} />;
-    if (id === 'area-context') return <Building2 size={size} color={tw.color('indigo-600')} />;
-    return <Map size={size} color={tw.color('indigo-600')} />;
-  };
-
   return (
     <View style={tw`flex-1 bg-white`}>
-      <ScrollView contentContainerStyle={tw`p-4 pb-12`}>
+      <ScrollView contentContainerStyle={tw`p-4 pb-12`} contentInsetAdjustmentBehavior="automatic">
         <View style={tw`flex-row justify-between items-center mb-8`}>
           <View>
             <Text style={tw`text-xs font-bold text-slate-400 uppercase tracking-widest mb-1`}>
@@ -114,13 +106,22 @@ export default function Results({ result, onReset }: ResultsProps) {
             <View style={tw`mt-3`}>
               <Text style={tw`font-bold text-slate-800 text-xs border-b border-slate-200 pb-1 mb-2`}>Main rating factors:</Text>
               {result.crimeData.scoreFactors?.map((factor, i) => (
-                <View key={i} style={tw`flex-row justify-between mb-2`}>
-                  <Text style={tw`text-xs text-slate-600 flex-1 mr-2`}>{factor.label}</Text>
-                  <Text style={tw`text-xs font-medium ${factor.impact === 'up' ? 'text-rose-500' : factor.impact === 'down' ? 'text-emerald-500' : 'text-slate-500'}`}>
+                <View key={i} style={tw`mb-3`}>
+                  <View style={tw`flex-row justify-between`}>
+                    <Text style={tw`text-xs font-bold text-slate-700 flex-1 mr-2`}>{factor.label}</Text>
+                    <Text style={tw`text-xs font-medium ${factor.impact === 'up' ? 'text-rose-500' : factor.impact === 'down' ? 'text-emerald-500' : 'text-slate-500'}`}>
                     {factor.impact === 'up' ? 'Raises' : factor.impact === 'down' ? 'Lowers' : 'Shapes'}
-                  </Text>
+                    </Text>
+                  </View>
+                  <Text style={tw`text-xs text-slate-500 leading-5 mt-1`}>{factor.detail}</Text>
                 </View>
               ))}
+              <View style={tw`flex-row items-start gap-2 bg-white rounded-xl p-3 mt-1`}>
+                <Info size={14} color={tw.color('slate-400')} />
+                <Text style={tw`text-[11px] text-slate-500 flex-1`}>
+                  Local score {result.crimeData.scoreBreakdown?.localScore ?? result.crimeData.crimeScore}, with a {result.crimeData.scoreBreakdown?.contextAdjustment ?? 0} point wider-area adjustment.
+                </Text>
+              </View>
             </View>
           )}
         </View>
@@ -138,35 +139,17 @@ export default function Results({ result, onReset }: ResultsProps) {
         </View>
 
         <View style={tw`mb-8 border-t border-slate-200 pt-8`}>
-          <Text style={tw`text-xl font-black text-slate-900 mb-6`}>Sandbox Intelligence</Text>
+          <Text style={tw`text-xl font-black text-slate-900 mb-2`}>Premium Intelligence</Text>
+          <Text style={tw`text-xs text-slate-500 mb-6`}>Unlocked in this sandbox build.</Text>
 
-          {result.premiumInsights.map((insight) => (
-            <View key={insight.id} style={tw`bg-slate-50 border border-slate-200 p-5 rounded-2xl flex-row items-start gap-4 mb-4`}>
-              <View style={tw`bg-indigo-50 p-3 rounded-xl`}>
-                {getInsightIcon(insight.id)}
-              </View>
-              <View style={tw`flex-1`}>
-                <View style={tw`flex-row items-center gap-2`}>
-                  <Text style={tw`font-bold text-slate-900`}>{insight.title}</Text>
-                  <Text style={tw`text-[10px] font-bold uppercase text-indigo-500`}>{insight.badge}</Text>
-                </View>
-                <Text style={tw`text-xs text-slate-500 mt-1`}>{insight.description}</Text>
-              </View>
-            </View>
-          ))}
-        </View>
+          <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
+            <Text style={tw`text-sm font-black text-slate-900 mb-4`}>Crime trend</Text>
+            <TrendChart trendData={result.trendData} />
+          </View>
 
-        <View style={tw`mb-8 border-t border-slate-200 pt-8`}>
-          <Text style={tw`text-xl font-black text-slate-900 mb-6`}>Trend Snapshot</Text>
-          <View style={tw`bg-white border border-slate-200 rounded-3xl p-6 shadow-sm`}>
-            <Text style={tw`text-sm text-slate-600 leading-5 mb-4`}>{result.trendData.summary}</Text>
-            {result.trendData.monthly.map((point) => (
-              <View key={point.month} style={tw`flex-row justify-between items-center py-2 border-b border-slate-100`}>
-                <Text style={tw`text-xs font-bold text-slate-500 uppercase`}>{point.monthDisplay}</Text>
-                <Text style={tw`text-xs text-slate-700`}>{point.totalCrimes} total</Text>
-                <Text style={tw`text-xs text-slate-500`}>V {point.violentCrimes} | ASB {point.antiSocialCrimes}</Text>
-              </View>
-            ))}
+          <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
+            <Text style={tw`text-sm font-black text-slate-900 mb-4`}>Latest hotspot clusters</Text>
+            <HotspotView hotspotData={result.hotspotData} />
           </View>
         </View>
 

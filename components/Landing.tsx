@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TextInput, TouchableOpacity, ScrollView } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, ScrollView, KeyboardAvoidingView } from 'react-native';
 import { Search, MapPin, Compass, LocateFixed } from 'lucide-react-native';
 import tw from 'twrnc';
 
@@ -33,7 +33,8 @@ export default function Landing({
   findingNearby,
 }: LandingProps) {
   return (
-    <View style={tw`flex-1 items-center justify-center px-4 bg-white`}>
+    <KeyboardAvoidingView style={tw`flex-1 bg-white`} behavior={process.env.EXPO_OS === 'ios' ? 'padding' : undefined}>
+    <ScrollView contentContainerStyle={tw`flex-grow items-center justify-center px-4 py-10`} keyboardShouldPersistTaps="handled">
       <View style={tw`w-20 h-20 bg-white border border-slate-200 shadow-sm rounded-3xl flex items-center justify-center mb-8`}>
         <Compass size={40} color={tw.color('indigo-500')} />
       </View>
@@ -56,6 +57,9 @@ export default function Landing({
             value={postcodeInput}
             onChangeText={setPostcodeInput}
             autoCapitalize="characters"
+            autoCorrect={false}
+            returnKeyType="search"
+            onSubmitEditing={handleSearch}
           />
         </View>
 
@@ -65,7 +69,10 @@ export default function Landing({
 
         <TouchableOpacity
           onPress={handleSearch}
-          style={tw`bg-indigo-600 h-16 rounded-2xl shadow-md flex-row items-center justify-center gap-3`}
+          disabled={!postcodeInput.trim()}
+          accessibilityRole="button"
+          accessibilityLabel="Check crime risk"
+          style={tw`${postcodeInput.trim() ? 'bg-indigo-600' : 'bg-indigo-300'} h-16 rounded-2xl shadow-md flex-row items-center justify-center gap-3`}
         >
           <Search size={20} color="white" />
           <Text style={tw`text-white font-bold text-lg`}>Check Risk</Text>
@@ -73,6 +80,7 @@ export default function Landing({
 
         <TouchableOpacity
           onPress={useCurrentLocation}
+          disabled={findingNearby}
           style={tw`mt-3 h-14 rounded-2xl border border-slate-200 bg-white flex-row items-center justify-center gap-3`}
         >
           <LocateFixed size={18} color={tw.color('indigo-500')} />
@@ -121,6 +129,7 @@ export default function Landing({
           </View>
         </View>
       )}
-    </View>
+    </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
