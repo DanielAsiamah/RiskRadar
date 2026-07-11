@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createCrimeFileSource } from './crime-file-source.mjs';
+import { blendPostcodeScore, calculateCrimeScore, crimeScoreModel } from './crime-score.mjs';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -1765,7 +1766,8 @@ function buildMapCompareCacheKey(payload = {}) {
 }
 
 function getCachedAnalysisResult(cacheKey) {
-  const entry = analysisResultCache.find((item) => item.key === cacheKey);
+  const versionedCacheKey = `${crimeScoreModel.id}:${cacheKey}`;
+  const entry = analysisResultCache.find((item) => item.key === versionedCacheKey);
 
   if (!entry) {
     return null;
@@ -1785,7 +1787,7 @@ function getCachedAnalysisResult(cacheKey) {
 
 function setCachedAnalysisResult(cacheKey, value) {
   const entry = {
-    key: cacheKey,
+    key: `${crimeScoreModel.id}:${cacheKey}`,
     value: cloneJsonValue(value),
     expiresAt: Date.now() + ANALYSIS_CACHE_TTL_MS,
   };
@@ -2418,108 +2420,6 @@ function filterCrimesByRadius(crimes, latitude, longitude, radiusMeters) {
   });
 }
 
-function scoreCrime(categories, totalCrimes) {
-  if (!totalCrimes) {
-    return 4;
-  }
-
-  const violentCount = getCategoryCount(categories, 'violent-crime') || getCategoryCount(categories, 'violence-and-sexual-offences');
-  const robberyCount = getCategoryCount(categories, 'robbery');
-  const weaponsCount = getCategoryCount(categories, 'possession-of-weapons');
-  const burglaryCount = getCategoryCount(categories, 'burglary');
-  const antiSocialCount = getCategoryCount(categories, 'anti-social-behaviour');
-  const vehicleCrimeCount = getCategoryCount(categories, 'vehicle-crime');
-  const drugsCount = getCategoryCount(categories, 'drugs');
-  const theftCount =
-    getCategoryCount(categories, 'other-theft') +
-    getCategoryCount(categories, 'theft') +
-    getCategoryCount(categories, 'theft-from-the-person') +
-    getCategoryCount(categories, 'shoplifting') +
-    getCategoryCount(categories, 'bicycle-theft');
-  const topCategoryShare = (categories[0]?.count || 0) / totalCrimes;
-  const violentShare = violentCount / totalCrimes;
-  const robberyAndWeaponsCount = robberyCount + weaponsCount;
-
-  // Threshold scoring keeps high scores rare, but still leaves room for meaningful
-  // separation between postcodes once crimes are filtered to a tight local radius.
-  const robberyPoints = thresholdPoints(robberyCount, [
-    [2, 1],
-    [5, 2],
-    [10, 4],
-    [20, 6],
-  ]);
-  const weaponsPoints = thresholdPoints(weaponsCount, [
-    [1, 1],
-    [3, 2],
-    [6, 4],
-  ]);
-  const violentPoints = thresholdPoints(violentCount, [
-    [10, 1],
-    [20, 2],
-    [35, 3],
-    [60, 4],
-    [100, 5],
-  ]);
-  const burglaryPoints = thresholdPoints(burglaryCount, [
-    [3, 1],
-    [8, 2],
-    [15, 3],
-  ]);
-  const antiSocialPoints = thresholdPoints(antiSocialCount, [
-    [5, 1],
-    [15, 2],
-    [35, 3],
-    [70, 4],
-  ]);
-  const vehiclePoints = thresholdPoints(vehicleCrimeCount, [
-    [5, 1],
-    [12, 2],
-    [25, 3],
-  ]);
-  const drugsPoints = thresholdPoints(drugsCount, [
-    [3, 1],
-    [8, 2],
-    [15, 3],
-  ]);
-  const theftPoints = thresholdPoints(theftCount, [
-    [10, 1],
-    [25, 2],
-    [50, 3],
-    [90, 4],
-  ]);
-  const totalVolumePoints = thresholdPoints(totalCrimes, [
-    [25, 1],
-    [50, 2],
-    [100, 3],
-    [180, 4],
-    [300, 5],
-  ]);
-  const concentrationPoints = topCategoryShare >= 0.45 ? 2 : topCategoryShare >= 0.32 ? 1 : 0;
-  const violentSharePoints = violentShare >= 0.4 ? 2 : violentShare >= 0.25 ? 1 : 0;
-  const harmClusterPoints = thresholdPoints(robberyAndWeaponsCount, [
-    [2, 1],
-    [6, 2],
-    [12, 3],
-  ]);
-
-  const score =
-    4 +
-    robberyPoints +
-    weaponsPoints +
-    violentPoints +
-    burglaryPoints +
-    antiSocialPoints +
-    vehiclePoints +
-    drugsPoints +
-    theftPoints +
-    totalVolumePoints +
-    concentrationPoints +
-    violentSharePoints +
-    harmClusterPoints;
-
-  return clamp(score, 1, 70);
-}
-
 function getSafetyLevel(score) {
   if (score >= 58) return 'SEVERE';
   if (score >= 42) return 'HIGH';
@@ -2564,7 +2464,28 @@ function buildRiskSignals({ district, totalCrimes, categories }) {
   return signals;
 }
 
-function buildScoreFactors({ district, totalCrimes, categories, crimeScore }) {
+function buildScoreFactors({ district, totalCrimes, categories, crimeScore, scoreBreakdown }) {
+  const calculatedFactors = Array.isArray(scoreBreakdown?.factors) ? scoreBreakdown.factors : [];
+
+  if (calculatedFactors.length) {
+    const factors = calculatedFactors
+      .sort((left, right) => right.points - left.points || right.count - left.count)
+      .slice(0, 3)
+      .map((factor) => ({
+        label: factor.label,
+        impact: 'up',
+        detail: `${factor.detail} This adds ${factor.points} point${factor.points === 1 ? '' : 's'} to the local score.`,
+      }));
+
+    factors.push({
+      label: 'Conservative UK-wide scale',
+      impact: 'down',
+      detail: `The result stays at ${crimeScore}/100 because ordinary urban volume is deliberately weighted lightly; 50+ requires several exceptional serious-crime thresholds at once.`,
+    });
+
+    return factors.slice(0, 4);
+  }
+
   const violentCount = getCategoryCount(categories, 'violent-crime') || getCategoryCount(categories, 'violence-and-sexual-offences');
   const antiSocialCount = getCategoryCount(categories, 'anti-social-behaviour');
   const robberyCount = getCategoryCount(categories, 'robbery');
@@ -2862,9 +2783,10 @@ async function fetchCrimeData(latitude, longitude) {
 
   const postcodeCategories = summarizeCrimeCategories(postcodeCrimes);
   const contextCategories = summarizeCrimeCategories(contextCrimes);
-  const postcodeCrimeScore = scoreCrime(postcodeCategories, postcodeCrimes.length);
-  const contextCrimeScore = scoreCrime(contextCategories, contextCrimes.length);
-  const blendedCrimeScore = Math.round(postcodeCrimeScore * 0.65 + contextCrimeScore * 0.35);
+  const postcodeScoreResult = calculateCrimeScore(postcodeCategories, postcodeCrimes.length);
+  const contextScoreResult = calculateCrimeScore(contextCategories, contextCrimes.length);
+  const blendedScore = blendPostcodeScore(postcodeScoreResult, contextScoreResult);
+  const blendedCrimeScore = blendedScore.score;
   const totalCrimes = postcodeCrimes.length;
   const month = postcodeCrimes?.[0]?.month || contextCrimes?.[0]?.month || safeCrimes?.[0]?.month || null;
 
@@ -2878,8 +2800,15 @@ async function fetchCrimeData(latitude, longitude) {
     contextCrimeCount: contextCrimes.length,
     postcodeRadiusMeters: POSTCODE_RADIUS_METERS,
     contextRadiusMeters: CONTEXT_RADIUS_METERS,
+    scoreMethod: crimeScoreModel,
+    scoreBreakdown: {
+      localScore: blendedScore.localScore,
+      contextScore: blendedScore.contextScore,
+      contextAdjustment: blendedScore.contextAdjustment,
+      factors: postcodeScoreResult.factors,
+    },
     capExplanation:
-      `Live score blends incidents within roughly ${POSTCODE_RADIUS_METERS} metres of the postcode point with a wider ${CONTEXT_RADIUS_METERS} metre context view, so the result stays postcode-led without becoming too brittle around one exact point.`,
+      `The score is led by incidents within ${POSTCODE_RADIUS_METERS} metres. The wider ${CONTEXT_RADIUS_METERS} metre context can change it by only -2 to +3 points, and a score above 50 requires several exceptional thresholds at once.`,
   };
 }
 
@@ -3261,7 +3190,8 @@ async function computeAreaAnalysis(area = {}) {
     categories: area.categories,
   });
   const contextCategories = latestAreaFeed.categories;
-  const crimeScore = scoreCrime(contextCategories, latestAreaFeed.totalCrimes);
+  const scoreResult = calculateCrimeScore(contextCategories, latestAreaFeed.totalCrimes);
+  const crimeScore = scoreResult.score;
   const hotspotPayload = await fetchHotspotMap({
     points: polygonPoints,
     month: area.month,
@@ -3285,6 +3215,7 @@ async function computeAreaAnalysis(area = {}) {
     totalCrimes: latestAreaFeed.totalCrimes,
     categories: contextCategories,
     crimeScore,
+    scoreBreakdown: { factors: scoreResult.factors },
   });
   const areaContext = buildAreaContext({
     district: label,
@@ -3307,9 +3238,16 @@ async function computeAreaAnalysis(area = {}) {
       month: latestAreaFeed.month || '',
       monthDisplay: formatMonthDisplay(latestAreaFeed.month),
       categories: contextCategories,
+      scoreMethod: crimeScoreModel,
+      scoreBreakdown: {
+        localScore: scoreResult.score,
+        contextScore: null,
+        contextAdjustment: 0,
+        factors: scoreResult.factors,
+      },
       riskSignals,
       scoreFactors,
-      capExplanation: `Area score is calculated from incidents inside the selected polygon, using the same category thresholds as postcode analysis but without a postcode-radius blend.`,
+      capExplanation: 'Area score is calculated only from incidents inside the selected polygon, using the same deliberately conservative thresholds as postcode analysis.',
     },
     aiAnalysis: buildAiAnalysis({
       district: label,
@@ -3381,6 +3319,7 @@ async function computePointAnalysis(payload = {}) {
     totalCrimes: crimeData.totalCrimes,
     categories: crimeData.categories,
     crimeScore: crimeData.crimeScore,
+    scoreBreakdown: crimeData.scoreBreakdown,
   });
   const areaContext = buildAreaContext({
     district: pointContext.district,
@@ -3724,6 +3663,7 @@ async function computeLocationAnalysis(query) {
     totalCrimes: crimeData.totalCrimes,
     categories: crimeData.categories,
     crimeScore: crimeData.crimeScore,
+    scoreBreakdown: crimeData.scoreBreakdown,
   });
   const areaContext = buildAreaContext({
     district: location.admin_district,
