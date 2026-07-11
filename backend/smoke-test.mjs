@@ -294,7 +294,14 @@ async function main() {
   });
   assert(monthly.response.ok, `/api/monthly-crime-series failed with ${monthly.response.status}`);
   assert(Array.isArray(monthly.json?.monthly), 'Monthly crime series missing monthly array');
-  results.push({ step: 'monthly-crime-series', ok: true, months: monthly.json.monthly.length });
+  assert(Number.isFinite(monthly.json?.dataQuality?.loadedMonths), 'Monthly crime series missing completeness metadata');
+  assert(monthly.json.monthly.every((point) => typeof point.dataAvailable === 'boolean'), 'Monthly points must identify unavailable data');
+  results.push({
+    step: 'monthly-crime-series',
+    ok: true,
+    months: monthly.json.monthly.length,
+    loadedMonths: monthly.json.dataQuality.loadedMonths,
+  });
 
   const areaAnalysis = await requestJson('/api/analyze-area', {
     method: 'POST',

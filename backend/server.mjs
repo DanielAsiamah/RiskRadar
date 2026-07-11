@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createCrimeFileSource } from './crime-file-source.mjs';
 import { blendPostcodeScore, calculateCrimeScore, crimeScoreModel } from './crime-score.mjs';
+import { mapSettledWithConcurrency } from './bounded-concurrency.mjs';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -21,6 +22,7 @@ const CACHE_MAX_ENTRIES = Number(process.env.CACHE_MAX_ENTRIES || 500);
 const POSTCODE_RADIUS_METERS = 400;
 const CONTEXT_RADIUS_METERS = 900;
 const TREND_MONTH_COUNT = 6;
+const MONTHLY_FETCH_CONCURRENCY = clampEnvironmentInteger(process.env.MONTHLY_FETCH_CONCURRENCY, 2, 1, 4);
 const CORS_ALLOW_ORIGIN = process.env.CORS_ALLOW_ORIGIN || '*';
 const RATE_LIMIT_ENABLED = process.env.RATE_LIMIT_ENABLED !== 'false';
 const RATE_LIMIT_WINDOW_MS = Math.max(1000, Number(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000);
@@ -45,6 +47,7 @@ const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.
 const CRIME_SOURCE_MODE = String(process.env.CRIME_SOURCE_MODE || 'api').trim().toLowerCase() === 'files' ? 'files' : 'api';
 const CRIME_DATA_ROOT = process.env.CRIME_DATA_ROOT || path.join(process.cwd(), 'backend', 'data', 'police');
 const CRIME_SOURCE_FALLBACK_TO_API = process.env.CRIME_SOURCE_FALLBACK_TO_API !== 'false';
+const ANALYSIS_CACHE_SCHEMA_VERSION = 'monthly-quality-v1';
 const SERVER_STARTED_AT = new Date();
 const STARTUP_GRACE_PERIOD_MS = Math.max(0, Number(process.env.STARTUP_GRACE_PERIOD_MS) || 5000);
 const require = createRequire(import.meta.url);
@@ -100,6 +103,11 @@ const allowedCorsOrigins = CORS_ALLOW_ORIGIN
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+
+function clampEnvironmentInteger(value, fallback, minimum, maximum) {
+  const parsed = Number(value);
+  return Math.min(maximum, Math.max(minimum, Number.isFinite(parsed) ? Math.floor(parsed) : fallback));
+}
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -1766,7 +1774,7 @@ function buildMapCompareCacheKey(payload = {}) {
 }
 
 function getCachedAnalysisResult(cacheKey) {
-  const versionedCacheKey = `${crimeScoreModel.id}:${cacheKey}`;
+  const versionedCacheKey = `${crimeScoreModel.id}:${ANALYSIS_CACHE_SCHEMA_VERSION}:${cacheKey}`;
   const entry = analysisResultCache.find((item) => item.key === versionedCacheKey);
 
   if (!entry) {
@@ -1787,7 +1795,7 @@ function getCachedAnalysisResult(cacheKey) {
 
 function setCachedAnalysisResult(cacheKey, value) {
   const entry = {
-    key: `${crimeScoreModel.id}:${cacheKey}`,
+    key: `${crimeScoreModel.id}:${ANALYSIS_CACHE_SCHEMA_VERSION}:${cacheKey}`,
     value: cloneJsonValue(value),
     expiresAt: Date.now() + ANALYSIS_CACHE_TTL_MS,
   };
@@ -3386,7 +3394,7 @@ async function analyzePoint(payload = {}) {
   };
 }
 
-function buildMonthlyPointFromCrimes(monthKey, crimes) {
+function buildMonthlyPointFromCrimes(monthKey, crimes, dataAvailable = true) {
   return {
     month: monthKey,
     monthDisplay: formatShortMonthDisplay(monthKey),
@@ -3394,98 +3402,27 @@ function buildMonthlyPointFromCrimes(monthKey, crimes) {
     violentCrimes: crimes.filter((crime) => ['violent-crime', 'violence-and-sexual-offences'].includes(crime.category)).length,
     antiSocialCrimes: crimes.filter((crime) => crime.category === 'anti-social-behaviour').length,
     robberyCrimes: crimes.filter((crime) => crime.category === 'robbery').length,
+    dataAvailable,
   };
 }
 
-async function fetchMonthlyCrimeSeries(payload = {}) {
-  const monthCount = clamp(Number(payload.monthCount) || TREND_MONTH_COUNT, 3, 12);
-  const monthKeys = (await fetchAvailableCrimeMonths()).slice(0, monthCount).reverse();
-  const categoryFilters = normalizeCategoryFilters(payload.categories);
-  const monthly = [];
-
-  try {
-    if (payload.postcode || payload.query) {
-      const location = await resolveLocation(payload.postcode ?? payload.query);
-      const radiusMeters = clamp(Number(payload.radiusMeters) || POSTCODE_RADIUS_METERS, 100, 3000);
-
-      for (const monthKey of monthKeys) {
-        // eslint-disable-next-line no-await-in-loop
-        const crimes = await fetchStreetCrimesAtPoint(location.latitude, location.longitude, monthKey);
-        const radiusFilteredCrimes = filterCrimesByRadius(crimes, location.latitude, location.longitude, radiusMeters);
-        const filteredCrimes = filterCrimesByCategory(radiusFilteredCrimes, categoryFilters);
-        monthly.push(buildMonthlyPointFromCrimes(monthKey, filteredCrimes));
-
-        if (monthKey !== monthKeys[monthKeys.length - 1]) {
-          // eslint-disable-next-line no-await-in-loop
-          await sleep(150);
-        }
-      }
-
-      const trend = buildTrendSummary(monthly);
-
-      return {
-        mode: 'postcode',
-        target: {
-          postcode: location.postcode,
-          district: location.admin_district,
-          latitude: location.latitude,
-          longitude: location.longitude,
-          radiusMeters,
-        },
-        monthCount,
-        appliedCategories: categoryFilters,
-        monthly,
-        ...trend,
-      };
+function buildConcurrentMonthlyResult(monthKeys, settledResults) {
+  const loadedMonthly = [];
+  const failedMonths = [];
+  const monthly = monthKeys.map((monthKey, index) => {
+    const result = settledResults[index];
+    if (result?.status === 'fulfilled') {
+      loadedMonthly.push(result.value);
+      return result.value;
     }
 
-    const polygonPoints = normalizePolygonPoints(payload.points);
-    if (polygonPoints.length < 3) {
-      const error = new Error('A postcode/query or at least three polygon points are required.');
-      error.statusCode = 400;
-      throw error;
-    }
+    failedMonths.push(monthKey);
+    return buildMonthlyPointFromCrimes(monthKey, [], false);
+  });
 
-    for (const monthKey of monthKeys) {
-      // eslint-disable-next-line no-await-in-loop
-      const areaResult = await fetchStreetCrimesInPolygon(polygonPoints, monthKey);
-      const filteredCrimes = filterCrimesByCategory(areaResult.crimes, categoryFilters);
-      monthly.push(buildMonthlyPointFromCrimes(monthKey, filteredCrimes));
-
-      if (monthKey !== monthKeys[monthKeys.length - 1]) {
-        // eslint-disable-next-line no-await-in-loop
-        await sleep(150);
-      }
-    }
-
-    const trend = buildTrendSummary(monthly);
-
-    return {
-      mode: 'area',
-      target: {
-        polygon: polygonPoints,
-        center: averageCoordinates(polygonPoints),
-      },
-      monthCount,
-      appliedCategories: categoryFilters,
-      monthly,
-      ...trend,
-    };
-  } catch (error) {
-    if (error.statusCode === 429) {
-      const fallbackMonthly = monthKeys.map((monthKey) => {
-        const existing = monthly.find((point) => point.month === monthKey);
-        return existing || buildMonthlyPointFromCrimes(monthKey, []);
-      });
-
-      return {
-        mode: payload.postcode || payload.query ? 'postcode' : 'area',
-        target: payload.postcode || payload.query
-          ? { query: payload.postcode ?? payload.query }
-          : { polygon: normalizePolygonPoints(payload.points) },
-        monthCount,
-        appliedCategories: categoryFilters,
-        monthly: fallbackMonthly,
+  const trend = loadedMonthly.length
+    ? buildTrendSummary(loadedMonthly)
+    : {
         direction: 'stable',
         changePercent: 0,
         categoryDirection: {
@@ -3493,14 +3430,84 @@ async function fetchMonthlyCrimeSeries(payload = {}) {
           antiSocialCrimes: 'stable',
           robberyCrimes: 'stable',
         },
-        summary: monthly.length
-          ? 'Monthly series data is partially loaded because the public police API throttled part of the history lookup.'
-          : 'Monthly series data is temporarily unavailable because the public police API throttled the history lookup.',
+        summary: 'Historical trend data is temporarily unavailable because every monthly lookup failed.',
       };
-    }
 
+  if (failedMonths.length && loadedMonthly.length) {
+    trend.summary += ` ${loadedMonthly.length} of ${monthKeys.length} months loaded; unavailable months are excluded from the trend calculation.`;
+  }
+
+  return {
+    monthly,
+    trend,
+    dataQuality: {
+      complete: failedMonths.length === 0,
+      requestedMonths: monthKeys.length,
+      loadedMonths: loadedMonthly.length,
+      failedMonths,
+      concurrency: MONTHLY_FETCH_CONCURRENCY,
+    },
+  };
+}
+
+async function fetchMonthlyCrimeSeries(payload = {}) {
+  const monthCount = clamp(Number(payload.monthCount) || TREND_MONTH_COUNT, 3, 12);
+  const monthKeys = (await fetchAvailableCrimeMonths()).slice(0, monthCount).reverse();
+  const categoryFilters = normalizeCategoryFilters(payload.categories);
+  if (payload.postcode || payload.query) {
+    const location = await resolveLocation(payload.postcode ?? payload.query);
+    const radiusMeters = clamp(Number(payload.radiusMeters) || POSTCODE_RADIUS_METERS, 100, 3000);
+    const settled = await mapSettledWithConcurrency(monthKeys, MONTHLY_FETCH_CONCURRENCY, async (monthKey) => {
+      const crimes = await fetchStreetCrimesAtPoint(location.latitude, location.longitude, monthKey);
+      const radiusFilteredCrimes = filterCrimesByRadius(crimes, location.latitude, location.longitude, radiusMeters);
+      const filteredCrimes = filterCrimesByCategory(radiusFilteredCrimes, categoryFilters);
+      return buildMonthlyPointFromCrimes(monthKey, filteredCrimes);
+    });
+    const series = buildConcurrentMonthlyResult(monthKeys, settled);
+
+    return {
+      mode: 'postcode',
+      target: {
+        postcode: location.postcode,
+        district: location.admin_district,
+        latitude: location.latitude,
+        longitude: location.longitude,
+        radiusMeters,
+      },
+      monthCount,
+      appliedCategories: categoryFilters,
+      monthly: series.monthly,
+      dataQuality: series.dataQuality,
+      ...series.trend,
+    };
+  }
+
+  const polygonPoints = normalizePolygonPoints(payload.points);
+  if (polygonPoints.length < 3) {
+    const error = new Error('A postcode/query or at least three polygon points are required.');
+    error.statusCode = 400;
     throw error;
   }
+
+  const settled = await mapSettledWithConcurrency(monthKeys, MONTHLY_FETCH_CONCURRENCY, async (monthKey) => {
+      const areaResult = await fetchStreetCrimesInPolygon(polygonPoints, monthKey);
+      const filteredCrimes = filterCrimesByCategory(areaResult.crimes, categoryFilters);
+      return buildMonthlyPointFromCrimes(monthKey, filteredCrimes);
+  });
+  const series = buildConcurrentMonthlyResult(monthKeys, settled);
+
+  return {
+    mode: 'area',
+    target: {
+      polygon: polygonPoints,
+      center: averageCoordinates(polygonPoints),
+    },
+    monthCount,
+    appliedCategories: categoryFilters,
+    monthly: series.monthly,
+    dataQuality: series.dataQuality,
+    ...series.trend,
+  };
 }
 
 async function fetchHotspotMap(payload = {}) {
@@ -3574,71 +3581,18 @@ async function fetchHotspotMap(payload = {}) {
 
 async function fetchCrimeHistory(latitude, longitude, monthCount = TREND_MONTH_COUNT) {
   const monthKeys = (await fetchAvailableCrimeMonths()).slice(0, monthCount).reverse();
-  const monthly = [];
-
-  try {
-    for (const monthKey of monthKeys) {
-      const crimesUrl = `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}&date=${monthKey}`;
-      // eslint-disable-next-line no-await-in-loop
-      const crimes = await fetchJson(crimesUrl, {}, 18000).catch((error) => {
-        if (error.statusCode === 404) {
-          return [];
-        }
-        throw error;
-      });
-
+  const settled = await mapSettledWithConcurrency(monthKeys, MONTHLY_FETCH_CONCURRENCY, async (monthKey) => {
+      const crimes = await fetchStreetCrimesAtPoint(latitude, longitude, monthKey);
       const safeCrimes = Array.isArray(crimes) ? crimes : [];
       const postcodeCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, POSTCODE_RADIUS_METERS);
+      return buildMonthlyPointFromCrimes(monthKey, postcodeCrimes);
+  });
+  const series = buildConcurrentMonthlyResult(monthKeys, settled);
 
-      monthly.push({
-        month: monthKey,
-        monthDisplay: formatShortMonthDisplay(monthKey),
-        totalCrimes: postcodeCrimes.length,
-        violentCrimes: postcodeCrimes.filter((crime) => ['violent-crime', 'violence-and-sexual-offences'].includes(crime.category)).length,
-        antiSocialCrimes: postcodeCrimes.filter((crime) => crime.category === 'anti-social-behaviour').length,
-        robberyCrimes: postcodeCrimes.filter((crime) => crime.category === 'robbery').length,
-      });
-
-      if (monthKey !== monthKeys[monthKeys.length - 1]) {
-        // Light pacing helps with public API throttling when several users search at once.
-        // eslint-disable-next-line no-await-in-loop
-        await sleep(150);
-      }
-    }
-  } catch (error) {
-    if (error.statusCode === 429) {
-      const fallbackMonthly = monthKeys.map((monthKey) => {
-        const existing = monthly.find((point) => point.month === monthKey);
-        return existing || {
-          month: monthKey,
-          monthDisplay: formatShortMonthDisplay(monthKey),
-          totalCrimes: 0,
-          violentCrimes: 0,
-          antiSocialCrimes: 0,
-          robberyCrimes: 0,
-        };
-      });
-
-      return {
-        monthly: fallbackMonthly,
-        direction: 'stable',
-        changePercent: 0,
-        categoryDirection: {
-          violentCrimes: 'stable',
-          antiSocialCrimes: 'stable',
-          robberyCrimes: 'stable',
-        },
-        summary: monthly.length
-          ? 'Historical trend data is partially loaded because the public police API throttled part of the month-by-month lookup.'
-          : 'Historical trend data is temporarily unavailable because the public police API throttled the month-by-month lookup.',
-      };
-    }
-
-    throw error;
-  }
   return {
-    monthly,
-    ...buildTrendSummary(monthly),
+    monthly: series.monthly,
+    dataQuality: series.dataQuality,
+    ...series.trend,
   };
 }
 

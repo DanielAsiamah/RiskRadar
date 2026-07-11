@@ -121,6 +121,8 @@ This repo now includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/
 
 Use [.env.example](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/.env.example) as the starting point for production configuration.
 
+`MONTHLY_FETCH_CONCURRENCY` controls how many historical police-data months are requested at once. The default is `2`, and the backend enforces a range of `1` to `4` to avoid overwhelming the public API. Trend responses include `dataQuality` plus `dataAvailable` on every monthly point; failed months are excluded from trend calculations instead of being treated as zero-crime months.
+
 ### Storage mode
 
 The backend now supports two state persistence modes:

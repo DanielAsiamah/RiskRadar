@@ -26,6 +26,7 @@
     "api:crime-score-calibration": "node backend/crime-score-calibration.mjs",
     "api:crime-source-check": "node backend/crime-source-check.mjs",
     "api:score-test": "node --test backend/crime-score.test.mjs",
+    "api:concurrency-test": "node --test backend/bounded-concurrency.test.mjs",
     "api:import-crime-snapshots": "node backend/import-crime-snapshots.mjs",
     "api:prewarm": "node backend/prewarm.mjs",
     "api:smoke": "node backend/smoke-test.mjs",
