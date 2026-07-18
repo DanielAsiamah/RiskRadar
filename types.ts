@@ -10,6 +10,7 @@ export interface CrimeData {
   }[];
   capExplanation?: string;
   riskSignals?: string[];
+  riskSignalDetails?: RiskSignalDetail[];
   contextCrimeCount?: number;
   postcodeRadiusMeters?: number;
   contextRadiusMeters?: number;
@@ -35,6 +36,50 @@ export interface CrimeData {
     impact: 'up' | 'down' | 'neutral';
     detail: string;
   }[];
+}
+
+export interface EvidenceReference {
+  persistentId: string;
+  category: string;
+  categoryLabel: string;
+  month: string;
+  locationStreet: string;
+  officialCaseUrl: string;
+}
+
+export interface RiskSignalDetail {
+  id: string;
+  category: string;
+  categoryLabel: string;
+  count: number;
+  month: string;
+  monthDisplay: string;
+  headline: string;
+  detail: string;
+  roads: Array<{
+    name: string;
+    count: number;
+  }>;
+  evidence: EvidenceReference[];
+}
+
+export interface CrimeEvidenceDetail {
+  persistentId: string;
+  category: string;
+  categoryLabel: string;
+  month: string;
+  monthDisplay: string;
+  locationStreet: string;
+  latitude: number;
+  longitude: number;
+  outcomes: Array<{
+    code: string;
+    status: string;
+    date: string;
+    dateDisplay: string;
+  }>;
+  officialSourceUrl: string;
+  disclosure: string;
 }
 
 export interface TrendPoint {
@@ -79,6 +124,19 @@ export interface HotspotCluster {
   distanceMeters: number;
   topCategory: string;
   topCategoryLabel: string;
+  locationLabel?: string;
+  roads?: Array<{
+    name: string;
+    count: number;
+  }>;
+  evidence?: Array<{
+    persistentId: string;
+    category: string;
+    categoryLabel: string;
+    month: string;
+    locationStreet: string;
+    officialCaseUrl: string;
+  }>;
 }
 
 export interface HotspotData {

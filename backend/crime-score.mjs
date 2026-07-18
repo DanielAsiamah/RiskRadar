@@ -1,4 +1,4 @@
-const SCORE_MODEL_VERSION = 'uk-local-pressure-v2';
+const SCORE_MODEL_VERSION = 'uk-local-pressure-v3';
 
 const CATEGORY_RULES = [
   {
@@ -20,7 +20,7 @@ const CATEGORY_RULES = [
     key: 'violent-crime',
     aliases: ['violence-and-sexual-offences'],
     label: 'Violent crime',
-    thresholds: [[25, 1], [60, 2], [120, 3], [220, 5]],
+    thresholds: [[1, 2], [5, 7], [10, 14], [20, 22], [35, 30], [60, 38], [100, 46]],
   },
   {
     key: 'burglary',
@@ -73,7 +73,7 @@ export function calculateCrimeScore(categories = [], totalCrimes = 0) {
 
   if (incidentCount === 0) {
     return {
-      score: 2,
+      score: 5,
       model: SCORE_MODEL_VERSION,
       factors: [],
       explanation: 'No incidents were returned in the local search radius. A small baseline remains because public data coverage is not a guarantee of zero risk.',
@@ -81,8 +81,8 @@ export function calculateCrimeScore(categories = [], totalCrimes = 0) {
   }
 
   const factors = [];
-  let score = 2;
-  const volumePoints = thresholdPoints(incidentCount, [[20, 1], [50, 2], [100, 3], [200, 4], [350, 5]]);
+  let score = 5;
+  const volumePoints = thresholdPoints(incidentCount, [[5, 2], [10, 4], [20, 7], [40, 10], [75, 14], [120, 18], [200, 22], [350, 28]]);
   addFactor(factors, 'local-volume', 'Local incident volume', incidentCount, volumePoints, `${incidentCount} incidents were recorded inside the selected local boundary.`);
   score += volumePoints;
 
@@ -112,31 +112,41 @@ export function calculateCrimeScore(categories = [], totalCrimes = 0) {
   addFactor(factors, 'serious-harm-cluster', 'Serious-harm concentration', seriousHarmCount, seriousHarmPoints, `${seriousHarmCount} combined robbery and weapons incidents indicate an unusually concentrated serious-harm pattern.`);
   score += seriousHarmPoints;
 
-  const extremePressurePoints = thresholdPoints(incidentCount, [[600, 2], [900, 5], [1300, 9]]);
+  const extremePressurePoints = thresholdPoints(incidentCount, [[600, 3], [900, 7], [1300, 12]]);
   addFactor(factors, 'extreme-pressure', 'Exceptional incident density', incidentCount, extremePressurePoints, `${incidentCount} incidents are in an exceptional local-density band.`);
   score += extremePressurePoints;
 
   const violentShare = violentCount / incidentCount;
-  if (violentCount >= 100 && violentShare >= 0.45) {
-    score += 2;
-    addFactor(factors, 'violent-concentration', 'Violent-crime concentration', violentCount, 2, `${Math.round(violentShare * 100)}% of local incidents are violent crime, with at least 100 reports.`);
+  if (violentCount >= 10 && violentShare >= 0.35) {
+    const concentrationPoints = thresholdPoints(violentShare, [[0.35, 2], [0.5, 4], [0.65, 6]]);
+    score += concentrationPoints;
+    addFactor(factors, 'violent-concentration', 'Violent-crime concentration', violentCount, concentrationPoints, `${Math.round(violentShare * 100)}% of local incidents are violent crime.`);
+  }
+
+  const violentMinimumScore = thresholdPoints(violentCount, [[10, 35], [20, 50], [35, 65], [60, 75], [100, 85]]);
+  if (violentMinimumScore > score) {
+    const floorAdjustment = violentMinimumScore - score;
+    score = violentMinimumScore;
+    addFactor(factors, 'violent-severity-floor', 'Violent-crime severity band', violentCount, floorAdjustment, `${violentCount} violent incidents set a minimum local risk band of ${violentMinimumScore}/100.`);
   }
 
   return {
-    score: clamp(Math.round(score), 1, 70),
+    score: clamp(Math.round(score), 1, 95),
+    minimumScore: violentMinimumScore || 0,
     model: SCORE_MODEL_VERSION,
     factors,
-    explanation: 'The score uses one month of incidents inside the selected local boundary. Ordinary urban volume adds only a few points; 50+ requires several exceptional serious-crime and density thresholds at once.',
+    explanation: 'The score uses one month of incidents inside the selected local boundary. Total volume shapes the baseline, while violent-crime count and concentration establish stronger minimum severity bands.',
   };
 }
 
 export function blendPostcodeScore(postcodeResult, contextResult) {
   const localScore = Number(postcodeResult?.score || 0);
   const contextScore = Number(contextResult?.score || 0);
-  const contextAdjustment = clamp(Math.round((contextScore - localScore) * 0.15), -2, 3);
+  const minimumScore = Number(postcodeResult?.minimumScore || 0);
+  const contextAdjustment = clamp(Math.round((contextScore - localScore) * 0.15), -2, 5);
 
   return {
-    score: clamp(localScore + contextAdjustment, 1, 70),
+    score: clamp(Math.max(minimumScore, localScore + contextAdjustment), 1, 95),
     localScore,
     contextScore,
     contextAdjustment,
@@ -146,7 +156,7 @@ export function blendPostcodeScore(postcodeResult, contextResult) {
 export const crimeScoreModel = {
   id: SCORE_MODEL_VERSION,
   displayScaleMaximum: 100,
-  modelCap: 70,
-  postcodeWeightDescription: 'The 400 metre postcode score is primary. The wider 900 metre context can adjust it by no more than -2 to +3 points.',
+  modelCap: 95,
+  postcodeWeightDescription: 'The 400 metre postcode score is primary. The wider 900 metre context can adjust it by no more than -2 to +5 points, without lowering a violent-crime severity floor.',
   homicideLimitation: 'The public UK Police street-level category feed normally groups homicide within violent crime, so a separate murder increment is only applied when a source explicitly supplies a homicide category.',
 };

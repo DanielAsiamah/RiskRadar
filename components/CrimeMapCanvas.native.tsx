@@ -9,7 +9,9 @@ export default function CrimeMapCanvas({
   areaPoints,
   boundaryPoints,
   radiusMeters,
+  dataKey,
   onMapPress,
+  onOpenEvidence,
 }: CrimeMapCanvasProps) {
   const mapRef = useRef<MapView>(null);
 
@@ -32,8 +34,23 @@ export default function CrimeMapCanvas({
           key={marker.id}
           coordinate={marker}
           title={marker.categoryLabel}
-          description={marker.locationStreet}
-          pinColor="#e11d48"
+          description={[
+            `Recorded: ${formatCrimeMonth(marker.month)}`,
+            marker.locationStreet,
+            ...marker.incidents.slice(0, 4).map((incident, index) => `${index + 1}. ${incident.categoryLabel}${incident.outcome ? ` - ${formatPublicOutcome(incident.outcome)}` : ''}`),
+            marker.officialCaseUrl ? 'Tap this card for the official Police.uk case history.' : 'Official case-history link unavailable.',
+            marker.incidentCount > 4 ? `+${marker.incidentCount - 4} more reports` : '',
+          ].filter(Boolean).join('\n')}
+          pinColor={marker.color || '#e11d48'}
+          identifier={`${dataKey}:${marker.id}`}
+          onCalloutPress={marker.officialCaseUrl && marker.persistentId ? () => onOpenEvidence({
+            persistentId: marker.persistentId!,
+            category: marker.category || 'other-crime',
+            categoryLabel: marker.categoryLabel,
+            month: marker.month || '',
+            locationStreet: marker.locationStreet,
+            officialCaseUrl: marker.officialCaseUrl!,
+          }) : undefined}
         />
       ))}
       {selectedPoint && <Marker coordinate={selectedPoint} title="Selected point" pinColor="#4f46e5" />}
@@ -57,4 +74,17 @@ export default function CrimeMapCanvas({
       ))}
     </MapView>
   );
+}
+
+function formatCrimeMonth(value?: string) {
+  if (!value || !/^\d{4}-\d{2}$/.test(value)) return value || 'Unknown';
+  const [year, month] = value.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' }).format(new Date(Date.UTC(year, month - 1, 1)));
+}
+
+function formatPublicOutcome(value: string) {
+  return value
+    .replace(/;?\s*no suspect identified/gi, '')
+    .replace(/\bsuspect\s+/gi, '')
+    .trim();
 }

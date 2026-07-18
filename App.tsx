@@ -3,14 +3,16 @@ import { View, Text } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
+import { StatusBar } from 'expo-status-bar';
 import tw from 'twrnc';
 
-import { PostcodeResult } from './types';
+import { EvidenceReference, PostcodeResult } from './types';
 import Landing from './components/Landing';
 import Scanner from './components/Scanner';
 import Results from './components/Results';
 import MapExplorer from './components/MapExplorer';
 import ComparePostcodes from './components/ComparePostcodes';
+import EvidenceDetail from './components/EvidenceDetail';
 import { apiRequest } from './api/client';
 
 interface NearbySuggestion {
@@ -19,15 +21,16 @@ interface NearbySuggestion {
 }
 
 export default function App() {
-  const [appState, setAppState] = useState<'HOME' | 'SCANNING' | 'RESULTS' | 'MAP' | 'COMPARE' | 'PAYWALL'>('HOME');
+  const [appState, setAppState] = useState<'HOME' | 'SCANNING' | 'RESULTS' | 'EVIDENCE' | 'MAP' | 'COMPARE' | 'PAYWALL'>('HOME');
   const [postcodeInput, setPostcodeInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PostcodeResult | null>(null);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const [searchCount, setSearchCount] = useState<number>(0);
-  const [scanDuration, setScanDuration] = useState<number>(2200);
+  const [scanDuration, setScanDuration] = useState<number>(1800);
   const [nearbySuggestions, setNearbySuggestions] = useState<NearbySuggestion[]>([]);
   const [findingNearby, setFindingNearby] = useState(false);
+  const [selectedEvidence, setSelectedEvidence] = useState<EvidenceReference | null>(null);
   const searchRequestId = useRef(0);
 
   // Load state on mount
@@ -62,7 +65,7 @@ export default function App() {
     setError(null);
     setResult(null);
 
-    const targetDuration = 2200;
+    const targetDuration = 1800;
     setScanDuration(targetDuration);
     const requestId = ++searchRequestId.current;
 
@@ -95,7 +98,7 @@ export default function App() {
       // Keep a brief reveal animation without delaying a slow network response.
       setTimeout(() => {
         if (requestId === searchRequestId.current) setAppState('RESULTS');
-      }, Math.max(100, remainingTime));
+      }, Math.max(220, remainingTime));
 
     } catch (err: any) {
       if (requestId !== searchRequestId.current) return;
@@ -150,6 +153,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <SafeAreaView style={tw`flex-1 bg-white`}>
+        <StatusBar style="dark" />
         {appState === 'HOME' && (
           <Landing
             postcodeInput={postcodeInput}
@@ -174,16 +178,29 @@ export default function App() {
           <Scanner 
             postcode={postcodeInput.toUpperCase()} 
             duration={scanDuration}
+            ready={Boolean(result)}
           />
         )}
         
         {appState === 'RESULTS' && result && (
           <Results 
             result={result} 
+            onOpenEvidence={(reference) => {
+              setSelectedEvidence(reference);
+              setAppState('EVIDENCE');
+            }}
             onReset={() => {
               setPostcodeInput('');
+              setSelectedEvidence(null);
               setAppState('HOME');
             }} 
+          />
+        )}
+
+        {appState === 'EVIDENCE' && selectedEvidence && (
+          <EvidenceDetail
+            reference={selectedEvidence}
+            onBack={() => setAppState(result ? 'RESULTS' : 'HOME')}
           />
         )}
         

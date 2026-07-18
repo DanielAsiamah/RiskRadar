@@ -6,17 +6,13 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "experiments": {
-      "reactCompiler": true
-    },
     "plugins": [
       [
         "expo-location",
         {
           "locationWhenInUsePermission": "Allow RiskRadar to use your location to suggest nearby postcodes while you are on the go."
         }
-      ],
-      "expo-status-bar"
+      ]
     ],
     "ios": {
       "supportsTablet": true

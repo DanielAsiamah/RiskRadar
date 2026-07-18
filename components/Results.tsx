@@ -1,17 +1,18 @@
 import React, { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { Shield, AlertTriangle, Search, ChevronDown, Info } from 'lucide-react-native';
+import { Shield, AlertTriangle, Search, ChevronDown, Info, ExternalLink, MapPin } from 'lucide-react-native';
 import tw from 'twrnc';
-import { PostcodeResult } from '../types';
+import { EvidenceReference, PostcodeResult } from '../types';
 import AnimatedRiskScore from './AnimatedRiskScore';
 import { HotspotView, TrendChart } from './IntelligenceCharts';
 
 interface ResultsProps {
   result: PostcodeResult;
   onReset: () => void;
+  onOpenEvidence: (reference: EvidenceReference) => void;
 }
 
-export default function Results({ result, onReset }: ResultsProps) {
+export default function Results({ result, onReset, onOpenEvidence }: ResultsProps) {
   const [showDetails, setShowDetails] = useState(false);
 
   const getBadge = (score: number) => {
@@ -128,14 +129,69 @@ export default function Results({ result, onReset }: ResultsProps) {
 
         <View style={tw`mb-8 border-t border-slate-200 pt-8`}>
           <Text style={tw`text-xl font-black text-slate-900 mb-6`}>Identified Risk Signals</Text>
-          <View style={tw`bg-white border border-slate-200 rounded-3xl p-6 shadow-sm`}>
-            {result.crimeData.riskSignals?.map((signal, idx) => (
-              <View key={idx} style={tw`flex-row items-start gap-3 mb-4`}>
-                <AlertTriangle size={20} color={tw.color('amber-500')} />
-                <Text style={tw`text-sm text-slate-700 font-medium flex-1 leading-5`}>{signal}</Text>
+          {result.crimeData.riskSignalDetails?.length ? result.crimeData.riskSignalDetails.map((signal) => {
+            const accent = signal.category === 'violent-crime'
+              ? '#e11d48'
+              : signal.category === 'anti-social-behaviour'
+                ? '#d97706'
+                : signal.category === 'local-volume'
+                  ? '#64748b'
+                  : '#4f46e5';
+
+            return (
+              <View key={signal.id} style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-4`}>
+                <View style={tw`flex-row items-start mb-3`}>
+                  <View style={[tw`w-10 h-10 rounded-full items-center justify-center mr-3`, { backgroundColor: `${accent}14` }]}>
+                    <Text style={[tw`text-base font-black`, { color: accent }]}>{signal.count}</Text>
+                  </View>
+                  <View style={tw`flex-1`}>
+                    <Text style={tw`text-[10px] font-bold tracking-widest text-slate-400 uppercase mb-1`}>{signal.categoryLabel}</Text>
+                    <Text style={tw`text-sm font-black text-slate-900 leading-5`}>{signal.headline}</Text>
+                  </View>
+                </View>
+
+                <Text style={tw`text-xs text-slate-600 leading-5 mb-3`}>{signal.detail}</Text>
+                <Text style={tw`text-[10px] font-bold tracking-wider text-slate-400 uppercase mb-2`}>{signal.monthDisplay}</Text>
+
+                {signal.roads.length ? (
+                  <View style={tw`mb-3`}>
+                    {signal.roads.map((road) => (
+                      <View key={road.name} style={tw`flex-row items-center mb-2`}>
+                        <MapPin size={13} color={accent} />
+                        <Text style={tw`text-xs text-slate-600 ml-2 flex-1`}>{road.name}</Text>
+                        <Text style={[tw`text-xs font-black`, { color: accent }]}>{road.count}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+
+                {signal.evidence.length ? (
+                  <View style={tw`flex-row flex-wrap gap-2`}>
+                    {signal.evidence.map((record, recordIndex) => (
+                      <TouchableOpacity
+                        key={record.persistentId}
+                        onPress={() => onOpenEvidence(record)}
+                        accessibilityRole="button"
+                        style={tw`flex-row items-center gap-1 bg-indigo-50 border border-indigo-100 rounded-full px-3 py-2`}
+                      >
+                        <ExternalLink size={12} color="#4f46e5" />
+                        <Text style={tw`text-[10px] font-bold text-indigo-700`}>Evidence {recordIndex + 1}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : null}
               </View>
-            ))}
-          </View>
+            );
+          }) : (
+            <View style={tw`bg-white border border-slate-200 rounded-3xl p-6 shadow-sm`}>
+              {result.crimeData.riskSignals?.map((signal, idx) => (
+                <View key={idx} style={tw`flex-row items-start gap-3 mb-4`}>
+                  <AlertTriangle size={20} color={tw.color('amber-500')} />
+                  <Text style={tw`text-sm text-slate-700 font-medium flex-1 leading-5`}>{signal}</Text>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
         <View style={tw`mb-8 border-t border-slate-200 pt-8`}>
@@ -149,7 +205,7 @@ export default function Results({ result, onReset }: ResultsProps) {
 
           <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
             <Text style={tw`text-sm font-black text-slate-900 mb-4`}>Latest hotspot clusters</Text>
-            <HotspotView hotspotData={result.hotspotData} />
+            <HotspotView hotspotData={result.hotspotData} onOpenEvidence={onOpenEvidence} />
           </View>
         </View>
 
@@ -158,7 +214,7 @@ export default function Results({ result, onReset }: ResultsProps) {
           <View style={tw`bg-white border border-slate-200 rounded-3xl p-6 shadow-sm`}>
             <Text style={tw`text-sm text-slate-700 leading-6 mb-3`}>{result.aiAnalysis.areaContext}</Text>
             <Text style={tw`text-xs text-slate-500`}>
-              Sandbox mode is surfacing the richer context directly so we can test how useful it feels before deciding what stays premium later.
+              Road labels and evidence links above come from anonymised Police.uk records. They show an approximate mapped road and recorded month, not an exact address or named person.
             </Text>
           </View>
         </View>

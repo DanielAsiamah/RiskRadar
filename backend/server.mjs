@@ -6,6 +6,11 @@ import { createCrimeFileSource } from './crime-file-source.mjs';
 import { blendPostcodeScore, calculateCrimeScore, crimeScoreModel } from './crime-score.mjs';
 import { mapSettledWithConcurrency } from './bounded-concurrency.mjs';
 import { apiCatalog } from './api-catalog.mjs';
+import {
+  buildEvidenceView,
+  buildStructuredRiskSignals,
+  isValidPersistentId,
+} from './crime-evidence.mjs';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -48,7 +53,7 @@ const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.
 const CRIME_SOURCE_MODE = String(process.env.CRIME_SOURCE_MODE || 'api').trim().toLowerCase() === 'files' ? 'files' : 'api';
 const CRIME_DATA_ROOT = process.env.CRIME_DATA_ROOT || path.join(process.cwd(), 'backend', 'data', 'police');
 const CRIME_SOURCE_FALLBACK_TO_API = process.env.CRIME_SOURCE_FALLBACK_TO_API !== 'false';
-const ANALYSIS_CACHE_SCHEMA_VERSION = 'monthly-quality-v1';
+const ANALYSIS_CACHE_SCHEMA_VERSION = 'structured-risk-evidence-v5';
 const SERVER_STARTED_AT = new Date();
 const STARTUP_GRACE_PERIOD_MS = Math.max(0, Number(process.env.STARTUP_GRACE_PERIOD_MS) || 5000);
 const SHUTDOWN_TIMEOUT_MS = Math.max(1000, Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000);
@@ -1627,6 +1632,10 @@ function filterCrimesByCategory(crimes, categories) {
 }
 
 function sanitizeCrimeRecord(crime) {
+  const persistentId = String(crime?.persistent_id || '').trim();
+  const hasOfficialCaseHistory = isValidPersistentId(persistentId);
+  const outcome = String(crime?.outcome_status?.category || '');
+
   return {
     category: String(crime?.category || 'other-crime'),
     categoryLabel: humanizeCategory(crime?.category || 'other-crime'),
@@ -1634,8 +1643,25 @@ function sanitizeCrimeRecord(crime) {
     latitude: Number(crime?.location?.latitude),
     longitude: Number(crime?.location?.longitude),
     locationStreet: String(crime?.location?.street?.name || 'Unknown street'),
-    outcome: String(crime?.outcome_status?.category || ''),
+    outcome,
+    outcomeDate: String(crime?.outcome_status?.date || ''),
+    persistentId: hasOfficialCaseHistory ? persistentId : '',
+    officialCaseUrl: hasOfficialCaseHistory
+      ? `https://data.police.uk/api/outcomes-for-crime/${encodeURIComponent(persistentId)}`
+      : '',
   };
+}
+
+async function fetchCrimeEvidence(persistentId) {
+  if (!isValidPersistentId(persistentId)) {
+    const error = new Error('A valid Police.uk persistent crime identifier is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const officialSourceUrl = `https://data.police.uk/api/outcomes-for-crime/${encodeURIComponent(persistentId)}`;
+  const payload = await fetchJson(officialSourceUrl, {}, 12000);
+  return buildEvidenceView(payload, persistentId);
 }
 
 function buildCrimeFeedSummary({ label, crimes, categories, radiusMeters }) {
@@ -2521,11 +2547,12 @@ function filterCrimesByRadius(crimes, latitude, longitude, radiusMeters) {
 }
 
 function getSafetyLevel(score) {
-  if (score >= 58) return 'SEVERE';
-  if (score >= 42) return 'HIGH';
-  if (score >= 28) return 'ELEVATED';
-  if (score >= 15) return 'MODERATE';
-  if (score >= 7) return 'NORMAL URBAN CAUTION';
+  if (score >= 85) return 'SEVERE';
+  if (score >= 75) return 'VERY HIGH';
+  if (score >= 65) return 'HIGH';
+  if (score >= 50) return 'ELEVATED';
+  if (score >= 35) return 'MODERATE';
+  if (score >= 20) return 'NORMAL URBAN CAUTION';
   return 'LOW RISK';
 }
 
@@ -2578,9 +2605,9 @@ function buildScoreFactors({ district, totalCrimes, categories, crimeScore, scor
       }));
 
     factors.push({
-      label: 'Conservative UK-wide scale',
-      impact: 'down',
-      detail: `The result stays at ${crimeScore}/100 because ordinary urban volume is deliberately weighted lightly; 50+ requires several exceptional serious-crime thresholds at once.`,
+      label: 'Local severity calibration',
+      impact: 'neutral',
+      detail: `The ${crimeScore}/100 result reflects one month inside the postcode boundary. Violent-crime bands carry more weight than general incident volume.`,
     });
 
     return factors.slice(0, 4);
@@ -2693,12 +2720,14 @@ function clusterCrimesIntoHotspots({ latitude, longitude, crimes, minimumCluster
       existing.latitudeTotal += incidentLat;
       existing.longitudeTotal += incidentLon;
       existing.categories.push(String(crime.category || 'other-crime'));
+      existing.crimes.push(crime);
     } else {
       clustersByCell.set(cellKey, {
         count: 1,
         latitudeTotal: incidentLat,
         longitudeTotal: incidentLon,
         categories: [String(crime.category || 'other-crime')],
+        crimes: [crime],
       });
     }
   }
@@ -2712,6 +2741,27 @@ function clusterCrimesIntoHotspots({ latitude, longitude, crimes, minimumCluster
         cluster.categories.map((category) => ({ category }))
       ).slice(0, 2);
       const topCategory = topCategories[0]?.category || 'other-crime';
+      const streetCounts = new Map();
+      for (const crime of cluster.crimes) {
+        const street = String(crime?.location?.street?.name || '').trim();
+        if (street) streetCounts.set(street, (streetCounts.get(street) || 0) + 1);
+      }
+      const roads = [...streetCounts.entries()]
+        .sort((left, right) => right[1] - left[1])
+        .slice(0, 3)
+        .map(([name, count]) => ({ name, count }));
+      const evidence = cluster.crimes
+        .map(sanitizeCrimeRecord)
+        .filter((crime) => crime.officialCaseUrl)
+        .slice(0, 3)
+        .map((crime) => ({
+          persistentId: crime.persistentId,
+          category: crime.category,
+          categoryLabel: crime.categoryLabel,
+          month: crime.month,
+          locationStreet: crime.locationStreet,
+          officialCaseUrl: crime.officialCaseUrl,
+        }));
 
       return {
         count: cluster.count,
@@ -2721,6 +2771,9 @@ function clusterCrimesIntoHotspots({ latitude, longitude, crimes, minimumCluster
         topCategory,
         topCategoryLabel: humanizeCategory(topCategory),
         categories: topCategories,
+        locationLabel: roads[0]?.name || 'Approximate mapped location',
+        roads,
+        evidence,
       };
     })
     .sort((a, b) => b.count - a.count)
@@ -2750,7 +2803,7 @@ function summarizeHotspots({ district, latitude, longitude, crimes }) {
 
   const leadCluster = clusters[0];
   const secondaryCluster = clusters[1];
-  let summary = `The tightest hotspot near ${district} contains ${leadCluster.count} recent incidents centred about ${leadCluster.distanceMeters}m from the searched postcode, led by ${leadCluster.topCategoryLabel.toLowerCase()}.`;
+  let summary = `The tightest hotspot near ${district} contains ${leadCluster.count} recent incidents around ${leadCluster.locationLabel}, about ${leadCluster.distanceMeters}m from the searched postcode, led by ${leadCluster.topCategoryLabel.toLowerCase()}.`;
 
   if (secondaryCluster) {
     summary += ` A second cluster of ${secondaryCluster.count} incidents also appears roughly ${secondaryCluster.distanceMeters}m away.`;
@@ -2908,7 +2961,7 @@ async function fetchCrimeData(latitude, longitude) {
       factors: postcodeScoreResult.factors,
     },
     capExplanation:
-      `The score is led by incidents within ${POSTCODE_RADIUS_METERS} metres. The wider ${CONTEXT_RADIUS_METERS} metre context can change it by only -2 to +3 points, and a score above 50 requires several exceptional thresholds at once.`,
+      `The score is led by one month of incidents within ${POSTCODE_RADIUS_METERS} metres. The wider ${CONTEXT_RADIUS_METERS} metre context can change it by only -2 to +5 points and cannot lower a violent-crime severity floor.`,
   };
 }
 
@@ -3721,12 +3774,28 @@ async function computeLocationAnalysis(query) {
     totalCrimes: crimeData.totalCrimes,
     categories: crimeData.categories,
   });
+  const postcodeCrimes = filterCrimesByRadius(
+    Array.isArray(latestContextCrimes) ? latestContextCrimes : [],
+    location.latitude,
+    location.longitude,
+    POSTCODE_RADIUS_METERS
+  ).map(sanitizeCrimeRecord);
+  const riskSignalDetails = buildStructuredRiskSignals({
+    district: location.admin_district,
+    postcode: location.postcode,
+    month: crimeData.month,
+    radiusMeters: POSTCODE_RADIUS_METERS,
+    totalCrimes: crimeData.totalCrimes,
+    categories: crimeData.categories,
+    crimes: postcodeCrimes,
+  });
 
   return {
     postcode: location.postcode,
     crimeData: {
       ...crimeData,
       riskSignals,
+      riskSignalDetails,
       scoreFactors,
     },
     postcodeData: {
@@ -4343,6 +4412,22 @@ const server = http.createServer(async (request, response) => {
       const statusCode = Number(error.statusCode) || 500;
       sendJson(request, response, statusCode, {
         error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname.startsWith('/api/crime-evidence/')) {
+    try {
+      const persistentId = decodeURIComponent(url.pathname.slice('/api/crime-evidence/'.length));
+      const result = await fetchCrimeEvidence(persistentId);
+      sendJson(request, response, 200, result, {
+        'Cache-Control': 'public, max-age=900',
+      });
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 502;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Official Police.uk evidence is temporarily unavailable.',
       });
     }
     return;

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { ArrowLeft, BarChart3, Plus, Search, Trash2, TrendingDown, TrendingUp, Minus } from 'lucide-react-native';
+import { ArrowLeft, BarChart3, Minus, Plus, Search, Trash2, TrendingDown, TrendingUp } from 'lucide-react-native';
 import tw from 'twrnc';
 import { apiRequest } from '../api/client';
 import { PostcodeResult } from '../types';
@@ -12,7 +12,7 @@ interface ComparisonResponse {
 }
 
 export default function ComparePostcodes({ onBack }: { onBack: () => void }) {
-  const [queries, setQueries] = useState(['BR1 5NN', 'SW1A 1AA']);
+  const [queries, setQueries] = useState(['', '']);
   const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +31,15 @@ export default function ComparePostcodes({ onBack }: { onBack: () => void }) {
     try {
       setLoading(true);
       setError(null);
-      const result = await apiRequest<ComparisonResponse>('/api/compare-postcodes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ postcodes }),
-      }, 90_000);
+      const result = await apiRequest<ComparisonResponse>(
+        '/api/compare-postcodes',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ postcodes }),
+        },
+        90_000,
+      );
       setComparison(result);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Unable to compare these locations.');
@@ -118,6 +122,12 @@ export default function ComparePostcodes({ onBack }: { onBack: () => void }) {
 
 function ComparisonCard({ result, rank, highest }: { result: PostcodeResult; rank: number; highest: boolean }) {
   const trend = result.trendData?.direction ?? 'stable';
+  const localRadius = result.crimeData.postcodeRadiusMeters ?? 400;
+  const contextRadius = result.crimeData.contextRadiusMeters ?? 900;
+  const dataPeriod = result.crimeData.monthDisplay || formatMonth(result.crimeData.month);
+  const trendStart = result.trendData?.monthly?.[0]?.monthDisplay;
+  const trendEnd = result.trendData?.monthly?.[result.trendData.monthly.length - 1]?.monthDisplay;
+  const trendPeriod = trendStart && trendEnd ? `${trendStart} to ${trendEnd}` : null;
   const trendIcon = trend === 'rising'
     ? <TrendingUp size={16} color="#e11d48" />
     : trend === 'cooling'
@@ -134,6 +144,11 @@ function ComparisonCard({ result, rank, highest }: { result: PostcodeResult; ran
           <View style={tw`flex-1`}>
             <Text selectable style={tw`text-lg font-black text-slate-900`}>{result.postcodeData.postcode}</Text>
             <Text selectable style={tw`text-xs text-slate-500`}>{result.postcodeData.admin_district}</Text>
+            {dataPeriod ? (
+              <Text selectable style={tw`text-[10px] font-bold text-indigo-600 mt-1`}>
+                Counts: {dataPeriod} only{trendPeriod ? ` | Trend: ${trendPeriod}` : ''}
+              </Text>
+            ) : null}
           </View>
         </View>
         <View style={tw`items-end`}>
@@ -143,8 +158,8 @@ function ComparisonCard({ result, rank, highest }: { result: PostcodeResult; ran
       </View>
 
       <View style={tw`flex-row gap-2 mb-4`}>
-        <Metric label="LOCAL INCIDENTS" value={String(result.crimeData.totalCrimes)} />
-        <Metric label="WIDER CONTEXT" value={String(result.crimeData.contextCrimeCount ?? '—')} />
+        <Metric label={`LOCAL ${localRadius}M`} value={String(result.crimeData.totalCrimes)} />
+        <Metric label={`WIDER ${contextRadius}M`} value={String(result.crimeData.contextCrimeCount ?? '-')} />
         <Metric label="TREND" value={trend.toUpperCase()} icon={trendIcon} />
       </View>
 
@@ -174,4 +189,11 @@ function Metric({ label, value, icon }: { label: string; value: string; icon?: R
 
 function humanize(value: string) {
   return value.split('-').map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+}
+
+function formatMonth(value?: string) {
+  if (!value || !/^\d{4}-\d{2}$/.test(value)) return value || '';
+  const [year, month] = value.split('-').map(Number);
+  return new Intl.DateTimeFormat('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' })
+    .format(new Date(Date.UTC(year, month - 1, 1)));
 }

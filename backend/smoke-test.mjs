@@ -56,9 +56,9 @@ async function main() {
   assert(analysis.response.ok, `/api/analyze-postcode failed with ${analysis.response.status}`);
   assert(analysis.json?.postcode, 'Analysis payload missing postcode');
   assert(Number.isFinite(analysis.json?.crimeData?.crimeScore), 'Analysis payload missing numeric crime score');
-  assert(analysis.json?.crimeData?.scoreMethod?.id === 'uk-local-pressure-v2', 'Analysis payload missing current score model metadata');
+  assert(analysis.json?.crimeData?.scoreMethod?.id === 'uk-local-pressure-v3', 'Analysis payload missing current score model metadata');
   assert(Array.isArray(analysis.json?.crimeData?.scoreBreakdown?.factors), 'Analysis payload missing score factor breakdown');
-  assert(analysis.json?.crimeData?.crimeScore < 50, `${POSTCODE} unexpectedly reached the exceptional 50+ score band`);
+  assert(analysis.json?.crimeData?.crimeScore >= 1 && analysis.json?.crimeData?.crimeScore <= 95, `${POSTCODE} score is outside the supported model range`);
   results.push({
     step: 'analyze-postcode',
     ok: true,
