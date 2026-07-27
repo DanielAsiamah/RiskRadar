@@ -5,6 +5,7 @@ node_modules/
 
 # Expo
 .expo/
+.superpowers/
 dist/
 dist-*/
 web-build/
