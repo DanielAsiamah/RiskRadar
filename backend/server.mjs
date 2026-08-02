@@ -1,11 +1,20 @@
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createCrimeFileSource } from './crime-file-source.mjs';
 import { blendPostcodeScore, calculateCrimeScore, crimeScoreModel } from './crime-score.mjs';
 import { mapSettledWithConcurrency } from './bounded-concurrency.mjs';
 import { apiCatalog } from './api-catalog.mjs';
+import {
+  CONTACT_EMAIL,
+  FREE_MONTHLY_CHECK_LIMIT,
+  PRO_PRICE_GBP_MONTHLY,
+  buildUsageStatus,
+  getUsageMonthKey,
+  validateSafetySessionInput,
+} from './subscription-rules.mjs';
 import {
   buildEvidenceView,
   buildStructuredRiskSignals,
@@ -50,6 +59,9 @@ const ANALYSIS_CACHE_TTL_MS = Math.max(60 * 1000, Number(process.env.ANALYSIS_CA
 const SEARCH_PRESETS_ENABLED = process.env.SEARCH_PRESETS_ENABLED !== 'false';
 const SEARCH_PRESETS_FILE = process.env.SEARCH_PRESETS_FILE || path.join(DATA_DIR, 'search-presets.json');
 const SEARCH_PRESET_MAX_ENTRIES = Math.min(500, Math.max(20, Number(process.env.SEARCH_PRESET_MAX_ENTRIES) || 200));
+const SAFETY_SESSIONS_ENABLED = process.env.SAFETY_SESSIONS_ENABLED !== 'false';
+const SAFETY_SESSIONS_FILE = process.env.SAFETY_SESSIONS_FILE || path.join(DATA_DIR, 'safety-sessions.json');
+const SAFETY_SESSION_MAX_ENTRIES = Math.min(1000, Math.max(20, Number(process.env.SAFETY_SESSION_MAX_ENTRIES) || 200));
 const CRIME_SOURCE_MODE = String(process.env.CRIME_SOURCE_MODE || 'api').trim().toLowerCase() === 'files' ? 'files' : 'api';
 const CRIME_DATA_ROOT = process.env.CRIME_DATA_ROOT || path.join(process.cwd(), 'backend', 'data', 'police');
 const CRIME_SOURCE_FALLBACK_TO_API = process.env.CRIME_SOURCE_FALLBACK_TO_API !== 'false';
@@ -69,6 +81,7 @@ const routeStats = new Map();
 const analysisSnapshots = [];
 const analysisResultCache = [];
 const searchPresets = [];
+const safetySessions = [];
 let persistentCacheWrites = 0;
 let persistentCacheWriteQueued = false;
 let persistentCacheWriteTimer = null;
@@ -79,6 +92,8 @@ let analysisCacheWrites = 0;
 let analysisCacheLoaded = false;
 let searchPresetWrites = 0;
 let searchPresetsLoaded = false;
+let safetySessionWrites = 0;
+let safetySessionsLoaded = false;
 let DatabaseSyncCtor = null;
 let stateDb = null;
 let stateDbReady = false;
@@ -299,6 +314,15 @@ function ensureSearchPresetDir() {
 
   ensureDataDir();
   fs.mkdirSync(path.dirname(SEARCH_PRESETS_FILE), { recursive: true });
+}
+
+function ensureSafetySessionDir() {
+  if (!SAFETY_SESSIONS_ENABLED) {
+    return;
+  }
+
+  ensureDataDir();
+  fs.mkdirSync(path.dirname(SAFETY_SESSIONS_FILE), { recursive: true });
 }
 
 function usingSqliteState() {
@@ -738,6 +762,32 @@ function saveSearchPresets() {
   }
 }
 
+function saveSafetySessions() {
+  if (!SAFETY_SESSIONS_ENABLED) {
+    return;
+  }
+
+  try {
+    ensureSafetySessionDir();
+    fs.writeFileSync(
+      SAFETY_SESSIONS_FILE,
+      JSON.stringify(
+        {
+          version: 1,
+          savedAt: new Date().toISOString(),
+          entries: safetySessions,
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+    safetySessionWrites += 1;
+  } catch (error) {
+    console.error('Failed to persist safety sessions:', error);
+  }
+}
+
 function loadPersistentCache() {
   if (!PERSISTENT_CACHE_ENABLED) {
     return;
@@ -954,6 +1004,30 @@ function loadSearchPresets() {
   }
 }
 
+function loadSafetySessions() {
+  if (!SAFETY_SESSIONS_ENABLED) {
+    safetySessionsLoaded = true;
+    return;
+  }
+
+  try {
+    if (!fs.existsSync(SAFETY_SESSIONS_FILE)) {
+      safetySessionsLoaded = true;
+      return;
+    }
+
+    const raw = fs.readFileSync(SAFETY_SESSIONS_FILE, 'utf8');
+    const parsed = JSON.parse(raw);
+    const entries = Array.isArray(parsed?.entries) ? parsed.entries : [];
+
+    safetySessions.splice(0, safetySessions.length, ...entries.slice(0, SAFETY_SESSION_MAX_ENTRIES));
+    safetySessionsLoaded = true;
+  } catch (error) {
+    console.error('Failed to load safety sessions:', error);
+    safetySessionsLoaded = true;
+  }
+}
+
 function pruneCacheIfNeeded() {
   cleanupExpiredUpstreamCache();
 
@@ -1134,6 +1208,9 @@ function buildReadinessStatus() {
   }
   if (SEARCH_PRESETS_ENABLED && !searchPresetsLoaded) {
     issues.push('search-presets-not-loaded');
+  }
+  if (SAFETY_SESSIONS_ENABLED && !safetySessionsLoaded) {
+    issues.push('safety-sessions-not-loaded');
   }
   if (usingSqliteState() && stateBootstrapStatus.reason.startsWith('bootstrap-failed')) {
     issues.push('sqlite-bootstrap-failed');
@@ -2087,6 +2164,119 @@ function deleteSearchPresetById(id) {
   searchPresets.splice(index, 1);
   saveSearchPresets();
   return true;
+}
+
+function requireSafetySessionsEnabled() {
+  if (!SAFETY_SESSIONS_ENABLED) {
+    const error = new Error('Safety Sessions are disabled.');
+    error.statusCode = 503;
+    throw error;
+  }
+}
+
+function getRequestOrigin(request) {
+  const host = String(request.headers['x-forwarded-host'] || request.headers.host || '').split(',')[0].trim();
+  const protocol = String(request.headers['x-forwarded-proto'] || '').split(',')[0].trim() || 'http';
+  return host ? `${protocol}://${host}` : '';
+}
+
+function createShareToken() {
+  return crypto.randomBytes(24).toString('base64url');
+}
+
+function buildSafetyShareUrl(request, token) {
+  const origin = getRequestOrigin(request);
+  return `${origin}/safety-session?token=${encodeURIComponent(token)}`;
+}
+
+function sanitizeSafetySessionForShare(session) {
+  return {
+    id: session.id,
+    destination: session.destination,
+    purpose: session.purpose,
+    meetingContact: session.meetingContact,
+    expectedEndAt: session.expectedEndAt,
+    notes: session.notes,
+    status: session.status,
+    alertState: session.alertState,
+    createdAt: session.createdAt,
+    updatedAt: session.updatedAt,
+    checkedInAt: session.checkedInAt || null,
+  };
+}
+
+function createSafetySession(input, request) {
+  requireSafetySessionsEnabled();
+  const validated = validateSafetySessionInput(input, new Date());
+
+  if (!validated.ok) {
+    const error = new Error(validated.errors.join(' '));
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const timestamp = new Date().toISOString();
+  const shareToken = createShareToken();
+  const entry = {
+    id: createSnapshotId('session'),
+    ...validated.value,
+    shareToken,
+    shareUrl: buildSafetyShareUrl(request, shareToken),
+    status: 'active',
+    alertState: 'pending',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    checkedInAt: null,
+  };
+
+  safetySessions.unshift(entry);
+  if (safetySessions.length > SAFETY_SESSION_MAX_ENTRIES) {
+    safetySessions.length = SAFETY_SESSION_MAX_ENTRIES;
+  }
+
+  saveSafetySessions();
+  return entry;
+}
+
+function listSafetySessions(limit = 20) {
+  requireSafetySessionsEnabled();
+  return safetySessions.slice(0, limit);
+}
+
+function checkInSafetySession(id) {
+  requireSafetySessionsEnabled();
+  const session = safetySessions.find((entry) => entry.id === id);
+
+  if (!session) {
+    const error = new Error('Safety Session not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  const timestamp = new Date().toISOString();
+  session.status = 'checked-in';
+  session.alertState = 'cancelled';
+  session.checkedInAt = timestamp;
+  session.updatedAt = timestamp;
+  saveSafetySessions();
+  return session;
+}
+
+function getSafetySessionShare(token) {
+  requireSafetySessionsEnabled();
+  const normalized = String(token || '').trim();
+  const session = safetySessions.find((entry) => entry.shareToken === normalized);
+
+  if (!session) {
+    const error = new Error('Safety Session share link not found.');
+    error.statusCode = 404;
+    throw error;
+  }
+
+  return {
+    session: sanitizeSafetySessionForShare(session),
+    disclaimer: 'RiskRadar Safety Sessions help trusted contacts see your plan and check-in status. RiskRadar does not contact emergency services, does not verify venues, and does not send SMS or push alerts in this version.',
+  };
 }
 
 async function executeSearchPreset(id, mode = 'analyze') {
@@ -4077,6 +4267,14 @@ const server = http.createServer(async (request, response) => {
         maxEntries: SEARCH_PRESET_MAX_ENTRIES,
         writes: searchPresetWrites,
       },
+      safetySessions: {
+        enabled: SAFETY_SESSIONS_ENABLED,
+        loaded: safetySessionsLoaded,
+        file: SAFETY_SESSIONS_FILE,
+        entries: safetySessions.length,
+        maxEntries: SAFETY_SESSION_MAX_ENTRIES,
+        writes: safetySessionWrites,
+      },
     });
     return;
   }
@@ -4275,6 +4473,93 @@ const server = http.createServer(async (request, response) => {
         month,
         monthLimit,
       }));
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/subscription-status') {
+    const entitlement = String(url.searchParams.get('entitlement') || 'free').trim().toLowerCase() === 'pro' ? 'pro' : 'free';
+    const used = Math.max(0, Math.floor(Number(url.searchParams.get('used')) || 0));
+    const monthKey = String(url.searchParams.get('monthKey') || getUsageMonthKey()).trim();
+    sendJson(request, response, 200, {
+      ...buildUsageStatus({ used, monthKey, entitlement }),
+      price: {
+        currency: 'GBP',
+        monthly: PRO_PRICE_GBP_MONTHLY,
+        label: `£${PRO_PRICE_GBP_MONTHLY}/month`,
+      },
+      freeMonthlyCheckLimit: FREE_MONTHLY_CHECK_LIMIT,
+      contactEmail: CONTACT_EMAIL,
+      proIncludes: [
+        'Unlimited UK area checks',
+        'Safety Sessions for trips, holidays, dates, and marketplace meetups',
+        'Trusted-contact share links',
+        'Saved places and comparisons',
+        'Longer trend context when available',
+      ],
+      disclaimer: 'RiskRadar uses public data and does not contact emergency services, verify venues, or provide live tracking in this version.',
+    });
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/safety-sessions') {
+    try {
+      const body = await readJsonBody(request);
+      sendJson(request, response, 200, createSafetySession(body, request));
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/safety-sessions') {
+    try {
+      const limit = clamp(Number(url.searchParams.get('limit')) || 20, 1, 100);
+      sendJson(request, response, 200, {
+        sessions: listSafetySessions(limit),
+      });
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/safety-sessions/check-in') {
+    try {
+      const body = await readJsonBody(request);
+      const id = String(body.id || '').trim();
+
+      if (!id) {
+        const error = new Error('Safety Session id is required.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      sendJson(request, response, 200, checkInSafetySession(id));
+    } catch (error) {
+      const statusCode = Number(error.statusCode) || 500;
+      sendJson(request, response, statusCode, {
+        error: error.message || 'Unexpected backend error.',
+      });
+    }
+    return;
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/safety-session-share') {
+    try {
+      const token = String(url.searchParams.get('token') || '').trim();
+      sendJson(request, response, 200, getSafetySessionShare(token));
     } catch (error) {
       const statusCode = Number(error.statusCode) || 500;
       sendJson(request, response, statusCode, {
@@ -4758,6 +5043,7 @@ loadPersistentCache();
 loadAnalysisSnapshots();
 loadAnalysisCache();
 loadSearchPresets();
+loadSafetySessions();
 
 server.listen(PORT, HOST, () => {
   console.log(`RiskRadar API listening on http://${HOST}:${PORT}`);
@@ -4774,6 +5060,7 @@ function flushStateForShutdown() {
   saveAnalysisSnapshots();
   saveAnalysisCache();
   saveSearchPresets();
+  saveSafetySessions();
 }
 
 function closeStateDatabase() {

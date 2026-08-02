@@ -253,6 +253,45 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 - `GET /api/docs`
   Returns a machine-readable catalogue of every public API operation, its purpose, access level, and expected input.
 
+- `GET /api/subscription-status`
+  Returns free-tier usage limits, RiskRadar PRO pricing, the support contact email, and the honest PRO value proposition. Query parameters:
+  - `used`
+  - `monthKey`
+  - `entitlement`
+
+- `POST /api/safety-sessions`
+  Creates a Safety Session for a trip, holiday, date, work visit, or marketplace meetup.
+
+  Body:
+  ```json
+  {
+    "destination": "SW1A 1AA",
+    "purpose": "marketplace",
+    "meetingContact": "Facebook Marketplace seller",
+    "trustedEmail": "friend@example.com",
+    "expectedEndAt": "2026-08-02T11:30:00.000Z",
+    "notes": "Meet outside a busy station."
+  }
+  ```
+
+- `GET /api/safety-sessions`
+  Lists recent Safety Sessions from the current backend store. Query parameter:
+  - `limit`
+
+- `POST /api/safety-sessions/check-in`
+  Marks a Safety Session as checked in and cancels its pending alert state.
+
+  Body:
+  ```json
+  { "id": "session_..." }
+  ```
+
+- `GET /api/safety-session-share`
+  Returns the public trusted-contact share view for a Safety Session. The response intentionally excludes `trustedEmail`. Query parameter:
+  - `token`
+
+Safety Sessions v1 store the plan, trusted-contact email, share token, status, and missed-check-in alert state. They do not contact emergency services, verify venues, provide continuous live tracking, or send SMS/push notifications in this version. Configure `SAFETY_SESSIONS_ENABLED=false` to disable the routes, `SAFETY_SESSIONS_FILE` to change the JSON state file, and `SAFETY_SESSION_MAX_ENTRIES` to tune retention.
+
 - `POST /api/analyze-postcode`
   - Body:
     ```json
