@@ -29,6 +29,9 @@ interface LandingProps {
   findingNearby: boolean;
   openMapExplorer: () => void;
   openComparison: () => void;
+  openSafetySession: () => void;
+  openPaywall: () => void;
+  freeSearchLimit: number;
 }
 
 const INDIGO = '#4f46e5';
@@ -45,8 +48,13 @@ export default function Landing({
   findingNearby,
   openMapExplorer,
   openComparison,
+  openSafetySession,
+  openPaywall,
+  searchCount,
+  freeSearchLimit,
 }: LandingProps) {
   const canSearch = Boolean(postcodeInput.trim());
+  const freeRemaining = Math.max(0, freeSearchLimit - searchCount);
 
   return (
     <KeyboardAvoidingView style={tw`flex-1 bg-white`} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -78,6 +86,19 @@ export default function Landing({
             <Text style={tw`text-base text-slate-500 leading-6`}>
               Search any UK postcode for recent crime trends, local hotspots, and a clear evidence-based risk score.
             </Text>
+          </View>
+
+          <View style={tw`rounded-3xl border border-indigo-100 bg-indigo-50 p-4 mb-4`}>
+            <Text style={tw`text-[10px] font-bold tracking-widest text-indigo-500 mb-2`}>FREE PLAN</Text>
+            <Text style={tw`text-slate-900 text-lg font-black mb-1`}>
+              {freeRemaining} of {freeSearchLimit} checks left this month
+            </Text>
+            <Text style={tw`text-slate-500 leading-5 mb-3`}>
+              PRO is £15/month for unlimited checks and Safety Sessions when you are travelling, meeting someone, or checking a new area.
+            </Text>
+            <Pressable onPress={openPaywall} hitSlop={6} accessibilityRole="button">
+              <Text style={tw`text-indigo-700 font-black`}>See PRO and FAQ</Text>
+            </Pressable>
           </View>
 
           <View style={tw`rounded-3xl border border-slate-200 bg-slate-50 p-4 mb-4`}>
@@ -124,6 +145,10 @@ export default function Landing({
           <View style={tw`flex-row gap-3 mb-8`}>
             <FeatureButton label="Crime map" icon={<Map size={21} color="#0f172a" />} onPress={openMapExplorer} />
             <FeatureButton label="Compare" icon={<BarChart3 size={21} color="#0f172a" />} onPress={openComparison} />
+          </View>
+
+          <View style={tw`mb-8`}>
+            <FeatureButton label="Safety Session" icon={<ShieldCheck size={21} color="#0f172a" />} onPress={openSafetySession} />
           </View>
 
           {nearbySuggestions.length > 0 ? (

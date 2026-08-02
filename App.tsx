@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text } from 'react-native';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
@@ -13,6 +12,8 @@ import Results from './components/Results';
 import MapExplorer from './components/MapExplorer';
 import ComparePostcodes from './components/ComparePostcodes';
 import EvidenceDetail from './components/EvidenceDetail';
+import Paywall from './components/Paywall';
+import SafetySession from './components/SafetySession';
 import { apiRequest } from './api/client';
 
 interface NearbySuggestion {
@@ -20,8 +21,38 @@ interface NearbySuggestion {
   admin_district: string;
 }
 
+const FREE_MONTHLY_CHECK_LIMIT = 3;
+const USAGE_STORAGE_KEY = 'riskradar_usage_v1';
+
+interface UsageState {
+  monthKey: string;
+  count: number;
+}
+
+function getUsageMonthKey(date = new Date()) {
+  return date.toISOString().slice(0, 7);
+}
+
+function normalizeUsageState(value: string | null, fallbackCount = 0): UsageState {
+  const currentMonthKey = getUsageMonthKey();
+
+  if (!value) {
+    return { monthKey: currentMonthKey, count: fallbackCount };
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Partial<UsageState>;
+    const monthKey = typeof parsed.monthKey === 'string' ? parsed.monthKey : currentMonthKey;
+    const count = Math.max(0, Math.floor(Number(parsed.count) || 0));
+    return monthKey === currentMonthKey ? { monthKey, count } : { monthKey: currentMonthKey, count: 0 };
+  } catch {
+    const legacyCount = Math.max(0, Math.floor(Number(value) || fallbackCount));
+    return { monthKey: currentMonthKey, count: legacyCount };
+  }
+}
+
 export default function App() {
-  const [appState, setAppState] = useState<'HOME' | 'SCANNING' | 'RESULTS' | 'EVIDENCE' | 'MAP' | 'COMPARE' | 'PAYWALL'>('HOME');
+  const [appState, setAppState] = useState<'HOME' | 'SCANNING' | 'RESULTS' | 'EVIDENCE' | 'MAP' | 'COMPARE' | 'PAYWALL' | 'SAFETY_SESSION'>('HOME');
   const [postcodeInput, setPostcodeInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PostcodeResult | null>(null);
@@ -37,8 +68,13 @@ export default function App() {
   useEffect(() => {
     const loadState = async () => {
       try {
-        const savedCount = await AsyncStorage.getItem('riskradar_search_count');
-        if (savedCount) setSearchCount(parseInt(savedCount, 10));
+        const [savedUsage, savedCount] = await Promise.all([
+          AsyncStorage.getItem(USAGE_STORAGE_KEY),
+          AsyncStorage.getItem('riskradar_search_count'),
+        ]);
+        const usage = normalizeUsageState(savedUsage, savedCount ? parseInt(savedCount, 10) : 0);
+        setSearchCount(usage.count);
+        await AsyncStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify(usage));
 
         const savedSearches = await AsyncStorage.getItem('riskradar_recent_searches');
         if (savedSearches) setRecentSearches(JSON.parse(savedSearches));
@@ -50,14 +86,14 @@ export default function App() {
   }, []);
 
   const handleSearch = async () => {
-    // Sandbox mode: Bypass paywall limit for testing
-    // if (searchCount >= 4) {
-    //   setAppState('PAYWALL');
-    //   return;
-    // }
-
     if (!postcodeInput.trim()) {
       setError('Please enter a location or postcode.');
+      return;
+    }
+
+    const usageMonthKey = getUsageMonthKey();
+    if (searchCount >= FREE_MONTHLY_CHECK_LIMIT) {
+      setAppState('PAYWALL');
       return;
     }
 
@@ -83,6 +119,7 @@ export default function App() {
       // Increment count only on success
       const newCount = searchCount + 1;
       setSearchCount(newCount);
+      await AsyncStorage.setItem(USAGE_STORAGE_KEY, JSON.stringify({ monthKey: usageMonthKey, count: newCount }));
       await AsyncStorage.setItem('riskradar_search_count', newCount.toString());
 
       // Add to recent searches (keep last 3)
@@ -168,11 +205,15 @@ export default function App() {
             findingNearby={findingNearby}
             openMapExplorer={() => setAppState('MAP')}
             openComparison={() => setAppState('COMPARE')}
+            openSafetySession={() => setAppState('SAFETY_SESSION')}
+            openPaywall={() => setAppState('PAYWALL')}
+            freeSearchLimit={FREE_MONTHLY_CHECK_LIMIT}
           />
         )}
 
         {appState === 'MAP' && <MapExplorer onBack={() => setAppState('HOME')} />}
         {appState === 'COMPARE' && <ComparePostcodes onBack={() => setAppState('HOME')} />}
+        {appState === 'SAFETY_SESSION' && <SafetySession onBack={() => setAppState('HOME')} />}
         
         {appState === 'SCANNING' && (
           <Scanner 
@@ -205,15 +246,10 @@ export default function App() {
         )}
         
         {appState === 'PAYWALL' && (
-          <View style={tw`flex-1 justify-center items-center p-6 bg-white`}>
-            <Text style={tw`text-slate-900 text-2xl font-bold mb-4`}>Unlock PRO</Text>
-            <Text style={tw`text-slate-600 text-center mb-8`}>
-              You have reached your daily search limit of 4 free searches. Upgrade to RiskRadar PRO for unlimited queries, live news feeds, and raw unredacted police logs.
-            </Text>
-            <Text style={tw`text-indigo-600 font-bold mb-8`} onPress={() => setAppState('HOME')}>
-              Go Back
-            </Text>
-          </View>
+          <Paywall
+            onBack={() => setAppState('HOME')}
+            onOpenSafetySession={() => setAppState('SAFETY_SESSION')}
+          />
         )}
       </SafeAreaView>
     </SafeAreaProvider>
