@@ -4,11 +4,12 @@ import test from 'node:test';
 import { apiCatalog } from './api-catalog.mjs';
 
 test('documents every public HTTP route', async () => {
-  const [serverSource, installGuide] = await Promise.all([
+  const [serverSource, membershipSource, installGuide] = await Promise.all([
     readFile('backend/server.mjs', 'utf8'),
+    readFile('backend/membership/routes.mjs', 'utf8'),
     readFile('INSTALL.md', 'utf8'),
   ]);
-  const routes = [...serverSource.matchAll(/url\.pathname === '([^']+)'/g)].map((match) => match[1]);
+  const routes = [...`${serverSource}\n${membershipSource}`.matchAll(/url\.pathname === '([^']+)'/g)].map((match) => match[1]);
 
   assert.ok(routes.length > 20, 'Expected the server route extractor to find public routes.');
   for (const route of new Set(routes)) {
@@ -17,8 +18,11 @@ test('documents every public HTTP route', async () => {
 });
 
 test('catalogues every method and path implemented by the router', async () => {
-  const serverSource = await readFile('backend/server.mjs', 'utf8');
-  const implemented = [...serverSource.matchAll(/request\.method === '([^']+)' && url\.pathname === '([^']+)'/g)]
+  const [serverSource, membershipSource] = await Promise.all([
+    readFile('backend/server.mjs', 'utf8'),
+    readFile('backend/membership/routes.mjs', 'utf8'),
+  ]);
+  const implemented = [...`${serverSource}\n${membershipSource}`.matchAll(/request\.method === '([^']+)' && url\.pathname === '([^']+)'/g)]
     .map((match) => `${match[1]} ${match[2]}`)
     .sort();
   const catalogued = apiCatalog.endpoints
@@ -28,7 +32,7 @@ test('catalogues every method and path implemented by the router', async () => {
   assert.deepEqual(catalogued, implemented);
   for (const item of apiCatalog.endpoints) {
     assert.ok(item.summary.length >= 20, `${item.method} ${item.path} needs a useful summary`);
-    assert.ok(['public', 'admin'].includes(item.access));
+    assert.ok(['public', 'member', 'admin'].includes(item.access));
   }
 });
 

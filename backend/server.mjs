@@ -11,6 +11,10 @@ import {
   buildStructuredRiskSignals,
   isValidPersistentId,
 } from './crime-evidence.mjs';
+import { readMembershipConfig } from './membership/config.mjs';
+import { createSupabaseMembershipStore } from './membership/supabase-store.mjs';
+import { createStripeBilling } from './membership/stripe-billing.mjs';
+import { createMembershipRouteHandler } from './membership/routes.mjs';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -62,6 +66,16 @@ const WEB_APP_ENABLED = process.env.WEB_APP_ENABLED !== 'false' && fs.existsSync
 const EMBED_FRAME_ANCESTORS = buildFrameAncestors(process.env.EMBED_ALLOW_ORIGINS);
 const require = createRequire(import.meta.url);
 const crimeFileSource = createCrimeFileSource({ rootDir: CRIME_DATA_ROOT });
+const membershipConfig = readMembershipConfig(process.env);
+const membershipStore = createSupabaseMembershipStore(membershipConfig);
+const membershipBilling = membershipConfig.configured
+  ? createStripeBilling({ config: membershipConfig, store: membershipStore })
+  : null;
+const membershipRoutes = createMembershipRouteHandler({
+  config: membershipConfig,
+  store: membershipStore,
+  billing: membershipBilling,
+});
 const upstreamCache = new Map();
 const inflightFetches = new Map();
 const rateLimitBuckets = new Map();
@@ -1053,7 +1067,7 @@ function getCorsOrigin(request) {
 function buildCorsHeaders(request) {
   return {
     'Access-Control-Allow-Origin': getCorsOrigin(request),
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-API-Key, Stripe-Signature',
     'Access-Control-Allow-Methods': 'GET,POST,DELETE,OPTIONS',
     Vary: 'Origin',
   };
@@ -4002,6 +4016,10 @@ const server = http.createServer(async (request, response) => {
         'Retry-After': String(retryAfterSeconds),
       }
     );
+    return;
+  }
+
+  if (await membershipRoutes.handle(request, response, url)) {
     return;
   }
 

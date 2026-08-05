@@ -253,6 +253,18 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 - `GET /api/docs`
   Returns a machine-readable catalogue of every public API operation, its purpose, access level, and expected input.
 
+- `GET /api/account`
+  Returns the signed-in member entitlement view, including Premium status and billing state.
+
+- `POST /api/billing/checkout-reference`
+  Creates a signed Stripe checkout URL for the signed-in member.
+
+- `POST /api/billing/customer-portal`
+  Creates a Stripe customer-portal session for the signed-in member.
+
+- `POST /api/billing/webhook`
+  Receives Stripe webhook events that activate, update, or revoke Premium access.
+
 - `POST /api/analyze-postcode`
   - Body:
     ```json
