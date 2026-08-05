@@ -13,6 +13,7 @@
   "main": "index.ts",
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
+    "@supabase/supabase-js": "^2.112.1",
     "@types/leaflet": "^1.9.21",
     "expo": "~54.0.35",
     "expo-constants": "~18.0.13",
@@ -28,6 +29,7 @@
     "react-native-safe-area-context": "~5.6.0",
     "react-native-svg": "15.12.1",
     "react-native-web": "^0.21.0",
+    "stripe": "^22.4.0",
     "twrnc": "^4.16.0"
   },
   "devDependencies": {
