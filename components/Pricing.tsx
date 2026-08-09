@@ -22,9 +22,10 @@ export interface PricingProps {
   onBack(): void;
   onCheckout(): Promise<void>;
   onOpenRouteGuard(): void;
+  onOpenSafetySession(): void;
 }
 
-export default function Pricing({ authenticated, busy, error, onBack, onCheckout, onOpenRouteGuard }: PricingProps) {
+export default function Pricing({ authenticated, busy, error, onBack, onCheckout, onOpenRouteGuard, onOpenSafetySession }: PricingProps) {
   return (
     <View style={membershipStyles.screen}>
       <ScrollView contentContainerStyle={membershipStyles.scrollContent} contentInsetAdjustmentBehavior="automatic">
@@ -55,7 +56,7 @@ export default function Pricing({ authenticated, busy, error, onBack, onCheckout
             Premium turns one-off postcode checks into a personal monthly view of local change and official evidence.
           </Text>
 
-          <Paywall onOpenRouteGuard={onOpenRouteGuard} />
+          <Paywall onOpenRouteGuard={onOpenRouteGuard} onOpenSafetySession={onOpenSafetySession} />
 
           <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`border-indigo-100 mb-5`]}>
             <View style={tw`flex-row items-end mb-2`}>

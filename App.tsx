@@ -19,6 +19,7 @@ import Account from './components/Account';
 import Pricing from './components/Pricing';
 import SignIn from './components/SignIn';
 import RouteGuard from './components/RouteGuard';
+import SafetySession from './components/SafetySession';
 import { apiRequest } from './api/client';
 import { beginCheckout, getAccount, openCustomerPortal } from './api/membership';
 import { webAppUrl } from './auth/client';
@@ -52,7 +53,8 @@ type AppState =
   | 'SIGN_IN'
   | 'PRICING'
   | 'ACCOUNT'
-  | 'ROUTE_GUARD';
+  | 'ROUTE_GUARD'
+  | 'SAFETY_SESSION';
 
 const DAILY_SEARCH_STORAGE_KEY = 'riskradar_daily_searches';
 const LEGACY_SEARCH_COUNT_KEY = 'riskradar_search_count';
@@ -550,6 +552,7 @@ export default function App() {
                 setAppState('PRICING');
               }
             }}
+            openSafetySession={() => setAppState('SAFETY_SESSION')}
           />
         )}
 
@@ -568,6 +571,7 @@ export default function App() {
             }}
           />
         )}
+        {appState === 'SAFETY_SESSION' && <SafetySession onBack={() => setAppState('HOME')} />}
         
         {appState === 'SCANNING' && (
           <Scanner 
@@ -598,7 +602,6 @@ export default function App() {
             onBack={() => setAppState(result ? 'RESULTS' : 'HOME')}
           />
         )}
-
         {appState === 'SIGN_IN' && (
           <SignIn
             onSubmit={signInWithEmail}
@@ -618,6 +621,7 @@ export default function App() {
               routeGuardBackState.current = 'PRICING';
               setAppState('ROUTE_GUARD');
             }}
+            onOpenSafetySession={() => setAppState('SAFETY_SESSION')}
           />
         )}
 

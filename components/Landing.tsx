@@ -37,6 +37,7 @@ interface LandingProps {
   openRouteGuard: () => void;
   openAccount: () => void;
   openPremium: () => void;
+  openSafetySession: () => void;
 }
 
 const INDIGO = '#4f46e5';
@@ -61,6 +62,7 @@ export default function Landing({
   openRouteGuard,
   openAccount,
   openPremium,
+  openSafetySession,
 }: LandingProps) {
   const canSearch = searchSubmissionDecision(searchHydrated, postcodeInput) === 'ready';
   const freeSearchesRemaining = Math.max(0, freeSearchLimit - searchCount);
@@ -101,6 +103,19 @@ export default function Landing({
             <Text style={tw`text-base text-slate-500 leading-6`}>
               Search any UK postcode for recent crime trends, local hotspots, and a clear evidence-based risk score.
             </Text>
+          </View>
+
+          <View style={tw`rounded-3xl border border-indigo-100 bg-indigo-50 p-4 mb-4`}>
+            <Text style={tw`text-[10px] font-bold tracking-widest text-indigo-500 mb-2`}>FREE PLAN</Text>
+            <Text style={tw`text-slate-900 text-lg font-black mb-1`}>
+              {freeSearchesRemaining} of {freeSearchLimit} checks left today
+            </Text>
+            <Text style={tw`text-slate-500 leading-5 mb-3`}>
+              Premium is GBP 8.99/month for unlimited checks, Route Guard, and Safety Sessions.
+            </Text>
+            <Pressable onPress={openPremium} hitSlop={6} accessibilityRole="button">
+              <Text style={tw`text-indigo-700 font-black`}>See PRO and FAQ</Text>
+            </Pressable>
           </View>
 
           <View style={tw`rounded-3xl border border-slate-200 bg-slate-50 p-4 mb-4`}>
@@ -166,6 +181,10 @@ export default function Landing({
             </View>
             <ChevronRight size={18} color={INDIGO} />
           </Pressable>
+
+          <View style={tw`mb-8`}>
+            <FeatureButton label="Safety Session" icon={<ShieldCheck size={21} color="#0f172a" />} onPress={openSafetySession} />
+          </View>
 
           {nearbySuggestions.length > 0 ? (
             <ChipSection title="SUGGESTED NEAR YOU">

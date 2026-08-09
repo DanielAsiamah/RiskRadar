@@ -30,6 +30,7 @@ export const pricingFixture = React.createElement(Pricing, {
   onBack: () => undefined,
   onCheckout: async () => undefined,
   onOpenRouteGuard: () => undefined,
+  onOpenSafetySession: () => undefined,
 });
 
 export const accountFixture = React.createElement(Account, {
