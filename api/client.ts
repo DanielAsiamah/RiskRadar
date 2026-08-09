@@ -85,6 +85,13 @@ export async function apiRequest<T>(
   authMode: ApiAuthMode = 'none',
 ): Promise<T> {
   const controller = new AbortController();
+  const externalSignal = options.signal;
+  const abortFromExternalSignal = () => controller.abort();
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else {
+    externalSignal?.addEventListener('abort', abortFromExternalSignal, { once: true });
+  }
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
@@ -142,5 +149,6 @@ export async function apiRequest<T>(
     );
   } finally {
     clearTimeout(timeout);
+    externalSignal?.removeEventListener('abort', abortFromExternalSignal);
   }
 }

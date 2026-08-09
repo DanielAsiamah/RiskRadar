@@ -8,8 +8,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { BarChart3, Compass, LocateFixed, Map, MapPin, Search, ShieldCheck } from 'lucide-react-native';
+import { BarChart3, ChevronRight, Compass, LocateFixed, Map, MapPin, Navigation, Search, ShieldCheck, Sparkles } from 'lucide-react-native';
 import tw from 'twrnc';
+import { searchSubmissionDecision } from '../membership/client-state.mjs';
 
 interface NearbySuggestion {
   postcode: string;
@@ -24,11 +25,18 @@ interface LandingProps {
   recentSearches?: string[];
   clearSearches?: () => void;
   searchCount: number;
+  freeSearchLimit: number;
+  premium: boolean;
+  searchHydrated: boolean;
+  accountLabel: string;
   nearbySuggestions?: NearbySuggestion[];
   useCurrentLocation: () => void;
   findingNearby: boolean;
   openMapExplorer: () => void;
   openComparison: () => void;
+  openRouteGuard: () => void;
+  openAccount: () => void;
+  openPremium: () => void;
 }
 
 const INDIGO = '#4f46e5';
@@ -40,13 +48,22 @@ export default function Landing({
   error,
   recentSearches = [],
   clearSearches,
+  searchCount,
+  freeSearchLimit,
+  premium,
+  searchHydrated,
+  accountLabel,
   nearbySuggestions = [],
   useCurrentLocation,
   findingNearby,
   openMapExplorer,
   openComparison,
+  openRouteGuard,
+  openAccount,
+  openPremium,
 }: LandingProps) {
-  const canSearch = Boolean(postcodeInput.trim());
+  const canSearch = searchSubmissionDecision(searchHydrated, postcodeInput) === 'ready';
+  const freeSearchesRemaining = Math.max(0, freeSearchLimit - searchCount);
 
   return (
     <KeyboardAvoidingView style={tw`flex-1 bg-white`} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -66,9 +83,15 @@ export default function Landing({
                 <Text style={tw`text-[10px] font-bold tracking-widest text-slate-400`}>LIVE UK AREA INTELLIGENCE</Text>
               </View>
             </View>
-            <View style={tw`w-9 h-9 rounded-full bg-emerald-50 items-center justify-center`}>
-              <ShieldCheck size={18} color="#059669" />
-            </View>
+            <Pressable
+              onPress={openAccount}
+              hitSlop={6}
+              accessibilityRole="button"
+              style={({ pressed }) => [tw`h-10 rounded-full bg-emerald-50 flex-row items-center px-3`, pressed && tw`opacity-70`]}
+            >
+              <ShieldCheck size={17} color="#059669" />
+              <Text style={tw`text-[11px] font-black text-emerald-700 ml-2`}>{accountLabel}</Text>
+            </Pressable>
           </View>
 
           <View style={tw`mb-8`}>
@@ -93,7 +116,7 @@ export default function Landing({
                 autoCapitalize="characters"
                 autoCorrect={false}
                 returnKeyType="search"
-                onSubmitEditing={handleSearch}
+                onSubmitEditing={canSearch ? handleSearch : undefined}
                 accessibilityLabel="UK postcode or place"
               />
             </View>
@@ -101,7 +124,7 @@ export default function Landing({
             {error ? <Text selectable style={tw`text-rose-600 text-sm font-bold mb-3 px-1`}>{error}</Text> : null}
 
             <ActionButton
-              label="Check Risk"
+              label={searchHydrated ? 'Check Risk' : 'Loading search allowance...'}
               icon={<Search size={20} color="white" />}
               onPress={handleSearch}
               disabled={!canSearch}
@@ -124,7 +147,25 @@ export default function Landing({
           <View style={tw`flex-row gap-3 mb-8`}>
             <FeatureButton label="Crime map" icon={<Map size={21} color="#0f172a" />} onPress={openMapExplorer} />
             <FeatureButton label="Compare" icon={<BarChart3 size={21} color="#0f172a" />} onPress={openComparison} />
+            <FeatureButton label="Route Guard" badge="PRO" icon={<Navigation size={21} color="#4f46e5" />} onPress={openRouteGuard} />
           </View>
+
+          <Pressable
+            onPress={openPremium}
+            accessibilityRole="button"
+            style={({ pressed }) => [tw`rounded-3xl border border-indigo-100 bg-indigo-50 px-5 py-4 flex-row items-center mb-8`, pressed && tw`opacity-75`]}
+          >
+            <View style={tw`w-11 h-11 rounded-2xl bg-white items-center justify-center mr-3`}>
+              <Sparkles size={20} color={INDIGO} />
+            </View>
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-sm font-black text-slate-950`}>{premium ? 'RiskRadar Premium is active' : 'Explore RiskRadar Premium'}</Text>
+              <Text style={tw`text-xs text-slate-500 mt-1`}>
+                {premium ? 'Unlimited searches and member intelligence.' : `${freeSearchesRemaining} free ${freeSearchesRemaining === 1 ? 'search' : 'searches'} left today.`}
+              </Text>
+            </View>
+            <ChevronRight size={18} color={INDIGO} />
+          </Pressable>
 
           {nearbySuggestions.length > 0 ? (
             <ChipSection title="SUGGESTED NEAR YOU">
@@ -171,7 +212,7 @@ function ActionButton({ label, icon, onPress, disabled, primary = false }: { lab
   );
 }
 
-function FeatureButton({ label, icon, onPress }: { label: string; icon: React.ReactNode; onPress: () => void }) {
+function FeatureButton({ label, icon, onPress, badge }: { label: string; icon: React.ReactNode; onPress: () => void; badge?: string }) {
   return (
     <Pressable
       onPress={onPress}
@@ -180,7 +221,10 @@ function FeatureButton({ label, icon, onPress }: { label: string; icon: React.Re
       style={({ pressed }) => [tw`flex-1 h-24 rounded-2xl border border-slate-200 bg-white px-4 justify-center`, pressed && tw`bg-slate-100`]}
     >
       {icon}
-      <Text style={tw`text-sm font-black text-slate-900 mt-3`}>{label}</Text>
+      <View style={tw`flex-row items-center mt-3`}>
+        <Text style={tw`text-xs font-black text-slate-900`}>{label}</Text>
+        {badge ? <View style={tw`ml-1 rounded-full bg-indigo-600 px-1.5 py-0.5`}><Text style={tw`text-[8px] font-black text-white`}>{badge}</Text></View> : null}
+      </View>
     </Pressable>
   );
 }

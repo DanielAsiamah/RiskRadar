@@ -15,6 +15,7 @@ import { readMembershipConfig } from './membership/config.mjs';
 import { createSupabaseMembershipStore } from './membership/supabase-store.mjs';
 import { createStripeBilling } from './membership/stripe-billing.mjs';
 import { createMembershipRouteHandler } from './membership/routes.mjs';
+import { createRouteGuardRouteHandler } from './route-guard.mjs';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -76,6 +77,7 @@ const membershipRoutes = createMembershipRouteHandler({
   store: membershipStore,
   billing: membershipBilling,
 });
+const routeGuardRoutes = createRouteGuardRouteHandler({ sendJson });
 const upstreamCache = new Map();
 const inflightFetches = new Map();
 const rateLimitBuckets = new Map();
@@ -4020,6 +4022,11 @@ const server = http.createServer(async (request, response) => {
   }
 
   if (await membershipRoutes.handle(request, response, url)) {
+    return;
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/route-guard') {
+    await routeGuardRoutes.handle(request, response, url);
     return;
   }
 

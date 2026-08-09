@@ -1,8 +1,8 @@
 import type { AccountEntitlement } from '../membership/types';
 import { apiRequest } from './client';
 
-export function getAccount(): Promise<AccountEntitlement> {
-  return apiRequest<AccountEntitlement>('/api/account', {}, 40_000, 'required');
+export function getAccount(timeoutMs = 40_000, signal?: AbortSignal): Promise<AccountEntitlement> {
+  return apiRequest<AccountEntitlement>('/api/account', { signal }, timeoutMs, 'required');
 }
 
 export function beginCheckout(): Promise<{ checkoutUrl: string }> {

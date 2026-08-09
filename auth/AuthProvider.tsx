@@ -1,6 +1,9 @@
 import type { PropsWithChildren } from 'react';
 import React, { createContext, useEffect, useState } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
+import * as ExpoLinking from 'expo-linking';
+import { Platform } from 'react-native';
+import { selectAuthRedirectUrl } from '../membership/client-state.mjs';
 import { supabase, supabaseConfigured, webAppUrl } from './client';
 
 export interface AuthContextValue {
@@ -82,7 +85,9 @@ export function AuthProvider({ children }: PropsWithChildren) {
         throw new Error('Supabase Auth is not configured for this build.');
       }
 
-      const redirectUrl = `${webAppUrl}?auth=callback`;
+      const webRedirectUrl = `${webAppUrl}?auth=callback`;
+      const nativeRedirectUrl = Platform.OS === 'web' ? webRedirectUrl : ExpoLinking.createURL('auth/callback');
+      const redirectUrl = selectAuthRedirectUrl(Platform.OS, webRedirectUrl, nativeRedirectUrl);
       const { error } = await supabase.auth.signInWithOtp({
         email,
         options: {

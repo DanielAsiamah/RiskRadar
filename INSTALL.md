@@ -265,6 +265,22 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 - `POST /api/billing/webhook`
   Receives Stripe webhook events that activate, update, or revoke Premium access.
 
+- `POST /api/route-guard`
+  Builds a deterministic mock route and scans sampled sections for elevated area risk. Route Guard is a PRO website feature with 100 route scans included per calendar month.
+  - Body:
+    ```json
+    {
+      "start": "SE10 8EP",
+      "destination": "London Bridge",
+      "travelMode": "transit",
+      "entitlement": "pro",
+      "routeScansUsed": 4
+    }
+    ```
+  - Returns mock route points, distance and duration estimates, sampled risk scores, hotzone sections, overall risk level, monthly usage, a planning-only Google cost estimate, and the area-intelligence disclaimer.
+  - `ROUTE_PROVIDER` defaults to `mock`. This release makes no Google request and does not require `GOOGLE_MAPS_API_KEY`.
+  - Keep future Google credentials on the backend only. Never add a Google key to an `EXPO_PUBLIC_*` variable or frontend file.
+
 - `POST /api/analyze-postcode`
   - Body:
     ```json

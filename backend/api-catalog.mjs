@@ -19,6 +19,7 @@ export const apiCatalog = Object.freeze({
     endpoint('POST', '/api/billing/checkout-reference', 'Create a signed Stripe checkout URL for the current member.', 'None', 'member'),
     endpoint('POST', '/api/billing/customer-portal', 'Create a Stripe customer-portal session for the current member.', '{ returnUrl? }', 'member'),
     endpoint('POST', '/api/billing/webhook', 'Process Stripe webhook events that change Premium access.', 'Raw Stripe webhook payload', 'member'),
+    endpoint('POST', '/api/route-guard', 'Build a mock route and scan its sampled sections for elevated area risk.', '{ start, destination, travelMode, entitlement, routeScansUsed }', 'member'),
     endpoint('GET', '/api/filter-metadata', 'List supported months, crime categories, and default radii.'),
     endpoint('POST', '/api/analyze-postcode', 'Build a complete postcode or place risk analysis.', '{ postcode|string query }'),
     endpoint('POST', '/api/analyze-point', 'Build a complete analysis centred on map coordinates.', '{ latitude, longitude, monthCount? }'),
