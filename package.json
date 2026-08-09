@@ -48,8 +48,9 @@
     "api:prewarm": "node backend/prewarm.mjs",
     "api:smoke": "node backend/smoke-test.mjs",
     "api:verify": "node backend/verify.mjs",
-    "test": "npm run typecheck && npm run test:backend",
+    "test": "npm run typecheck && npm run test:backend && npm run test:git-guard",
     "test:backend": "node --check backend/server.mjs && node --test backend/*.test.mjs",
+    "test:git-guard": "node --test scripts/verify-clean-push.test.mjs",
     "typecheck": "node --stack-size=8192 node_modules/typescript/bin/tsc --noEmit",
     "build:web": "expo export --platform web --output-dir dist",
     "start": "expo start",
@@ -57,7 +58,8 @@
     "start:mobile:tunnel": "node scripts/start-expo-mobile.mjs --tunnel",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "setup:git-hooks": "node scripts/install-git-hooks.mjs"
   },
   "private": true
 }

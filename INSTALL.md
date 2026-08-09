@@ -15,6 +15,14 @@ cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
 npm install
 ```
 
+Enable the repository push guard once after cloning. It blocks `git push` whenever staged, unstaged, or untracked files have not been committed:
+
+```powershell
+npm run setup:git-hooks
+```
+
+Use the same command after cloning the repository on macOS. Git will then run the tracked `.githooks/pre-push` check before every push.
+
 ## Run locally
 
 Open two terminals.
