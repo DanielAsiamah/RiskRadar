@@ -17,13 +17,17 @@ import ComparePostcodes from './components/ComparePostcodes';
 import EvidenceDetail from './components/EvidenceDetail';
 import Account from './components/Account';
 import PremiumDashboard from './components/PremiumDashboard';
+import AlertSettings from './components/AlertSettings';
+import MemberReportScreen from './components/MemberReport';
 import Pricing from './components/Pricing';
 import SignIn from './components/SignIn';
 import RouteGuard from './components/RouteGuard';
 import SafetySession from './components/SafetySession';
 import { apiRequest } from './api/client';
+import { getAlertPreferences, updateAlertPreferences, type AlertPreferences, type AlertPreferencesInput } from './api/alerts';
 import { addWatchedPlace, getDashboard, removeWatchedPlace, renameWatchedPlace } from './api/dashboard';
 import { beginCheckout, getAccount, openCustomerPortal } from './api/membership';
+import { getMemberReport, type MemberReport } from './api/reports';
 import { webAppUrl } from './auth/client';
 import { useAuth } from './auth/useAuth';
 import type { DashboardView } from './membership/dashboard-types';
@@ -56,6 +60,8 @@ type AppState =
   | 'SIGN_IN'
   | 'PRICING'
   | 'DASHBOARD'
+  | 'ALERT_SETTINGS'
+  | 'REPORT'
   | 'ACCOUNT'
   | 'ROUTE_GUARD'
   | 'SAFETY_SESSION';
@@ -119,11 +125,21 @@ export default function App() {
   const [dashboardSaving, setDashboardSaving] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [selectedDashboardWatchId, setSelectedDashboardWatchId] = useState<string | null>(null);
+  const [alertPreferences, setAlertPreferences] = useState<AlertPreferences | null>(null);
+  const [alertPreferencesLoading, setAlertPreferencesLoading] = useState(false);
+  const [alertPreferencesSaving, setAlertPreferencesSaving] = useState(false);
+  const [alertPreferencesError, setAlertPreferencesError] = useState<string | null>(null);
+  const [memberReport, setMemberReport] = useState<MemberReport | null>(null);
+  const [memberReportLoading, setMemberReportLoading] = useState(false);
+  const [memberReportError, setMemberReportError] = useState<string | null>(null);
+  const [selectedReportWatchId, setSelectedReportWatchId] = useState<string | null>(null);
   const [routeScansUsed, setRouteScansUsed] = useState(0);
   const [routeScanUsageHydrated, setRouteScanUsageHydrated] = useState(false);
   const searchRequestId = useRef(0);
   const accountRequests = useRef(createLatestRequestCoordinator());
   const dashboardRequests = useRef(createLatestRequestCoordinator());
+  const alertPreferenceRequests = useRef(createLatestRequestCoordinator());
+  const reportRequests = useRef(createLatestRequestCoordinator());
   const routeGuardBackState = useRef<'HOME' | 'PRICING'>('HOME');
 
   useEffect(() => {
@@ -212,6 +228,82 @@ export default function App() {
     }
   };
 
+  const loadMemberReport = async (watchId: string, timeoutMs = 60_000) => {
+    if (!user || !account?.premium) {
+      setMemberReport(null);
+      setMemberReportLoading(false);
+      setMemberReportError(null);
+      return null;
+    }
+
+    const request = reportRequests.current.begin();
+    try {
+      setMemberReportLoading(true);
+      setMemberReportError(null);
+      const report = await getMemberReport(watchId, timeoutMs, request.signal);
+      if (!request.isCurrent()) return null;
+      setMemberReport(report);
+      return report;
+    } catch (requestError) {
+      if (!request.isCurrent()) return null;
+      setMemberReportError(requestError instanceof Error ? requestError.message : 'Unable to load this Premium report.');
+      return null;
+    } finally {
+      if (request.isCurrent()) setMemberReportLoading(false);
+    }
+  };
+
+  const loadAlertPreferences = async (timeoutMs = 40_000) => {
+    if (!user || !account?.premium) {
+      setAlertPreferences(null);
+      setAlertPreferencesLoading(false);
+      setAlertPreferencesError(null);
+      return null;
+    }
+
+    const request = alertPreferenceRequests.current.begin();
+    try {
+      setAlertPreferencesLoading(true);
+      setAlertPreferencesError(null);
+      const preferences = await getAlertPreferences(timeoutMs, request.signal);
+      if (!request.isCurrent()) return null;
+      setAlertPreferences(preferences);
+      return preferences;
+    } catch (requestError) {
+      if (!request.isCurrent()) return null;
+      setAlertPreferencesError(requestError instanceof Error ? requestError.message : 'Unable to load alert settings.');
+      return null;
+    } finally {
+      if (request.isCurrent()) setAlertPreferencesLoading(false);
+    }
+  };
+
+  const saveAlertPreferences = async (input: AlertPreferencesInput) => {
+    if (!user || !account?.premium) {
+      const message = 'Premium is required to update alert settings.';
+      setAlertPreferencesError(message);
+      throw new Error(message);
+    }
+
+    const previousPreferences = alertPreferences;
+    const request = alertPreferenceRequests.current.begin();
+    try {
+      setAlertPreferencesSaving(true);
+      setAlertPreferencesError(null);
+      const preferences = await updateAlertPreferences(input, 40_000, request.signal);
+      if (!request.isCurrent()) return;
+      setAlertPreferences(preferences);
+    } catch (requestError) {
+      if (request.isCurrent()) {
+        setAlertPreferences(previousPreferences);
+        setAlertPreferencesError(requestError instanceof Error ? requestError.message : 'Unable to save alert settings.');
+      }
+      throw requestError;
+    } finally {
+      if (request.isCurrent()) setAlertPreferencesSaving(false);
+    }
+  };
+
   useEffect(() => {
     if (!user) {
       accountRequests.current.cancel();
@@ -226,11 +318,21 @@ export default function App() {
   useEffect(() => {
     if (user) return;
     dashboardRequests.current.cancel();
+    alertPreferenceRequests.current.cancel();
+    reportRequests.current.cancel();
     setDashboard(null);
     setDashboardLoading(false);
     setDashboardSaving(false);
     setDashboardError(null);
     setSelectedDashboardWatchId(null);
+    setAlertPreferences(null);
+    setAlertPreferencesLoading(false);
+    setAlertPreferencesSaving(false);
+    setAlertPreferencesError(null);
+    setMemberReport(null);
+    setMemberReportLoading(false);
+    setMemberReportError(null);
+    setSelectedReportWatchId(null);
   }, [user?.id]);
 
   useEffect(() => {
@@ -255,7 +357,7 @@ export default function App() {
   }, [account?.premium, appState, authLoading, pendingPremiumDestination, user?.id]);
 
   useEffect(() => {
-    if (!authLoading && !user && (appState === 'ACCOUNT' || appState === 'DASHBOARD') && !billingReturnPending) {
+    if (!authLoading && !user && (appState === 'ACCOUNT' || appState === 'DASHBOARD' || appState === 'ALERT_SETTINGS' || appState === 'REPORT') && !billingReturnPending) {
       setAppState('SIGN_IN');
     }
   }, [appState, authLoading, billingReturnPending, user?.id]);
@@ -598,6 +700,57 @@ export default function App() {
     await refreshDashboard(id, 40_000);
   };
 
+  const handleOpenAlertSettings = async () => {
+    setPricingError(null);
+    if (!user) {
+      await rememberPremiumDestination('DASHBOARD');
+      setAppState('SIGN_IN');
+      return;
+    }
+
+    if (!account?.premium) {
+      await rememberPremiumDestination('DASHBOARD');
+      setAppState('PRICING');
+      return;
+    }
+
+    setAppState('ALERT_SETTINGS');
+    await loadAlertPreferences();
+  };
+
+  const handleAlertSettingsRetry = async () => {
+    await loadAlertPreferences(15_000);
+  };
+
+  const handleOpenReport = async (watchId: string) => {
+    setPricingError(null);
+    if (!user) {
+      await rememberPremiumDestination('REPORTS');
+      setAppState('SIGN_IN');
+      return;
+    }
+
+    if (!account?.premium) {
+      await rememberPremiumDestination('REPORTS');
+      setAppState('PRICING');
+      return;
+    }
+
+    setSelectedReportWatchId(watchId);
+    setMemberReport(null);
+    setAppState('REPORT');
+    await loadMemberReport(watchId);
+  };
+
+  const handleReportRetry = async () => {
+    if (!selectedReportWatchId) {
+      setMemberReportError('No watched place is selected for this report.');
+      return;
+    }
+
+    await loadMemberReport(selectedReportWatchId, 40_000);
+  };
+
   const handleCheckout = async () => {
     if (!user) {
       await rememberPremiumDestination('DASHBOARD');
@@ -658,6 +811,8 @@ export default function App() {
     } finally {
       accountRequests.current.cancel();
       dashboardRequests.current.cancel();
+      alertPreferenceRequests.current.cancel();
+      reportRequests.current.cancel();
       setAccount(null);
       setAccountError(null);
       setBillingConfirming(false);
@@ -667,6 +822,14 @@ export default function App() {
       setDashboardSaving(false);
       setDashboardError(null);
       setSelectedDashboardWatchId(null);
+      setAlertPreferences(null);
+      setAlertPreferencesLoading(false);
+      setAlertPreferencesSaving(false);
+      setAlertPreferencesError(null);
+      setMemberReport(null);
+      setMemberReportLoading(false);
+      setMemberReportError(null);
+      setSelectedReportWatchId(null);
       await clearPremiumDestination();
       await clearPendingWatchPostcode();
       setAppState('HOME');
@@ -704,6 +867,7 @@ export default function App() {
 
   const currentDailyUsage = parseDailySearchUsage(dailySearchUsage);
   const accountLabel = account?.premium ? 'Premium active' : user ? 'Account' : 'Sign in';
+  const latestDashboardDataMonth = dashboard?.selectedPlace?.snapshot?.dataMonth ?? null;
 
   return (
     <SafeAreaProvider>
@@ -831,6 +995,31 @@ export default function App() {
             onSelectWatchedPlace={handleSelectWatchedPlace}
             onClearPendingPostcode={() => { void clearPendingWatchPostcode(); }}
             onOpenCompare={() => setAppState('COMPARE')}
+            onOpenAlertSettings={() => { void handleOpenAlertSettings(); }}
+            onOpenReport={(watchId) => { void handleOpenReport(watchId); }}
+          />
+        )}
+
+        {appState === 'ALERT_SETTINGS' && (
+          <AlertSettings
+            preferences={alertPreferences}
+            loading={alertPreferencesLoading}
+            saving={alertPreferencesSaving}
+            error={alertPreferencesError}
+            latestDataMonth={latestDashboardDataMonth}
+            onBack={() => setAppState('DASHBOARD')}
+            onRetry={handleAlertSettingsRetry}
+            onSave={saveAlertPreferences}
+          />
+        )}
+
+        {appState === 'REPORT' && (
+          <MemberReportScreen
+            report={memberReport}
+            loading={memberReportLoading}
+            error={memberReportError}
+            onBack={() => setAppState('DASHBOARD')}
+            onRetry={handleReportRetry}
           />
         )}
 

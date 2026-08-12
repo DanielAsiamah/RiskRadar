@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
-import { ArrowLeft, BarChart3, Plus, RefreshCw, ShieldCheck } from 'lucide-react-native';
+import { ArrowLeft, BarChart3, Bell, FileText, Plus, RefreshCw, ShieldCheck } from 'lucide-react-native';
 import tw from 'twrnc';
 
 import type { ChangeSummary, DashboardView, WatchSnapshot } from '../membership/dashboard-types';
@@ -25,6 +25,8 @@ export interface PremiumDashboardProps {
   onSelectWatchedPlace(id: string): Promise<void>;
   onClearPendingPostcode(): void;
   onOpenCompare(): void;
+  onOpenAlertSettings(): void;
+  onOpenReport(watchId: string): void;
 }
 
 function formatMonth(value: string | null | undefined) {
@@ -106,6 +108,8 @@ export default function PremiumDashboard({
   onSelectWatchedPlace,
   onClearPendingPostcode,
   onOpenCompare,
+  onOpenAlertSettings,
+  onOpenReport,
 }: PremiumDashboardProps) {
   const [showAddForm, setShowAddForm] = useState(false);
 
@@ -179,6 +183,15 @@ export default function PremiumDashboard({
               <Text style={tw`text-sm font-black text-slate-700 ml-2`}>Compare areas</Text>
             </Pressable>
           </View>
+
+          <Pressable
+            onPress={onOpenAlertSettings}
+            style={({ pressed }) => [membershipStyles.secondaryButton, tw`mb-5`, pressed && tw`bg-slate-50`]}
+            accessibilityRole="button"
+          >
+            <Bell size={17} color={membershipColors.indigo} />
+            <Text style={tw`text-sm font-black text-indigo-700 ml-2`}>Alert settings</Text>
+          </Pressable>
 
           {showAddForm ? (
             <WatchPlaceForm
@@ -255,6 +268,15 @@ export default function PremiumDashboard({
                 <MetricPanel label="Total incidents" value={String(selectedPlace.snapshot.totalIncidents)} />
                 <MetricPanel label="Change" value={`${selectedPlace.changeSummary?.changePercent ?? 0 > 0 ? '+' : ''}${selectedPlace.changeSummary?.changePercent ?? 0}%`} />
               </View>
+
+              <Pressable
+                onPress={() => onOpenReport(selectedPlace.id)}
+                style={({ pressed }) => [membershipStyles.secondaryButton, tw`mb-5`, pressed && tw`bg-slate-50`]}
+                accessibilityRole="button"
+              >
+                <FileText size={17} color={membershipColors.indigo} />
+                <Text style={tw`text-sm font-black text-indigo-700 ml-2`}>Download report</Text>
+              </Pressable>
 
               {trendData ? (
                 <View style={tw`mb-6`}>
