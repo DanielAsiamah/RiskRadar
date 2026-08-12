@@ -23,6 +23,19 @@ async function parseJson(response) {
   return body;
 }
 
+function mapAlertPreferences(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    monthlyEmailEnabled: Boolean(row.monthly_email_enabled),
+    categoryChangeEnabled: Boolean(row.category_change_enabled),
+    volumeChangeEnabled: Boolean(row.volume_change_enabled),
+    updatedAt: row.updated_at ?? null,
+  };
+}
+
 export function createSupabaseMembershipStore(config, fetchImpl = fetch) {
   async function request(path, options = {}) {
     const response = await fetchImpl(`${config.supabaseUrl}${path}`, options);
@@ -104,6 +117,30 @@ export function createSupabaseMembershipStore(config, fetchImpl = fetch) {
         }
         throw error;
       }
+    },
+
+    async getAlertPreferences(userId) {
+      const row = await getSingle(`/rest/v1/alert_preferences?user_id=${encodeFilter(userId)}&limit=1`);
+      return mapAlertPreferences(row);
+    },
+
+    async upsertAlertPreferences(userId, input) {
+      const rows = await request('/rest/v1/alert_preferences', {
+        method: 'POST',
+        headers: createHeaders(config.supabaseServiceRoleKey, {
+          'Content-Type': 'application/json',
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        }),
+        body: JSON.stringify({
+          user_id: userId,
+          monthly_email_enabled: Boolean(input?.monthlyEmailEnabled),
+          category_change_enabled: Boolean(input?.categoryChangeEnabled),
+          volume_change_enabled: Boolean(input?.volumeChangeEnabled),
+        }),
+      });
+
+      const row = Array.isArray(rows) ? rows[0] ?? null : rows;
+      return mapAlertPreferences(row);
     },
   };
 }

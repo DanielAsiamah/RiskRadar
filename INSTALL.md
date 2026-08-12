@@ -264,6 +264,20 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 - `GET /api/account`
   Returns the signed-in member entitlement view, including Premium status and billing state.
 
+- `GET /api/alert-preferences`
+  Returns the signed-in Premium member's monthly alert settings and delivery email.
+
+- `PUT /api/alert-preferences`
+  Updates the signed-in Premium member's monthly alert settings.
+  - Body:
+    ```json
+    {
+      "monthlyEmailEnabled": true,
+      "categoryChangeEnabled": true,
+      "volumeChangeEnabled": false
+    }
+    ```
+
 - `GET /api/dashboard`
   Returns the Premium dashboard view for watched postcodes, including the current monthly briefing, available places, and the selected place when `watchId` is supplied.
 

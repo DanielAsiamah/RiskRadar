@@ -80,3 +80,56 @@ test('claimBillingEvent inserts once and reports duplicates safely', async () =>
   assert.equal(await store.claimBillingEvent({ stripe_event_id: 'evt_1', event_type: 'invoice.paid' }), true);
   assert.equal(await store.claimBillingEvent({ stripe_event_id: 'evt_1', event_type: 'invoice.paid' }), false);
 });
+
+test('alert preference lookups and upserts use owner filters and merge semantics', async () => {
+  const calls = [];
+  const store = createStore(async (input, init = {}) => {
+    calls.push({ input, init });
+
+    if (init.method === 'POST') {
+      return createResponse(201, [{
+        user_id: 'user-1',
+        monthly_email_enabled: false,
+        category_change_enabled: true,
+        volume_change_enabled: false,
+        updated_at: '2026-08-12T13:00:00.000Z',
+      }]);
+    }
+
+    return createResponse(200, [{
+      user_id: 'user-1',
+      monthly_email_enabled: true,
+      category_change_enabled: true,
+      volume_change_enabled: true,
+      updated_at: '2026-08-12T12:00:00.000Z',
+    }]);
+  });
+
+  const current = await store.getAlertPreferences('user-1');
+  const updated = await store.upsertAlertPreferences('user-1', {
+    monthlyEmailEnabled: false,
+    categoryChangeEnabled: true,
+    volumeChangeEnabled: false,
+  });
+
+  assert.match(calls[0].input, /alert_preferences\?user_id=eq\.user-1&limit=1/);
+  assert.equal(calls[1].init.headers.Prefer, 'resolution=merge-duplicates,return=representation');
+  assert.deepEqual(JSON.parse(calls[1].init.body), {
+    user_id: 'user-1',
+    monthly_email_enabled: false,
+    category_change_enabled: true,
+    volume_change_enabled: false,
+  });
+  assert.deepEqual(current, {
+    monthlyEmailEnabled: true,
+    categoryChangeEnabled: true,
+    volumeChangeEnabled: true,
+    updatedAt: '2026-08-12T12:00:00.000Z',
+  });
+  assert.deepEqual(updated, {
+    monthlyEmailEnabled: false,
+    categoryChangeEnabled: true,
+    volumeChangeEnabled: false,
+    updatedAt: '2026-08-12T13:00:00.000Z',
+  });
+});
