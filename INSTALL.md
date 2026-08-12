@@ -281,6 +281,9 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 - `GET /api/dashboard`
   Returns the Premium dashboard view for watched postcodes, including the current monthly briefing, available places, and the selected place when `watchId` is supplied.
 
+- `GET /api/reports/:watchId`
+  Returns a private Premium report for one watched postcode, including the published data month, twelve-month trend, category changes, hotspot roads, official evidence links, and the printable disclosure copy.
+
 - `POST /api/billing/checkout-reference`
   Creates a signed Stripe checkout URL for the signed-in member.
 

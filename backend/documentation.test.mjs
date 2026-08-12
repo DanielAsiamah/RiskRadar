@@ -4,19 +4,23 @@ import test from 'node:test';
 import { apiCatalog } from './api-catalog.mjs';
 
 test('documents every public HTTP route', async () => {
-  const [serverSource, membershipSource, watchlistSource, dashboardSource, alertPreferencesSource, installGuide] = await Promise.all([
+  const [serverSource, membershipSource, watchlistSource, dashboardSource, alertPreferencesSource, reportRoutesSource, installGuide] = await Promise.all([
     readFile('backend/server.mjs', 'utf8'),
     readFile('backend/membership/routes.mjs', 'utf8'),
     readFile('backend/membership/watchlist-routes.mjs', 'utf8'),
     readFile('backend/membership/dashboard-routes.mjs', 'utf8'),
     readFile('backend/membership/alert-preferences.mjs', 'utf8'),
+    readFile('backend/membership/report-routes.mjs', 'utf8'),
     readFile('INSTALL.md', 'utf8'),
   ]);
-  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}\n${alertPreferencesSource}`;
+  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}\n${alertPreferencesSource}\n${reportRoutesSource}`;
   const routes = [...combinedSource.matchAll(/url\.pathname === '([^']+)'/g)].map((match) => match[1]);
 
   if (combinedSource.includes("/^\\/api\\/watchlist\\/([^/]+)$/")) {
     routes.push('/api/watchlist/:id');
+  }
+  if (combinedSource.includes("/^\\/api\\/reports\\/([^/]+)$/")) {
+    routes.push('/api/reports/:watchId');
   }
 
   assert.ok(routes.length > 20, 'Expected the server route extractor to find public routes.');
@@ -26,14 +30,15 @@ test('documents every public HTTP route', async () => {
 });
 
 test('catalogues every method and path implemented by the router', async () => {
-  const [serverSource, membershipSource, watchlistSource, dashboardSource, alertPreferencesSource] = await Promise.all([
+  const [serverSource, membershipSource, watchlistSource, dashboardSource, alertPreferencesSource, reportRoutesSource] = await Promise.all([
     readFile('backend/server.mjs', 'utf8'),
     readFile('backend/membership/routes.mjs', 'utf8'),
     readFile('backend/membership/watchlist-routes.mjs', 'utf8'),
     readFile('backend/membership/dashboard-routes.mjs', 'utf8'),
     readFile('backend/membership/alert-preferences.mjs', 'utf8'),
+    readFile('backend/membership/report-routes.mjs', 'utf8'),
   ]);
-  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}\n${alertPreferencesSource}`;
+  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}\n${alertPreferencesSource}\n${reportRoutesSource}`;
   const implemented = [...combinedSource.matchAll(/request\.method === '([^']+)' && url\.pathname === '([^']+)'/g)]
     .map((match) => `${match[1]} ${match[2]}`)
     .concat(watchlistSource.includes("url.pathname === '/api/watchlist'")
@@ -44,6 +49,9 @@ test('catalogues every method and path implemented by the router', async () => {
       : [])
     .concat(alertPreferencesSource.includes("url.pathname !== '/api/alert-preferences'")
       ? ['GET /api/alert-preferences', 'PUT /api/alert-preferences']
+      : [])
+    .concat(reportRoutesSource.includes("/^\\/api\\/reports\\/([^/]+)$/")
+      ? ['GET /api/reports/:watchId']
       : [])
     .concat(combinedSource.includes("/^\\/api\\/watchlist\\/([^/]+)$/")
       ? ['PATCH /api/watchlist/:id', 'DELETE /api/watchlist/:id']

@@ -1,6 +1,7 @@
 import { toEntitlement } from './subscription-state.mjs';
 import { createDashboardRouteHandler } from './dashboard-routes.mjs';
 import { createAlertPreferencesRouteHandler } from './alert-preferences.mjs';
+import { createReportRouteHandler } from './report-routes.mjs';
 import { createWatchlistRouteHandler } from './watchlist-routes.mjs';
 
 function sendJson(response, statusCode, payload, extraHeaders = {}) {
@@ -64,6 +65,11 @@ export function createMembershipRouteHandler({
     fetchMonthlyCrimeSeries,
   });
   const alertPreferencesRoutes = createAlertPreferencesRouteHandler({ store });
+  const reportRoutes = createReportRouteHandler({
+    watchlistStore,
+    analyzeLocation,
+    fetchMonthlyCrimeSeries,
+  });
 
   async function authenticate(request) {
     const token = readBearerToken(request);
@@ -264,6 +270,14 @@ export function createMembershipRouteHandler({
         requirePremium,
       });
       if (alertPreferencesHandled) {
+        return true;
+      }
+
+      const reportHandled = await reportRoutes.handle(request, response, url, {
+        sendJson,
+        requirePremium,
+      });
+      if (reportHandled) {
         return true;
       }
 
