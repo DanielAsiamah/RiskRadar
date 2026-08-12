@@ -264,6 +264,9 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 - `GET /api/account`
   Returns the signed-in member entitlement view, including Premium status and billing state.
 
+- `GET /api/dashboard`
+  Returns the Premium dashboard view for watched postcodes, including the current monthly briefing, available places, and the selected place when `watchId` is supplied.
+
 - `POST /api/billing/checkout-reference`
   Creates a signed Stripe checkout URL for the signed-in member.
 
@@ -272,6 +275,26 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 
 - `POST /api/billing/webhook`
   Receives Stripe webhook events that activate, update, or revoke Premium access.
+
+- `GET /api/watchlist`
+  Lists the signed-in member's watched postcodes.
+
+- `POST /api/watchlist`
+  Creates a watched postcode for the signed-in member.
+  - Body:
+    ```json
+    { "label": "Home", "postcode": "SE10 8EP" }
+    ```
+
+- `PATCH /api/watchlist/:id`
+  Renames a watched postcode owned by the signed-in member.
+  - Body:
+    ```json
+    { "label": "Family" }
+    ```
+
+- `DELETE /api/watchlist/:id`
+  Deletes a watched postcode owned by the signed-in member.
 
 - `POST /api/route-guard`
   Builds a deterministic mock route and scans sampled sections for elevated area risk. Route Guard is a PRO website feature with 100 route scans included per calendar month.

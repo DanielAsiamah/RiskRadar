@@ -1,4 +1,5 @@
 import { toEntitlement } from './subscription-state.mjs';
+import { createDashboardRouteHandler } from './dashboard-routes.mjs';
 import { createWatchlistRouteHandler } from './watchlist-routes.mjs';
 
 function sendJson(response, statusCode, payload, extraHeaders = {}) {
@@ -47,8 +48,20 @@ async function readJsonBody(request) {
   return JSON.parse(rawBody.toString('utf8'));
 }
 
-export function createMembershipRouteHandler({ config, store, billing, watchlistStore = null }) {
+export function createMembershipRouteHandler({
+  config,
+  store,
+  billing,
+  watchlistStore = null,
+  analyzeLocation = null,
+  fetchMonthlyCrimeSeries = null,
+}) {
   const watchlistRoutes = createWatchlistRouteHandler({ watchlistStore });
+  const dashboardRoutes = createDashboardRouteHandler({
+    watchlistStore,
+    analyzeLocation,
+    fetchMonthlyCrimeSeries,
+  });
 
   async function authenticate(request) {
     const token = readBearerToken(request);
@@ -232,6 +245,14 @@ export function createMembershipRouteHandler({ config, store, billing, watchlist
         requirePremium,
       });
       if (watchlistHandled) {
+        return true;
+      }
+
+      const dashboardHandled = await dashboardRoutes.handle(request, response, url, {
+        sendJson,
+        requirePremium,
+      });
+      if (dashboardHandled) {
         return true;
       }
 

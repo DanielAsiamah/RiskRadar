@@ -4,12 +4,19 @@ import test from 'node:test';
 import { apiCatalog } from './api-catalog.mjs';
 
 test('documents every public HTTP route', async () => {
-  const [serverSource, membershipSource, installGuide] = await Promise.all([
+  const [serverSource, membershipSource, watchlistSource, dashboardSource, installGuide] = await Promise.all([
     readFile('backend/server.mjs', 'utf8'),
     readFile('backend/membership/routes.mjs', 'utf8'),
+    readFile('backend/membership/watchlist-routes.mjs', 'utf8'),
+    readFile('backend/membership/dashboard-routes.mjs', 'utf8'),
     readFile('INSTALL.md', 'utf8'),
   ]);
-  const routes = [...`${serverSource}\n${membershipSource}`.matchAll(/url\.pathname === '([^']+)'/g)].map((match) => match[1]);
+  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}`;
+  const routes = [...combinedSource.matchAll(/url\.pathname === '([^']+)'/g)].map((match) => match[1]);
+
+  if (combinedSource.includes("/^\\/api\\/watchlist\\/([^/]+)$/")) {
+    routes.push('/api/watchlist/:id');
+  }
 
   assert.ok(routes.length > 20, 'Expected the server route extractor to find public routes.');
   for (const route of new Set(routes)) {
@@ -18,12 +25,24 @@ test('documents every public HTTP route', async () => {
 });
 
 test('catalogues every method and path implemented by the router', async () => {
-  const [serverSource, membershipSource] = await Promise.all([
+  const [serverSource, membershipSource, watchlistSource, dashboardSource] = await Promise.all([
     readFile('backend/server.mjs', 'utf8'),
     readFile('backend/membership/routes.mjs', 'utf8'),
+    readFile('backend/membership/watchlist-routes.mjs', 'utf8'),
+    readFile('backend/membership/dashboard-routes.mjs', 'utf8'),
   ]);
-  const implemented = [...`${serverSource}\n${membershipSource}`.matchAll(/request\.method === '([^']+)' && url\.pathname === '([^']+)'/g)]
+  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}`;
+  const implemented = [...combinedSource.matchAll(/request\.method === '([^']+)' && url\.pathname === '([^']+)'/g)]
     .map((match) => `${match[1]} ${match[2]}`)
+    .concat(watchlistSource.includes("url.pathname === '/api/watchlist'")
+      ? ['GET /api/watchlist', 'POST /api/watchlist']
+      : [])
+    .concat(dashboardSource.includes("url.pathname !== '/api/dashboard'")
+      ? ['GET /api/dashboard']
+      : [])
+    .concat(combinedSource.includes("/^\\/api\\/watchlist\\/([^/]+)$/")
+      ? ['PATCH /api/watchlist/:id', 'DELETE /api/watchlist/:id']
+      : [])
     .sort();
   const catalogued = apiCatalog.endpoints
     .map((item) => `${item.method} ${item.path}`)

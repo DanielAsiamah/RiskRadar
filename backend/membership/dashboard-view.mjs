@@ -81,7 +81,7 @@ export function buildWatchSnapshot(analysis, generatedAt = new Date().toISOStrin
   };
 }
 
-export function buildDashboardView({ places = [], analyses = [], entitlement }) {
+export function buildDashboardView({ places = [], analyses = [], entitlement, selectedWatchId = null }) {
   const analysisByWatchId = new Map(
     analyses
       .filter((entry) => entry?.watchId)
@@ -109,7 +109,13 @@ export function buildDashboardView({ places = [], analyses = [], entitlement }) 
     };
   });
 
-  const selectedPlace = dashboardPlaces.find((place) => place.available) || null;
+  const selectedPlace = (
+    (selectedWatchId
+      ? dashboardPlaces.find((place) => place.id === selectedWatchId && place.available)
+      : null)
+    || dashboardPlaces.find((place) => place.available)
+    || null
+  );
 
   return {
     entitlement,

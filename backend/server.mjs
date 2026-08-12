@@ -91,6 +91,8 @@ const membershipRoutes = createMembershipRouteHandler({
   store: membershipStore,
   billing: membershipBilling,
   watchlistStore: membershipWatchlistStore,
+  analyzeLocation,
+  fetchMonthlyCrimeSeries,
 });
 const routeGuardRoutes = createRouteGuardRouteHandler({ sendJson });
 const upstreamCache = new Map();
