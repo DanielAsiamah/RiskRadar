@@ -45,7 +45,7 @@ export function removeWatchedPlace(id: string): Promise<DeleteWatchedPlaceRespon
   }, 40_000, 'required');
 }
 
-export function getDashboard(watchId?: string): Promise<DashboardView> {
+export function getDashboard(watchId?: string, timeoutMs = 40_000, signal?: AbortSignal): Promise<DashboardView> {
   const query = watchId ? `?watchId=${encodeURIComponent(watchId)}` : '';
-  return apiRequest<DashboardView>(`/api/dashboard${query}`, {}, 40_000, 'required');
+  return apiRequest<DashboardView>(`/api/dashboard${query}`, { signal }, timeoutMs, 'required');
 }

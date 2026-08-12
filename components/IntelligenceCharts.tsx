@@ -14,18 +14,30 @@ const seriesOptions: { key: SeriesKey; label: string; color: string }[] = [
   { key: 'robberyCrimes', label: 'Robbery', color: '#0284c7' },
 ];
 
-export function TrendChart({ trendData }: { trendData: TrendData }) {
+export function TrendChart({
+  trendData,
+  availableSeries,
+}: {
+  trendData: TrendData;
+  availableSeries?: SeriesKey[];
+}) {
   const [seriesKey, setSeriesKey] = useState<SeriesKey>('totalCrimes');
   const { width } = useWindowDimensions();
+  const filteredSeriesOptions = availableSeries?.length
+    ? seriesOptions.filter((item) => availableSeries.includes(item.key))
+    : seriesOptions;
+  const activeSeriesKey = filteredSeriesOptions.some((item) => item.key === seriesKey)
+    ? seriesKey
+    : filteredSeriesOptions[0]?.key ?? 'totalCrimes';
   const points = trendData.monthly.filter((point) => point.dataAvailable !== false);
-  const option = seriesOptions.find((item) => item.key === seriesKey) ?? seriesOptions[0];
+  const option = filteredSeriesOptions.find((item) => item.key === activeSeriesKey) ?? filteredSeriesOptions[0] ?? seriesOptions[0];
   const chartWidth = Math.min(Math.max(width - 82, 260), 560);
   const chartHeight = 180;
-  const values = points.map((point) => point[seriesKey]);
+  const values = points.map((point) => Number(point[activeSeriesKey] ?? 0));
   const maximum = Math.max(...values, 1);
   const coordinates = points.map((point, index) => ({
     x: points.length === 1 ? chartWidth / 2 : 18 + index * ((chartWidth - 36) / (points.length - 1)),
-    y: 18 + (1 - point[seriesKey] / maximum) * 112,
+    y: 18 + (1 - Number(point[activeSeriesKey] ?? 0) / maximum) * 112,
   }));
   const directionIcon = trendData.direction === 'rising'
     ? <TrendingUp size={18} color="#e11d48" />
@@ -46,13 +58,13 @@ export function TrendChart({ trendData }: { trendData: TrendData }) {
       </View>
 
       <View style={tw`flex-row flex-wrap gap-2 mb-4`}>
-        {seriesOptions.map((item) => (
+        {filteredSeriesOptions.map((item) => (
           <TouchableOpacity
             key={item.key}
             onPress={() => setSeriesKey(item.key)}
-            style={tw`px-3 py-2 rounded-full ${seriesKey === item.key ? 'bg-slate-900' : 'bg-slate-100'}`}
+            style={tw`px-3 py-2 rounded-full ${activeSeriesKey === item.key ? 'bg-slate-900' : 'bg-slate-100'}`}
           >
-            <Text style={tw`text-xs font-bold ${seriesKey === item.key ? 'text-white' : 'text-slate-600'}`}>{item.label}</Text>
+            <Text style={tw`text-xs font-bold ${activeSeriesKey === item.key ? 'text-white' : 'text-slate-600'}`}>{item.label}</Text>
           </TouchableOpacity>
         ))}
       </View>

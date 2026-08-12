@@ -11,7 +11,13 @@ interface ComparisonResponse {
   results: PostcodeResult[];
 }
 
-export default function ComparePostcodes({ onBack }: { onBack: () => void }) {
+interface ComparePostcodesProps {
+  onBack: () => void;
+  premium: boolean;
+  onRequirePremium: () => void;
+}
+
+export default function ComparePostcodes({ onBack, premium, onRequirePremium }: ComparePostcodesProps) {
   const [queries, setQueries] = useState(['', '']);
   const [comparison, setComparison] = useState<ComparisonResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -25,6 +31,11 @@ export default function ComparePostcodes({ onBack }: { onBack: () => void }) {
     const postcodes = queries.map((query) => query.trim()).filter(Boolean);
     if (new Set(postcodes.map((query) => query.toUpperCase())).size < 2) {
       setError('Enter at least two different postcodes or UK places.');
+      return;
+    }
+    if (!premium && postcodes.length > 2) {
+      setError('RiskRadar Premium compares up to five areas. Free preview compares two.');
+      onRequirePremium();
       return;
     }
 
@@ -85,13 +96,30 @@ export default function ComparePostcodes({ onBack }: { onBack: () => void }) {
             </View>
           ))}
 
-          {queries.length < 5 && (
-            <TouchableOpacity onPress={() => setQueries((current) => [...current, ''])} style={tw`flex-row items-center justify-center gap-2 h-11`}>
+          {queries.length < 5 ? (
+            <TouchableOpacity
+              onPress={() => {
+                if (!premium && queries.length >= 2) {
+                  setError('RiskRadar Premium compares up to five areas. Free preview compares two.');
+                  onRequirePremium();
+                  return;
+                }
+                setQueries((current) => [...current, '']);
+              }}
+              style={tw`flex-row items-center justify-center gap-2 h-11`}
+            >
               <Plus size={16} color={tw.color('indigo-600')} />
-              <Text style={tw`text-xs font-bold text-indigo-600`}>Add another location</Text>
+              <Text style={tw`text-xs font-bold text-indigo-600`}>
+                {premium ? 'Add another location' : 'Unlock Premium for 3-5 areas'}
+              </Text>
             </TouchableOpacity>
-          )}
+          ) : null}
         </View>
+        {!premium ? (
+          <Text style={tw`text-[11px] text-slate-500 mb-4`}>
+            Free preview compares two areas. Premium compares up to five.
+          </Text>
+        ) : null}
 
         {error && <Text selectable style={tw`text-sm font-bold text-rose-600 bg-rose-50 p-4 rounded-2xl mb-4`}>{error}</Text>}
 

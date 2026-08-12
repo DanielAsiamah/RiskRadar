@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { Shield, AlertTriangle, Search, ChevronDown, Info, ExternalLink, MapPin } from 'lucide-react-native';
+import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { Shield, ShieldCheck, AlertTriangle, Search, ChevronDown, Info, ExternalLink, MapPin } from 'lucide-react-native';
 import tw from 'twrnc';
 import { EvidenceReference, PostcodeResult } from '../types';
 import AnimatedRiskScore from './AnimatedRiskScore';
@@ -10,9 +10,21 @@ interface ResultsProps {
   result: PostcodeResult;
   onReset: () => void;
   onOpenEvidence: (reference: EvidenceReference) => void;
+  premium: boolean;
+  watchBusy: boolean;
+  onWatchPostcode: () => Promise<void>;
+  onOpenDashboard: () => void;
 }
 
-export default function Results({ result, onReset, onOpenEvidence }: ResultsProps) {
+export default function Results({
+  result,
+  onReset,
+  onOpenEvidence,
+  premium,
+  watchBusy,
+  onWatchPostcode,
+  onOpenDashboard,
+}: ResultsProps) {
   const [showDetails, setShowDetails] = useState(false);
 
   const getBadge = (score: number) => {
@@ -196,7 +208,36 @@ export default function Results({ result, onReset, onOpenEvidence }: ResultsProp
 
         <View style={tw`mb-8 border-t border-slate-200 pt-8`}>
           <Text style={tw`text-xl font-black text-slate-900 mb-2`}>Premium Intelligence</Text>
-          <Text style={tw`text-xs text-slate-500 mb-6`}>Unlocked in this sandbox build.</Text>
+          <Text style={tw`text-xs text-slate-500 mb-6`}>
+            {premium ? 'Your dashboard can now remember this postcode.' : 'Premium unlocks watched places, richer comparisons, and a personal dashboard.'}
+          </Text>
+
+          <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
+            <View style={tw`flex-row items-start justify-between mb-3`}>
+              <View style={tw`flex-1 pr-4`}>
+                <Text style={tw`text-sm font-black text-slate-900 mb-2`}>Premium dashboard</Text>
+                <Text style={tw`text-xs text-slate-500 leading-5`}>
+                  Save {result.postcodeData.postcode} to your watched places and track monthly shifts in incidents, hotspots, and category patterns.
+                </Text>
+              </View>
+              <View style={tw`w-11 h-11 rounded-2xl bg-indigo-50 border border-indigo-100 items-center justify-center`}>
+                <ShieldCheck size={20} color="#4f46e5" />
+              </View>
+            </View>
+            <TouchableOpacity
+              onPress={() => void onWatchPostcode()}
+              disabled={watchBusy}
+              style={tw`h-12 rounded-2xl bg-indigo-600 flex-row items-center justify-center mb-3 ${watchBusy ? 'opacity-60' : ''}`}
+            >
+              {watchBusy ? <ActivityIndicator color="white" /> : <ShieldCheck size={16} color="white" />}
+              <Text style={tw`text-sm font-black text-white ml-2`}>{premium ? 'Save to watched places' : 'Unlock to watch this area'}</Text>
+            </TouchableOpacity>
+            {premium ? (
+              <TouchableOpacity onPress={onOpenDashboard} style={tw`items-center`}>
+                <Text style={tw`text-xs font-black text-indigo-600`}>Open Premium dashboard</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
 
           <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
             <Text style={tw`text-sm font-black text-slate-900 mb-4`}>Crime trend</Text>

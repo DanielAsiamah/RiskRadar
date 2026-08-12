@@ -16,14 +16,17 @@ import MapExplorer from './components/MapExplorer';
 import ComparePostcodes from './components/ComparePostcodes';
 import EvidenceDetail from './components/EvidenceDetail';
 import Account from './components/Account';
+import PremiumDashboard from './components/PremiumDashboard';
 import Pricing from './components/Pricing';
 import SignIn from './components/SignIn';
 import RouteGuard from './components/RouteGuard';
 import SafetySession from './components/SafetySession';
 import { apiRequest } from './api/client';
+import { addWatchedPlace, getDashboard, removeWatchedPlace, renameWatchedPlace } from './api/dashboard';
 import { beginCheckout, getAccount, openCustomerPortal } from './api/membership';
 import { webAppUrl } from './auth/client';
 import { useAuth } from './auth/useAuth';
+import type { DashboardView } from './membership/dashboard-types';
 import {
   BILLING_CONFIRMATION_WINDOW_MS,
   FREE_DAILY_SEARCH_LIMIT,
@@ -52,6 +55,7 @@ type AppState =
   | 'COMPARE'
   | 'SIGN_IN'
   | 'PRICING'
+  | 'DASHBOARD'
   | 'ACCOUNT'
   | 'ROUTE_GUARD'
   | 'SAFETY_SESSION';
@@ -60,6 +64,7 @@ const DAILY_SEARCH_STORAGE_KEY = 'riskradar_daily_searches';
 const LEGACY_SEARCH_COUNT_KEY = 'riskradar_search_count';
 const RECENT_SEARCHES_STORAGE_KEY = 'riskradar_recent_searches';
 const PENDING_PREMIUM_STORAGE_KEY = 'riskradar_pending_premium_destination';
+const PENDING_WATCHED_POSTCODE_STORAGE_KEY = 'riskradar_pending_watch_postcode';
 const ROUTE_GUARD_USAGE_STORAGE_KEY = 'riskradar_route_guard_usage';
 
 function currentRouteGuardMonth() {
@@ -83,6 +88,10 @@ const initialMembershipRoute = Platform.OS === 'web' && typeof globalThis.locati
   ? membershipReturnRoute(globalThis.location.href)
   : null;
 
+function premiumStateForDestination(destination: PremiumDestination): AppState {
+  return destination === 'COMPARE' ? 'COMPARE' : 'DASHBOARD';
+}
+
 export default function App() {
   const { user, loading: authLoading, signInWithEmail, signOut } = useAuth();
   const [appState, setAppState] = useState<AppState>(initialMembershipRoute ? 'ACCOUNT' : 'HOME');
@@ -102,21 +111,29 @@ export default function App() {
   const [membershipBusy, setMembershipBusy] = useState(false);
   const [pricingError, setPricingError] = useState<string | null>(null);
   const [pendingPremiumDestination, setPendingPremiumDestination] = useState<PremiumDestination | null>(null);
+  const [pendingWatchedPostcode, setPendingWatchedPostcode] = useState<string | null>(null);
   const [billingReturnPending, setBillingReturnPending] = useState(initialMembershipRoute === 'BILLING_SUCCESS');
   const [billingConfirming, setBillingConfirming] = useState(initialMembershipRoute === 'BILLING_SUCCESS');
+  const [dashboard, setDashboard] = useState<DashboardView | null>(null);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [dashboardSaving, setDashboardSaving] = useState(false);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [selectedDashboardWatchId, setSelectedDashboardWatchId] = useState<string | null>(null);
   const [routeScansUsed, setRouteScansUsed] = useState(0);
   const [routeScanUsageHydrated, setRouteScanUsageHydrated] = useState(false);
   const searchRequestId = useRef(0);
   const accountRequests = useRef(createLatestRequestCoordinator());
+  const dashboardRequests = useRef(createLatestRequestCoordinator());
   const routeGuardBackState = useRef<'HOME' | 'PRICING'>('HOME');
 
   useEffect(() => {
     const loadState = async () => {
       try {
-        const [savedUsage, savedSearches, savedDestination, savedRouteGuardUsage] = await Promise.all([
+        const [savedUsage, savedSearches, savedDestination, savedPendingWatchPostcode, savedRouteGuardUsage] = await Promise.all([
           AsyncStorage.getItem(DAILY_SEARCH_STORAGE_KEY),
           AsyncStorage.getItem(RECENT_SEARCHES_STORAGE_KEY),
           AsyncStorage.getItem(PENDING_PREMIUM_STORAGE_KEY),
+          AsyncStorage.getItem(PENDING_WATCHED_POSTCODE_STORAGE_KEY),
           AsyncStorage.getItem(ROUTE_GUARD_USAGE_STORAGE_KEY),
         ]);
         setDailySearchUsage(parseDailySearchUsage(savedUsage));
@@ -126,6 +143,11 @@ export default function App() {
           if (Array.isArray(parsedSearches)) setRecentSearches(parsedSearches.filter((value) => typeof value === 'string').slice(0, 3));
         }
         setPendingPremiumDestination(normalizePendingDestination(savedDestination));
+        setPendingWatchedPostcode(
+          typeof savedPendingWatchPostcode === 'string' && savedPendingWatchPostcode.trim()
+            ? savedPendingWatchPostcode.trim().toUpperCase()
+            : null,
+        );
         await AsyncStorage.removeItem(LEGACY_SEARCH_COUNT_KEY);
       } catch (err) {
         console.error('Failed to load async storage', err);
@@ -164,6 +186,32 @@ export default function App() {
     }
   };
 
+  const refreshDashboard = async (watchId: string | null = selectedDashboardWatchId, timeoutMs = 40_000) => {
+    if (!user || !account?.premium) {
+      setDashboard(null);
+      setDashboardLoading(false);
+      setDashboardError(null);
+      return null;
+    }
+
+    const request = dashboardRequests.current.begin();
+    try {
+      setDashboardLoading(true);
+      setDashboardError(null);
+      const nextDashboard = await getDashboard(watchId ?? undefined, timeoutMs, request.signal);
+      if (!request.isCurrent()) return null;
+      setDashboard(nextDashboard);
+      setSelectedDashboardWatchId(nextDashboard.selectedPlace?.id ?? watchId ?? null);
+      return nextDashboard;
+    } catch (requestError) {
+      if (!request.isCurrent()) return null;
+      setDashboardError(requestError instanceof Error ? requestError.message : 'Unable to load your Premium dashboard.');
+      return null;
+    } finally {
+      if (request.isCurrent()) setDashboardLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!user) {
       accountRequests.current.cancel();
@@ -176,18 +224,28 @@ export default function App() {
   }, [user?.id]);
 
   useEffect(() => {
+    if (user) return;
+    dashboardRequests.current.cancel();
+    setDashboard(null);
+    setDashboardLoading(false);
+    setDashboardSaving(false);
+    setDashboardError(null);
+    setSelectedDashboardWatchId(null);
+  }, [user?.id]);
+
+  useEffect(() => {
     if (authLoading || !user) return;
 
     if (account?.premium && pendingPremiumDestination) {
       const destination = pendingPremiumDestination;
       setPendingPremiumDestination(null);
       void AsyncStorage.removeItem(PENDING_PREMIUM_STORAGE_KEY);
-      setAppState(destination === 'COMPARE' ? 'COMPARE' : 'ACCOUNT');
+      setAppState(premiumStateForDestination(destination));
       return;
     }
 
     if (pendingPremiumDestination && (appState === 'HOME' || appState === 'SIGN_IN')) {
-      setAppState(account?.premium ? 'ACCOUNT' : 'PRICING');
+      setAppState(account?.premium ? premiumStateForDestination(pendingPremiumDestination) : 'PRICING');
       return;
     }
 
@@ -197,10 +255,15 @@ export default function App() {
   }, [account?.premium, appState, authLoading, pendingPremiumDestination, user?.id]);
 
   useEffect(() => {
-    if (!authLoading && !user && appState === 'ACCOUNT' && !billingReturnPending) {
+    if (!authLoading && !user && (appState === 'ACCOUNT' || appState === 'DASHBOARD') && !billingReturnPending) {
       setAppState('SIGN_IN');
     }
   }, [appState, authLoading, billingReturnPending, user?.id]);
+
+  useEffect(() => {
+    if (appState !== 'DASHBOARD' || !user || !account?.premium) return;
+    void refreshDashboard();
+  }, [appState, account?.premium, user?.id]);
 
   useEffect(() => {
     if (initialMembershipRoute !== 'ACCOUNT' || Platform.OS !== 'web' || typeof globalThis.location?.href !== 'string') return;
@@ -412,15 +475,127 @@ export default function App() {
     await AsyncStorage.removeItem(PENDING_PREMIUM_STORAGE_KEY);
   };
 
+  const rememberPendingWatchPostcode = async (postcode: string) => {
+    const normalized = postcode.trim().toUpperCase();
+    if (!normalized) return;
+    setPendingWatchedPostcode(normalized);
+    await AsyncStorage.setItem(PENDING_WATCHED_POSTCODE_STORAGE_KEY, normalized);
+  };
+
+  const clearPendingWatchPostcode = async () => {
+    setPendingWatchedPostcode(null);
+    await AsyncStorage.removeItem(PENDING_WATCHED_POSTCODE_STORAGE_KEY);
+  };
+
   const requirePremium = async (destination: PremiumDestination) => {
     if (account?.premium) {
       await clearPremiumDestination();
-      setAppState(destination === 'COMPARE' ? 'COMPARE' : 'ACCOUNT');
+      setAppState(premiumStateForDestination(destination));
       return;
     }
 
     await rememberPremiumDestination(destination);
     setAppState(user ? 'PRICING' : 'SIGN_IN');
+  };
+
+  const handleOpenDashboard = async () => {
+    setPricingError(null);
+    if (!user) {
+      await rememberPremiumDestination('DASHBOARD');
+      setAppState('SIGN_IN');
+      return;
+    }
+
+    if (!account?.premium) {
+      await rememberPremiumDestination('DASHBOARD');
+      setAppState('PRICING');
+      return;
+    }
+
+    await clearPremiumDestination();
+    setAppState('DASHBOARD');
+  };
+
+  const handleWatchPostcode = async () => {
+    const nextPostcode = (
+      result?.postcodeData.postcode
+      || result?.postcode
+      || postcodeInput.trim().toUpperCase()
+    ).trim().toUpperCase();
+
+    if (!nextPostcode) {
+      setError('No postcode is available to watch yet. Run a postcode search first.');
+      return;
+    }
+
+    setPricingError(null);
+    await rememberPendingWatchPostcode(nextPostcode);
+
+    if (account?.premium) {
+      await clearPremiumDestination();
+      setAppState('DASHBOARD');
+      return;
+    }
+
+    await rememberPremiumDestination('WATCH_PLACE');
+    setAppState(user ? 'PRICING' : 'SIGN_IN');
+  };
+
+  const handleDashboardRefresh = async () => {
+    await refreshDashboard(selectedDashboardWatchId, 15_000);
+  };
+
+  const handleAddWatchedPlace = async (input: { label: string; postcode: string }) => {
+    try {
+      setDashboardSaving(true);
+      setDashboardError(null);
+      const watchedPlace = await addWatchedPlace(input);
+      setSelectedDashboardWatchId(watchedPlace.id);
+      await refreshDashboard(watchedPlace.id, 60_000);
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : 'Unable to save this watched place.';
+      setDashboardError(message);
+      throw requestError;
+    } finally {
+      setDashboardSaving(false);
+    }
+  };
+
+  const handleRenameWatchedPlace = async (id: string, label: string) => {
+    try {
+      setDashboardSaving(true);
+      setDashboardError(null);
+      await renameWatchedPlace(id, label);
+      await refreshDashboard(selectedDashboardWatchId, 40_000);
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : 'Unable to rename this watched place.';
+      setDashboardError(message);
+      throw requestError;
+    } finally {
+      setDashboardSaving(false);
+    }
+  };
+
+  const handleRemoveWatchedPlace = async (id: string) => {
+    try {
+      setDashboardSaving(true);
+      setDashboardError(null);
+      await removeWatchedPlace(id);
+      const nextSelectedId = selectedDashboardWatchId === id ? null : selectedDashboardWatchId;
+      setSelectedDashboardWatchId(nextSelectedId);
+      await refreshDashboard(nextSelectedId, 40_000);
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : 'Unable to remove this watched place.';
+      setDashboardError(message);
+      throw requestError;
+    } finally {
+      setDashboardSaving(false);
+    }
+  };
+
+  const handleSelectWatchedPlace = async (id: string) => {
+    setSelectedDashboardWatchId(id);
+    await refreshDashboard(id, 40_000);
   };
 
   const handleCheckout = async () => {
@@ -482,22 +657,35 @@ export default function App() {
       await signOut();
     } finally {
       accountRequests.current.cancel();
+      dashboardRequests.current.cancel();
       setAccount(null);
       setAccountError(null);
       setBillingConfirming(false);
       setBillingReturnPending(false);
+      setDashboard(null);
+      setDashboardLoading(false);
+      setDashboardSaving(false);
+      setDashboardError(null);
+      setSelectedDashboardWatchId(null);
       await clearPremiumDestination();
+      await clearPendingWatchPostcode();
       setAppState('HOME');
     }
   };
 
   const handleContinueFree = async () => {
+    if (pendingPremiumDestination === 'WATCH_PLACE') {
+      await clearPendingWatchPostcode();
+    }
     await clearPremiumDestination();
     setPricingError(null);
     setAppState('HOME');
   };
 
   const handlePricingBack = async () => {
+    if (pendingPremiumDestination === 'WATCH_PLACE') {
+      await clearPendingWatchPostcode();
+    }
     const decision = pricingBackDecision(pendingPremiumDestination);
     if (decision.clearPendingDestination) {
       await clearPremiumDestination();
@@ -544,20 +732,19 @@ export default function App() {
               setAppState('ROUTE_GUARD');
             }}
             openAccount={() => setAppState(user ? 'ACCOUNT' : 'SIGN_IN')}
-            openPremium={() => {
-              if (account?.premium) {
-                void requirePremium('DASHBOARD');
-              } else {
-                setPricingError(null);
-                setAppState('PRICING');
-              }
-            }}
+            openPremium={() => { void handleOpenDashboard(); }}
             openSafetySession={() => setAppState('SAFETY_SESSION')}
           />
         )}
 
         {appState === 'MAP' && <MapExplorer onBack={() => setAppState('HOME')} />}
-        {appState === 'COMPARE' && <ComparePostcodes onBack={() => setAppState('HOME')} />}
+        {appState === 'COMPARE' && (
+          <ComparePostcodes
+            onBack={() => setAppState('HOME')}
+            premium={account?.premium === true}
+            onRequirePremium={() => { void requirePremium('COMPARE'); }}
+          />
+        )}
         {appState === 'ROUTE_GUARD' && (
           <RouteGuard
             premium={account?.premium === true}
@@ -593,6 +780,10 @@ export default function App() {
               setSelectedEvidence(null);
               setAppState('HOME');
             }} 
+            premium={account?.premium === true}
+            watchBusy={dashboardSaving}
+            onWatchPostcode={handleWatchPostcode}
+            onOpenDashboard={() => { void handleOpenDashboard(); }}
           />
         )}
 
@@ -622,6 +813,24 @@ export default function App() {
               setAppState('ROUTE_GUARD');
             }}
             onOpenSafetySession={() => setAppState('SAFETY_SESSION')}
+          />
+        )}
+
+        {appState === 'DASHBOARD' && (
+          <PremiumDashboard
+            dashboard={dashboard}
+            loading={dashboardLoading}
+            saving={dashboardSaving}
+            error={dashboardError}
+            pendingPostcode={pendingWatchedPostcode}
+            onBack={() => setAppState('HOME')}
+            onRefresh={handleDashboardRefresh}
+            onAddWatchedPlace={handleAddWatchedPlace}
+            onRenameWatchedPlace={handleRenameWatchedPlace}
+            onRemoveWatchedPlace={handleRemoveWatchedPlace}
+            onSelectWatchedPlace={handleSelectWatchedPlace}
+            onClearPendingPostcode={() => { void clearPendingWatchPostcode(); }}
+            onOpenCompare={() => setAppState('COMPARE')}
           />
         )}
 
