@@ -1,4 +1,5 @@
 import { toEntitlement } from './subscription-state.mjs';
+import { createWatchlistRouteHandler } from './watchlist-routes.mjs';
 
 function sendJson(response, statusCode, payload, extraHeaders = {}) {
   response.writeHead(statusCode, {
@@ -46,7 +47,9 @@ async function readJsonBody(request) {
   return JSON.parse(rawBody.toString('utf8'));
 }
 
-export function createMembershipRouteHandler({ config, store, billing }) {
+export function createMembershipRouteHandler({ config, store, billing, watchlistStore = null }) {
+  const watchlistRoutes = createWatchlistRouteHandler({ watchlistStore });
+
   async function authenticate(request) {
     const token = readBearerToken(request);
     if (!token) {
@@ -80,6 +83,48 @@ export function createMembershipRouteHandler({ config, store, billing }) {
         },
       };
     }
+  }
+
+  async function requirePremium(request) {
+    if (!config.configured) {
+      return {
+        error: {
+          statusCode: 503,
+          payload: {
+            error: 'Premium billing is not configured on this deployment yet.',
+            code: 'BILLING_UNAVAILABLE',
+          },
+        },
+      };
+    }
+
+    const auth = await authenticate(request);
+    if (auth.error) {
+      return auth;
+    }
+
+    const subscription = await store.getSubscription(auth.user.userId);
+    const entitlement = toEntitlement({
+      ...subscription,
+      email: auth.user.email,
+    }, true);
+
+    if (!entitlement.premium) {
+      return {
+        error: {
+          statusCode: 403,
+          payload: {
+            error: 'RiskRadar Premium is required for watched places.',
+            code: 'PREMIUM_REQUIRED',
+          },
+        },
+      };
+    }
+
+    return {
+      user: auth.user,
+      entitlement,
+    };
   }
 
   return {
@@ -178,6 +223,15 @@ export function createMembershipRouteHandler({ config, store, billing }) {
             error: error.message || 'Stripe webhook processing failed.',
           });
         }
+        return true;
+      }
+
+      const watchlistHandled = await watchlistRoutes.handle(request, response, url, {
+        sendJson,
+        readJsonBody,
+        requirePremium,
+      });
+      if (watchlistHandled) {
         return true;
       }
 

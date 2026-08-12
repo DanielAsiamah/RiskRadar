@@ -24,6 +24,7 @@ import { readMembershipConfig } from './membership/config.mjs';
 import { createSupabaseMembershipStore } from './membership/supabase-store.mjs';
 import { createStripeBilling } from './membership/stripe-billing.mjs';
 import { createMembershipRouteHandler } from './membership/routes.mjs';
+import { createWatchlistStore } from './membership/watchlist-store.mjs';
 import { createRouteGuardRouteHandler } from './route-guard.mjs';
 
 const PORT = Number(process.env.PORT || 3001);
@@ -81,6 +82,7 @@ const require = createRequire(import.meta.url);
 const crimeFileSource = createCrimeFileSource({ rootDir: CRIME_DATA_ROOT });
 const membershipConfig = readMembershipConfig(process.env);
 const membershipStore = createSupabaseMembershipStore(membershipConfig);
+const membershipWatchlistStore = createWatchlistStore(membershipConfig);
 const membershipBilling = membershipConfig.configured
   ? createStripeBilling({ config: membershipConfig, store: membershipStore })
   : null;
@@ -88,6 +90,7 @@ const membershipRoutes = createMembershipRouteHandler({
   config: membershipConfig,
   store: membershipStore,
   billing: membershipBilling,
+  watchlistStore: membershipWatchlistStore,
 });
 const routeGuardRoutes = createRouteGuardRouteHandler({ sendJson });
 const upstreamCache = new Map();
