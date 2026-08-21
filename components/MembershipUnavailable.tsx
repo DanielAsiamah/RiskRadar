@@ -9,9 +9,10 @@ export interface MembershipUnavailableProps {
   onBack(): void;
   onRetry(): Promise<void>;
   onSignOut?(): Promise<void>;
+  footer?: React.ReactNode;
 }
 
-export default function MembershipUnavailable({ onBack, onRetry, onSignOut }: MembershipUnavailableProps) {
+export default function MembershipUnavailable({ onBack, onRetry, onSignOut, footer }: MembershipUnavailableProps) {
   const [retrying, setRetrying] = React.useState(false);
 
   const retry = async () => {
@@ -54,6 +55,7 @@ export default function MembershipUnavailable({ onBack, onRetry, onSignOut }: Me
               </Pressable>
             ) : null}
           </View>
+          {footer}
         </View>
       </ScrollView>
     </View>

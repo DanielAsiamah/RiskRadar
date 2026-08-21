@@ -10,6 +10,7 @@ import MonthlyBriefing from './MonthlyBriefing';
 import WatchedPlaceCard from './WatchedPlaceCard';
 import WatchPlaceForm from './WatchPlaceForm';
 import { membershipColors, membershipStyles } from './membershipStyles';
+import SiteFooter, { type TrustNavigation } from './SiteFooter';
 
 export interface PremiumDashboardProps {
   dashboard: DashboardView | null;
@@ -27,6 +28,7 @@ export interface PremiumDashboardProps {
   onOpenCompare(): void;
   onOpenAlertSettings(): void;
   onOpenReport(watchId: string): void;
+  trustNavigation: TrustNavigation;
 }
 
 function formatMonth(value: string | null | undefined) {
@@ -110,6 +112,7 @@ export default function PremiumDashboard({
   onOpenCompare,
   onOpenAlertSettings,
   onOpenReport,
+  trustNavigation,
 }: PremiumDashboardProps) {
   const [showAddForm, setShowAddForm] = useState(false);
 
@@ -306,6 +309,8 @@ export default function PremiumDashboard({
               </View>
             </View>
           ) : null}
+
+          <SiteFooter {...trustNavigation} />
         </View>
       </ScrollView>
     </View>

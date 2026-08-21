@@ -5,6 +5,7 @@ import tw from 'twrnc';
 
 import { membershipColors, membershipStyles } from './membershipStyles';
 import Paywall from './Paywall';
+import SiteFooter, { type TrustNavigation } from './SiteFooter';
 
 const BENEFITS = [
   ['Unlimited postcode searches', 'Explore on the go, subject to fair-use protection.'],
@@ -23,9 +24,10 @@ export interface PricingProps {
   onCheckout(): Promise<void>;
   onOpenRouteGuard(): void;
   onOpenSafetySession(): void;
+  trustNavigation: TrustNavigation;
 }
 
-export default function Pricing({ authenticated, busy, error, onBack, onCheckout, onOpenRouteGuard, onOpenSafetySession }: PricingProps) {
+export default function Pricing({ authenticated, busy, error, onBack, onCheckout, onOpenRouteGuard, onOpenSafetySession, trustNavigation }: PricingProps) {
   return (
     <View style={membershipStyles.screen}>
       <ScrollView contentContainerStyle={membershipStyles.scrollContent} contentInsetAdjustmentBehavior="automatic">
@@ -60,7 +62,7 @@ export default function Pricing({ authenticated, busy, error, onBack, onCheckout
 
           <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`border-indigo-100 mb-5`]}>
             <View style={tw`flex-row items-end mb-2`}>
-              <Text style={tw`text-5xl font-black tracking-tight text-slate-950`}>£8.99</Text>
+              <Text style={tw`text-5xl font-black tracking-tight text-slate-950`}>£15</Text>
               <Text style={tw`text-sm font-bold text-slate-500 mb-2 ml-2`}>GBP / month</Text>
             </View>
             <Text style={tw`text-xs font-bold text-emerald-700 mb-7`}>Cancel any time. Your paid access continues to the end of the billing period.</Text>
@@ -105,6 +107,8 @@ export default function Pricing({ authenticated, busy, error, onBack, onCheckout
               Police.uk records are anonymised and published by recorded month. RiskRadar does not provide live police alerts, exact incident addresses, or real-time personal tracking.
             </Text>
           </View>
+
+          <SiteFooter {...trustNavigation} />
         </View>
       </ScrollView>
     </View>

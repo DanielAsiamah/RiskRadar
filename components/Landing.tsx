@@ -11,6 +11,7 @@ import {
 import { BarChart3, ChevronRight, Compass, LocateFixed, Map, MapPin, Navigation, Search, ShieldCheck, Sparkles } from 'lucide-react-native';
 import tw from 'twrnc';
 import { searchSubmissionDecision } from '../membership/client-state.mjs';
+import SiteFooter, { type TrustNavigation } from './SiteFooter';
 
 interface NearbySuggestion {
   postcode: string;
@@ -38,6 +39,7 @@ interface LandingProps {
   openAccount: () => void;
   openPremium: () => void;
   openSafetySession: () => void;
+  trustNavigation: TrustNavigation;
 }
 
 const INDIGO = '#4f46e5';
@@ -63,6 +65,7 @@ export default function Landing({
   openAccount,
   openPremium,
   openSafetySession,
+  trustNavigation,
 }: LandingProps) {
   const canSearch = searchSubmissionDecision(searchHydrated, postcodeInput) === 'ready';
   const freeSearchesRemaining = Math.max(0, freeSearchLimit - searchCount);
@@ -111,10 +114,10 @@ export default function Landing({
               {freeSearchesRemaining} of {freeSearchLimit} checks left today
             </Text>
             <Text style={tw`text-slate-500 leading-5 mb-3`}>
-              Premium is GBP 8.99/month for unlimited checks, Route Guard, and Safety Sessions.
+              Premium is GBP 15/month for unlimited checks, Route Guard, and Safety Sessions.
             </Text>
             <Pressable onPress={openPremium} hitSlop={6} accessibilityRole="button">
-              <Text style={tw`text-indigo-700 font-black`}>See PRO and FAQ</Text>
+              <Text style={tw`text-indigo-700 font-black`}>Explore Premium</Text>
             </Pressable>
           </View>
 
@@ -205,6 +208,8 @@ export default function Landing({
               </View>
             </View>
           ) : null}
+
+          <SiteFooter {...trustNavigation} />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

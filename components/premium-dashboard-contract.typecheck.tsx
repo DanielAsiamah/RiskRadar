@@ -5,6 +5,13 @@ import MonthlyBriefing from './MonthlyBriefing';
 import PremiumDashboard from './PremiumDashboard';
 import WatchedPlaceCard from './WatchedPlaceCard';
 import WatchPlaceForm from './WatchPlaceForm';
+import type { TrustNavigation } from './SiteFooter';
+
+const trustNavigation: TrustNavigation = {
+  onOpenFaq: () => undefined,
+  onOpenPrivacy: () => undefined,
+  onOpenAdvertise: () => undefined,
+};
 
 const dashboardFixture: DashboardView = {
   entitlement: {
@@ -103,4 +110,5 @@ export const premiumDashboardFixture = React.createElement(PremiumDashboard, {
   onOpenCompare: () => undefined,
   onOpenAlertSettings: () => undefined,
   onOpenReport: (_watchId: string) => undefined,
+  trustNavigation,
 });

@@ -10,7 +10,6 @@ import {
 
 test('free usage status allows exactly three checks per calendar day', () => {
   assert.equal(FREE_DAILY_CHECK_LIMIT, 3);
-  assert.equal(PRO_PRICE_GBP_MONTHLY, 8.99);
   assert.deepEqual(
     buildUsageStatus({ used: 2, dateKey: '2026-08-09', entitlement: 'free' }),
     { entitlement: 'free', dateKey: '2026-08-09', used: 2, limit: 3, remaining: 1, canSearch: true },
@@ -19,6 +18,10 @@ test('free usage status allows exactly three checks per calendar day', () => {
     buildUsageStatus({ used: 3, dateKey: '2026-08-09', entitlement: 'free' }),
     { entitlement: 'free', dateKey: '2026-08-09', used: 3, limit: 3, remaining: 0, canSearch: false },
   );
+});
+
+test('premium product price is GBP 15 per month', () => {
+  assert.equal(PRO_PRICE_GBP_MONTHLY, 15);
 });
 
 test('pro usage status has unlimited checks', () => {

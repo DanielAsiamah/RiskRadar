@@ -1,5 +1,5 @@
 export const FREE_DAILY_CHECK_LIMIT = 3;
-export const PRO_PRICE_GBP_MONTHLY = 8.99;
+export const PRO_PRICE_GBP_MONTHLY = 15;
 export const CONTACT_EMAIL = 'supr3ltd@gmail.com';
 export const SAFETY_SESSION_PURPOSES = Object.freeze([
   'marketplace',

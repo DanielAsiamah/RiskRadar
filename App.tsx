@@ -23,6 +23,10 @@ import Pricing from './components/Pricing';
 import SignIn from './components/SignIn';
 import RouteGuard from './components/RouteGuard';
 import SafetySession from './components/SafetySession';
+import Advertise from './components/Advertise';
+import Faq from './components/Faq';
+import Privacy from './components/Privacy';
+import type { TrustNavigation } from './components/SiteFooter';
 import { apiRequest } from './api/client';
 import { getAlertPreferences, updateAlertPreferences, type AlertPreferences, type AlertPreferencesInput } from './api/alerts';
 import { addWatchedPlace, getDashboard, removeWatchedPlace, renameWatchedPlace } from './api/dashboard';
@@ -64,7 +68,12 @@ type AppState =
   | 'REPORT'
   | 'ACCOUNT'
   | 'ROUTE_GUARD'
-  | 'SAFETY_SESSION';
+  | 'SAFETY_SESSION'
+  | 'FAQ'
+  | 'PRIVACY'
+  | 'ADVERTISE';
+
+type TrustAppState = Extract<AppState, 'FAQ' | 'PRIVACY' | 'ADVERTISE'>;
 
 const DAILY_SEARCH_STORAGE_KEY = 'riskradar_daily_searches';
 const LEGACY_SEARCH_COUNT_KEY = 'riskradar_search_count';
@@ -141,6 +150,7 @@ export default function App() {
   const alertPreferenceRequests = useRef(createLatestRequestCoordinator());
   const reportRequests = useRef(createLatestRequestCoordinator());
   const routeGuardBackState = useRef<'HOME' | 'PRICING'>('HOME');
+  const trustBackStack = useRef<AppState[]>([]);
 
   useEffect(() => {
     const loadState = async () => {
@@ -865,6 +875,22 @@ export default function App() {
     }));
   };
 
+  const openTrustScreen = (nextState: TrustAppState) => {
+    if (appState === nextState) return;
+    trustBackStack.current.push(appState);
+    setAppState(nextState);
+  };
+
+  const closeTrustScreen = () => {
+    setAppState(trustBackStack.current.pop() ?? 'HOME');
+  };
+
+  const trustNavigation: TrustNavigation = {
+    onOpenFaq: () => openTrustScreen('FAQ'),
+    onOpenPrivacy: () => openTrustScreen('PRIVACY'),
+    onOpenAdvertise: () => openTrustScreen('ADVERTISE'),
+  };
+
   const currentDailyUsage = parseDailySearchUsage(dailySearchUsage);
   const accountLabel = account?.premium ? 'Premium active' : user ? 'Account' : 'Sign in';
   const latestDashboardDataMonth = dashboard?.selectedPlace?.snapshot?.dataMonth ?? null;
@@ -898,8 +924,18 @@ export default function App() {
             openAccount={() => setAppState(user ? 'ACCOUNT' : 'SIGN_IN')}
             openPremium={() => { void handleOpenDashboard(); }}
             openSafetySession={() => setAppState('SAFETY_SESSION')}
+            trustNavigation={trustNavigation}
           />
         )}
+
+        {appState === 'FAQ' && (
+          <Faq
+            onBack={closeTrustScreen}
+            {...trustNavigation}
+          />
+        )}
+        {appState === 'PRIVACY' && <Privacy onBack={closeTrustScreen} />}
+        {appState === 'ADVERTISE' && <Advertise onBack={closeTrustScreen} />}
 
         {appState === 'MAP' && <MapExplorer onBack={() => setAppState('HOME')} />}
         {appState === 'COMPARE' && (
@@ -977,6 +1013,7 @@ export default function App() {
               setAppState('ROUTE_GUARD');
             }}
             onOpenSafetySession={() => setAppState('SAFETY_SESSION')}
+            trustNavigation={trustNavigation}
           />
         )}
 
@@ -997,6 +1034,7 @@ export default function App() {
             onOpenCompare={() => setAppState('COMPARE')}
             onOpenAlertSettings={() => { void handleOpenAlertSettings(); }}
             onOpenReport={(watchId) => { void handleOpenReport(watchId); }}
+            trustNavigation={trustNavigation}
           />
         )}
 
@@ -1041,6 +1079,7 @@ export default function App() {
               }
             }}
             onSignOut={handleSignOut}
+            trustNavigation={trustNavigation}
           />
         )}
       </SafeAreaView>

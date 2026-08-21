@@ -5,6 +5,13 @@ import Account from './Account';
 import MembershipUnavailable from './MembershipUnavailable';
 import Pricing from './Pricing';
 import SignIn from './SignIn';
+import type { TrustNavigation } from './SiteFooter';
+
+const trustNavigation: TrustNavigation = {
+  onOpenFaq: () => undefined,
+  onOpenPrivacy: () => undefined,
+  onOpenAdvertise: () => undefined,
+};
 
 const freeAccount: AccountEntitlement = {
   configured: true,
@@ -31,6 +38,7 @@ export const pricingFixture = React.createElement(Pricing, {
   onCheckout: async () => undefined,
   onOpenRouteGuard: () => undefined,
   onOpenSafetySession: () => undefined,
+  trustNavigation,
 });
 
 export const accountFixture = React.createElement(Account, {
@@ -43,6 +51,7 @@ export const accountFixture = React.createElement(Account, {
   onManageBilling: async () => undefined,
   onRestoreMembership: () => undefined,
   onSignOut: async () => undefined,
+  trustNavigation,
 });
 
 export const unavailableFixture = React.createElement(MembershipUnavailable, {

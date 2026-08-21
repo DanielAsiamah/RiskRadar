@@ -17,6 +17,7 @@ import { accountViewState } from '../membership/client-state.mjs';
 import type { AccountEntitlement } from '../membership/types';
 import MembershipUnavailable from './MembershipUnavailable';
 import { membershipColors, membershipStyles } from './membershipStyles';
+import SiteFooter, { type TrustNavigation } from './SiteFooter';
 
 export interface AccountProps {
   account: AccountEntitlement | null;
@@ -28,6 +29,7 @@ export interface AccountProps {
   onManageBilling(): Promise<void>;
   onRestoreMembership(): void;
   onSignOut(): Promise<void>;
+  trustNavigation: TrustNavigation;
 }
 
 export default function Account({
@@ -40,10 +42,18 @@ export default function Account({
   onManageBilling,
   onRestoreMembership,
   onSignOut,
+  trustNavigation,
 }: AccountProps) {
   const viewState = accountViewState(account, loading, confirming);
   if (viewState === 'unavailable') {
-    return <MembershipUnavailable onBack={onBack} onRetry={onRefresh} onSignOut={onSignOut} />;
+    return (
+      <MembershipUnavailable
+        onBack={onBack}
+        onRetry={onRefresh}
+        onSignOut={onSignOut}
+        footer={<SiteFooter {...trustNavigation} />}
+      />
+    );
   }
 
   const periodEnd = account?.currentPeriodEnd
@@ -144,6 +154,8 @@ export default function Account({
             <LogOut size={17} color={membershipColors.slate} />
             <Text style={tw`text-sm font-black text-slate-700 ml-2`}>Sign out</Text>
           </Pressable>
+
+          <SiteFooter {...trustNavigation} />
         </View>
       </ScrollView>
     </View>
