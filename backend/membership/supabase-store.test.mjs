@@ -15,10 +15,10 @@ function createResponse(status, jsonBody) {
   };
 }
 
-function createStore(fetchImpl) {
+function createStore(fetchImpl, supabaseAdminKey = 'service-role') {
   return createSupabaseMembershipStore({
     supabaseUrl: 'https://riskradar.supabase.co',
-    supabaseServiceRoleKey: 'service-role',
+    supabaseAdminKey,
   }, fetchImpl);
 }
 
@@ -68,6 +68,35 @@ test('upsertSubscription uses merge duplicates semantics', async () => {
   assert.equal(calls[0].init.method, 'POST');
   assert.equal(calls[0].init.headers.Authorization, 'Bearer service-role');
   assert.equal(calls[0].init.headers.Prefer, 'resolution=merge-duplicates');
+});
+
+test('current Supabase secret keys are sent as API keys rather than bearer JWTs', async () => {
+  const calls = [];
+  const store = createStore(async (input, init) => {
+    calls.push({ input, init });
+    return createResponse(201, []);
+  }, 'sb_secret_current-key');
+
+  await store.upsertSubscription({
+    user_id: '123e4567-e89b-12d3-a456-426614174000',
+    status: 'active',
+  });
+
+  assert.equal(calls[0].init.headers.apikey, 'sb_secret_current-key');
+  assert.equal('Authorization' in calls[0].init.headers, false);
+});
+
+test('token verification combines the admin API key with the member JWT', async () => {
+  const calls = [];
+  const store = createStore(async (input, init) => {
+    calls.push({ input, init });
+    return createResponse(200, { id: 'user-1' });
+  }, 'sb_secret_current-key');
+
+  await store.verifyAccessToken('member-jwt');
+
+  assert.equal(calls[0].init.headers.apikey, 'sb_secret_current-key');
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer member-jwt');
 });
 
 test('claimBillingEvent inserts once and reports duplicates safely', async () => {

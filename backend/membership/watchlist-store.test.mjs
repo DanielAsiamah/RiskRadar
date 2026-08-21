@@ -15,10 +15,10 @@ function createResponse(status, jsonBody) {
   };
 }
 
-function createStore(fetchImpl) {
+function createStore(fetchImpl, supabaseAdminKey = 'service-role') {
   return createWatchlistStore({
     supabaseUrl: 'https://riskradar.supabase.co',
-    supabaseServiceRoleKey: 'service-role',
+    supabaseAdminKey,
   }, fetchImpl);
 }
 
@@ -51,6 +51,19 @@ test('list filters by owner and returns camelCase rows', async () => {
   assert.equal(rows[0].lastCheckedMonth, '2026-05');
   assert.deepEqual(rows[0].lastSnapshot, { score: 6 });
   assert.equal('normalized_postcode' in rows[0], false);
+});
+
+test('watchlist requests do not send current Supabase secret keys as bearer JWTs', async () => {
+  const calls = [];
+  const store = createStore(async (input, init) => {
+    calls.push({ input, init });
+    return createResponse(200, []);
+  }, 'sb_secret_current-key');
+
+  await store.list('123e4567-e89b-12d3-a456-426614174000');
+
+  assert.equal(calls[0].init.headers.apikey, 'sb_secret_current-key');
+  assert.equal('Authorization' in calls[0].init.headers, false);
 });
 
 test('create validates labels before calling Supabase', async () => {

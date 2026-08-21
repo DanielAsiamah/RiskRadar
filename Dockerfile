@@ -8,10 +8,20 @@ RUN npm ci
 COPY app.json index.ts App.tsx tsconfig.json types.ts ./
 COPY api ./api
 COPY assets ./assets
+COPY auth ./auth
 COPY components ./components
+COPY membership ./membership
+COPY scripts ./scripts
 COPY types ./types
 
-RUN npx expo export --platform web --output-dir dist
+ARG EXPO_PUBLIC_API_BASE_URL
+ARG EXPO_PUBLIC_API_PORT=3001
+ARG EXPO_PUBLIC_SUPABASE_URL
+ARG EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+ARG EXPO_PUBLIC_SUPABASE_ANON_KEY
+ARG EXPO_PUBLIC_WEB_APP_URL
+
+RUN npm run build:web
 
 FROM node:22-alpine AS runtime
 
@@ -21,6 +31,9 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=3001 \
     WEB_DIST_DIR=/app/dist
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 
 COPY --chown=node:node backend ./backend
 COPY --from=web-builder --chown=node:node /app/dist ./dist

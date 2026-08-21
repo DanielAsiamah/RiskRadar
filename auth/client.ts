@@ -1,15 +1,20 @@
 import { createClient, type Session, type SupabaseClient } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
+import { readPublicAuthConfig } from './config.mjs';
 import { authStorage } from './storage';
 
-const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() || '';
-const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() || '';
-export const webAppUrl = process.env.EXPO_PUBLIC_WEB_APP_URL?.trim() || '';
+const publicAuthConfig = readPublicAuthConfig({
+  EXPO_PUBLIC_SUPABASE_URL: process.env.EXPO_PUBLIC_SUPABASE_URL,
+  EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
+  EXPO_PUBLIC_SUPABASE_ANON_KEY: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+  EXPO_PUBLIC_WEB_APP_URL: process.env.EXPO_PUBLIC_WEB_APP_URL,
+});
 
-export const supabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey && webAppUrl);
+export const supabaseConfigured = publicAuthConfig.configured;
+export const webAppUrl = publicAuthConfig.webAppUrl;
 
 export const supabase: SupabaseClient | null = supabaseConfigured
-  ? createClient(supabaseUrl, supabaseAnonKey, {
+  ? createClient(publicAuthConfig.supabaseUrl, publicAuthConfig.supabasePublishableKey, {
       auth: {
         autoRefreshToken: true,
         persistSession: true,

@@ -293,6 +293,23 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 - `POST /api/billing/webhook`
   Receives Stripe webhook events that activate, update, or revoke Premium access.
 
+### Supabase and Stripe setup
+
+Providing only a Supabase secret key is not enough. Apply all SQL migrations in
+`supabase/migrations`, enable Email authentication, configure local and
+production magic-link redirect URLs, and provide separate frontend publishable
+and backend secret keys. Then configure the Stripe recurring Price, Payment
+Link, webhook endpoint, webhook signing secret, and customer portal.
+
+Use `.env.example` as the local template and run:
+
+```powershell
+npm run membership:check
+```
+
+See `supabase/README.md` and `backend/DEPLOYMENT.md` for the exact dashboard
+steps and environment-variable contract.
+
 - `GET /api/watchlist`
   Lists the signed-in member's watched postcodes.
 

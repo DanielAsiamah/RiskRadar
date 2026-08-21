@@ -1,3 +1,5 @@
+import { createSupabaseAdminHeaders } from './supabase-headers.mjs';
+
 export class WatchlistStoreError extends Error {
   constructor(message, status, code) {
     super(message);
@@ -5,14 +7,6 @@ export class WatchlistStoreError extends Error {
     this.status = status;
     this.code = code;
   }
-}
-
-function createHeaders(serviceRoleKey, extraHeaders = {}) {
-  return {
-    apikey: serviceRoleKey,
-    Authorization: `Bearer ${serviceRoleKey}`,
-    ...extraHeaders,
-  };
 }
 
 function encodeFilter(value) {
@@ -107,7 +101,7 @@ export function createWatchlistStore(config, fetchImpl = fetch) {
   async function getSingle(path, method, body = null) {
     const rows = await request(path, {
       method,
-      headers: createHeaders(config.supabaseServiceRoleKey, {
+      headers: createSupabaseAdminHeaders(config.supabaseAdminKey, {
         'Content-Type': 'application/json',
         Prefer: 'return=representation',
       }),
@@ -128,7 +122,7 @@ export function createWatchlistStore(config, fetchImpl = fetch) {
         `/rest/v1/watched_places?user_id=${encodeFilter(userId)}&order=created_at.asc`,
         {
           method: 'GET',
-          headers: createHeaders(config.supabaseServiceRoleKey),
+          headers: createSupabaseAdminHeaders(config.supabaseAdminKey),
         },
       );
 

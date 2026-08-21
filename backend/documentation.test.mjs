@@ -79,7 +79,8 @@ test('keeps deployment documentation aligned with runtime requirements', async (
 
   assert.equal(packageJson.engines.node, '>=22.13.0');
   assert.match(installGuide, /Node\.js 22\.13 or newer/);
-  assert.match(dockerfile, /expo export --platform web/);
+  assert.match(dockerfile, /RUN npm run build:web/);
+  assert.match(packageJson.scripts['build:web'], /expo export --platform web/);
   assert.match(dockerfile, /COPY --from=web-builder .*\/app\/dist \.\/dist/);
   assert.match(renderBlueprint, /healthCheckPath: \/ready/);
   assert.match(installGuide, /EMBED_ALLOW_ORIGINS/);

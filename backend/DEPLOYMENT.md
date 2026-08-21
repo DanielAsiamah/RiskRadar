@@ -49,6 +49,62 @@ The repo includes [render.yaml](C:/Users/china/.gemini/antigravity/scratch/riskr
 
 ### Environment variables
 
+Before enabling member features, run `npm run membership:check`. It validates
+both the build-time Expo configuration and backend-only billing configuration
+without printing values.
+
+#### Premium frontend variables
+
+- `EXPO_PUBLIC_SUPABASE_URL`
+  Supabase project URL used by passwordless authentication.
+- `EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+  Current `sb_publishable_...` client key. The legacy
+  `EXPO_PUBLIC_SUPABASE_ANON_KEY` alias remains supported.
+- `EXPO_PUBLIC_WEB_APP_URL`
+  Public website origin used for magic-link and billing returns.
+
+These values are public by design and are compiled into the Expo bundle. Never
+put a Supabase secret key, Stripe secret, or webhook signing secret in an
+`EXPO_PUBLIC_...` variable. `npm run build:web` checks the public environment
+before Expo starts and scans the exported bundle afterward; either check blocks
+the build if a backend credential is detected.
+
+#### Premium backend variables
+
+- `SUPABASE_URL`
+  Same Supabase project URL used by the frontend.
+- `SUPABASE_SECRET_KEY`
+  Current `sb_secret_...` backend key. The legacy
+  `SUPABASE_SERVICE_ROLE_KEY` alias remains supported.
+- `STRIPE_SECRET_KEY`
+  Stripe test or live secret key for the RiskRadar account.
+- `STRIPE_WEBHOOK_SECRET`
+  Signing secret for the RiskRadar webhook endpoint.
+- `STRIPE_PREMIUM_PRICE_ID`
+  Recurring Price ID for the RiskRadar Premium plan.
+- `STRIPE_PAYMENT_LINK_URL`
+  RiskRadar Premium subscription Payment Link.
+- `BILLING_REFERENCE_SECRET`
+  At least 32 random characters used to bind checkout to a signed-in account.
+- `WEB_APP_URL`
+  Canonical public website origin allowed for billing portal returns.
+
+Configure Stripe with:
+
+```text
+Webhook URL: https://YOUR-BACKEND/api/billing/webhook
+Events: checkout.session.completed, customer.subscription.created,
+customer.subscription.updated, customer.subscription.deleted, invoice.paid,
+invoice.payment_failed
+Payment Link redirect: https://YOUR-WEBSITE/?billing=success
+Customer portal: enable payment-method updates and subscription cancellation
+```
+
+Run all Supabase migrations and configure Auth redirect URLs as described in
+`supabase/README.md` before testing checkout. Stripe test mode must prove that a
+successful payment unlocks only its bound Supabase user and that cancellation
+or payment failure updates the account state.
+
 - `PORT`
   Backend port. Default: `3001`
 - `HOST`

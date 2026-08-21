@@ -3,6 +3,7 @@ services:
     name: riskradar-api
     runtime: docker
     plan: starter
+    region: frankfurt
     autoDeploy: true
     healthCheckPath: /ready
     maxShutdownDelaySeconds: 15
@@ -51,3 +52,29 @@ services:
         value: true
       - key: SEARCH_PRESETS_ENABLED
         value: true
+      - key: EXPO_PUBLIC_API_BASE_URL
+        sync: false
+      - key: EXPO_PUBLIC_SUPABASE_URL
+        sync: false
+      - key: EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY
+        sync: false
+      - key: EXPO_PUBLIC_SUPABASE_ANON_KEY
+        sync: false
+      - key: EXPO_PUBLIC_WEB_APP_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SECRET_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: STRIPE_PREMIUM_PRICE_ID
+        sync: false
+      - key: STRIPE_PAYMENT_LINK_URL
+        sync: false
+      - key: BILLING_REFERENCE_SECRET
+        generateValue: true
+      - key: WEB_APP_URL
+        sync: false
