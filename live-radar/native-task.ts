@@ -51,6 +51,11 @@ export async function startNativeLiveRadarTask() {
     deferredUpdatesDistance: 250,
     deferredUpdatesInterval: 10 * 60 * 1000,
     timeInterval: 10 * 60 * 1000,
+    showsBackgroundLocationIndicator: false,
+    foregroundService: {
+      notificationTitle: 'RiskRadar Live Radar',
+      notificationBody: 'Monitoring your current area for higher-risk changes.',
+    },
   });
 }
 
