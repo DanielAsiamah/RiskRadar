@@ -3039,7 +3039,7 @@ function averageCoordinates(points) {
   };
 }
 
-function buildPremiumInsights({ trendData, areaContext, hotspotSummary }) {
+function buildPremiumInsights({ trendData, areaContext, hotspotSummary, timingContext }) {
   return [
     {
       id: 'trend',
@@ -3052,6 +3052,12 @@ function buildPremiumInsights({ trendData, areaContext, hotspotSummary }) {
       title: 'Category Trend Graph',
       description: `Track whether violent crime, anti-social behaviour, and robbery are trending up or down over the last ${trendData.monthly.length} months.`,
       badge: 'Live',
+    },
+    {
+      id: 'timing-rules',
+      title: 'Timing Rules',
+      description: timingContext?.summary || 'No late-night, weekend, or seasonal Premium timing uplift is active right now.',
+      badge: timingContext?.totalAdjustment ? `+${timingContext.totalAdjustment}` : 'Quiet',
     },
     {
       id: 'area-context',
@@ -3214,11 +3220,12 @@ async function fetchCrimeData(latitude, longitude) {
   const safeCrimes = await fetchStreetCrimesAtPoint(latitude, longitude);
   const postcodeCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, POSTCODE_RADIUS_METERS);
   const contextCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, CONTEXT_RADIUS_METERS);
+  const evaluationDate = new Date().toISOString();
 
   const postcodeCategories = summarizeCrimeCategories(postcodeCrimes);
   const contextCategories = summarizeCrimeCategories(contextCrimes);
-  const postcodeScoreResult = calculateCrimeScore(postcodeCategories, postcodeCrimes.length);
-  const contextScoreResult = calculateCrimeScore(contextCategories, contextCrimes.length);
+  const postcodeScoreResult = calculateCrimeScore(postcodeCategories, postcodeCrimes.length, { evaluationDate });
+  const contextScoreResult = calculateCrimeScore(contextCategories, contextCrimes.length, { evaluationDate });
   const blendedScore = blendPostcodeScore(postcodeScoreResult, contextScoreResult);
   const blendedCrimeScore = blendedScore.score;
   const totalCrimes = postcodeCrimes.length;
@@ -3241,6 +3248,7 @@ async function fetchCrimeData(latitude, longitude) {
       contextAdjustment: blendedScore.contextAdjustment,
       factors: postcodeScoreResult.factors,
     },
+    timingContext: postcodeScoreResult.timingContext,
     capExplanation:
       `The score is led by one month of incidents within ${POSTCODE_RADIUS_METERS} metres. The wider ${CONTEXT_RADIUS_METERS} metre context can change it by only -2 to +5 points and cannot lower a violent-crime severity floor.`,
   };
@@ -3624,7 +3632,9 @@ async function computeAreaAnalysis(area = {}) {
     categories: area.categories,
   });
   const contextCategories = latestAreaFeed.categories;
-  const scoreResult = calculateCrimeScore(contextCategories, latestAreaFeed.totalCrimes);
+  const scoreResult = calculateCrimeScore(contextCategories, latestAreaFeed.totalCrimes, {
+    evaluationDate: new Date().toISOString(),
+  });
   const crimeScore = scoreResult.score;
   const hotspotPayload = await fetchHotspotMap({
     points: polygonPoints,
@@ -3679,6 +3689,7 @@ async function computeAreaAnalysis(area = {}) {
         contextAdjustment: 0,
         factors: scoreResult.factors,
       },
+      timingContext: scoreResult.timingContext,
       riskSignals,
       scoreFactors,
       capExplanation: 'Area score is calculated only from incidents inside the selected polygon, using the same deliberately conservative thresholds as postcode analysis.',
@@ -3697,6 +3708,7 @@ async function computeAreaAnalysis(area = {}) {
       trendData,
       areaContext: `${areaContext} ${hotspotPayload.summary}`,
       hotspotSummary: hotspotPayload.summary,
+      timingContext: scoreResult.timingContext,
     }),
     hotspotData: {
       clusters: hotspotPayload.clusters,
@@ -3798,6 +3810,7 @@ async function computePointAnalysis(payload = {}) {
       trendData,
       areaContext: `${areaContext} ${hotspotData.summary}`,
       hotspotSummary: hotspotData.summary,
+      timingContext: crimeData.timingContext,
     }),
     hotspotData,
     newsLink: `https://news.google.com/search?q=${encodeURIComponent(`${pointContext.district} police OR crime`)}`,
@@ -4100,6 +4113,7 @@ async function computeLocationAnalysis(query) {
       trendData,
       areaContext: `${areaContext} ${hotspotData.summary}`,
       hotspotSummary: hotspotData.summary,
+      timingContext: crimeData.timingContext,
     }),
     nearbyRanking,
     hotspotData,

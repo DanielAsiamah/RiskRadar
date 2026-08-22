@@ -67,15 +67,149 @@ function addFactor(factors, id, label, count, points, detail) {
   factors.push({ id, label, count, points, detail });
 }
 
-export function calculateCrimeScore(categories = [], totalCrimes = 0) {
+function parseEvaluationDate(value) {
+  const parsed = value instanceof Date ? value : new Date(value ?? Date.now());
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getLondonDateParts(date) {
+  const formatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Europe/London',
+    weekday: 'long',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+  const lookup = {};
+
+  for (const part of formatter.formatToParts(date)) {
+    if (part.type !== 'literal') {
+      lookup[part.type] = part.value;
+    }
+  }
+
+  return {
+    weekday: String(lookup.weekday || ''),
+    month: Number(lookup.month || 0),
+    day: Number(lookup.day || 0),
+    hour: Number(lookup.hour || 0),
+    minute: Number(lookup.minute || 0),
+    localTimeLabel: `${lookup.weekday || 'Unknown'} ${lookup.day || ''}/${lookup.month || ''} ${lookup.hour || '00'}:${lookup.minute || '00'} UK time`.trim(),
+  };
+}
+
+function addTimingFactor(factors, remainingState, id, label, requestedPoints, detail) {
+  const awardedPoints = Math.min(Math.max(remainingState.remaining, 0), Math.max(requestedPoints, 0));
+  if (awardedPoints <= 0) {
+    return;
+  }
+
+  remainingState.remaining -= awardedPoints;
+  factors.push({ id, label, points: awardedPoints, detail });
+}
+
+function buildTimingContext(categories, totalCrimes, evaluationDate, baseScore) {
+  const parsedDate = parseEvaluationDate(evaluationDate);
+  if (!parsedDate) {
+    return null;
+  }
+
+  const london = getLondonDateParts(parsedDate);
+  const isNight = london.hour >= 21 || london.hour < 5;
+  const isWeekend = london.weekday === 'Saturday' || london.weekday === 'Sunday';
+  const isStudentSeason = london.month === 8 || london.month === 9;
+  const isChristmasSeason = london.month === 11 || london.month === 12;
+
+  const violentCount = categoryCount(categories, ['violent-crime', 'violence-and-sexual-offences']);
+  const robberyCount = categoryCount(categories, ['robbery']);
+  const drugsCount = categoryCount(categories, ['drugs']);
+  const antiSocialCount = categoryCount(categories, ['anti-social-behaviour']);
+  const publicOrderCount = categoryCount(categories, ['public-order']);
+  const burglaryCount = categoryCount(categories, ['burglary']);
+  const shopliftingCount = categoryCount(categories, ['shoplifting']);
+  const bicycleTheftCount = categoryCount(categories, ['bicycle-theft']);
+  const theftCount = categoryCount(categories, ['other-theft', 'theft', 'theft-from-the-person']);
+
+  const nightPressure = violentCount + robberyCount + drugsCount + theftCount;
+  const weekendPressure = violentCount + antiSocialCount + publicOrderCount + drugsCount + robberyCount;
+  const studentPressure = burglaryCount + theftCount + bicycleTheftCount;
+  const christmasPressure = shopliftingCount + burglaryCount + theftCount + bicycleTheftCount;
+
+  const factors = [];
+  const remainingState = { remaining: 4 };
+
+  if (isNight && (nightPressure >= 25 || violentCount >= 10 || totalCrimes >= 40)) {
+    addTimingFactor(
+      factors,
+      remainingState,
+      'night',
+      'Late-night pressure',
+      nightPressure >= 25 || violentCount >= 10 ? 2 : 1,
+      `The current UK time window is late at night, which tends to raise the relative pressure of violence, robbery, and opportunistic theft around active routes.`,
+    );
+  }
+
+  if (isWeekend && (weekendPressure >= 25 || totalCrimes >= 50)) {
+    addTimingFactor(
+      factors,
+      remainingState,
+      'weekend',
+      'Weekend uplift',
+      weekendPressure >= 45 || violentCount >= 15 ? 2 : 1,
+      `The current UK day falls on a weekend, when nightlife, gatherings, and public-order activity can make the local pattern less forgiving.`,
+    );
+  }
+
+  if (isStudentSeason && studentPressure >= 30) {
+    addTimingFactor(
+      factors,
+      remainingState,
+      'student-season',
+      'Student move-in season',
+      1,
+      `August and September can lift property and street disorder pressure in move-in periods, especially where burglary and theft are already visible.`,
+    );
+  }
+
+  if (isChristmasSeason && christmasPressure >= 25) {
+    addTimingFactor(
+      factors,
+      remainingState,
+      'christmas',
+      'Christmas theft season',
+      christmasPressure >= 50 ? 2 : 1,
+      `The late-year shopping and travel period can lift burglary and theft pressure where those categories are already active in the local feed.`,
+    );
+  }
+
+  const totalAdjustment = factors.reduce((sum, factor) => sum + factor.points, 0);
+  const summary = factors.length
+    ? `Current UK timing conditions add ${totalAdjustment} point${totalAdjustment === 1 ? '' : 's'} because ${factors.map((factor) => factor.label.toLowerCase()).join(', ')} are active.`
+    : 'No Premium timing adjustment is active for the current UK local time window.';
+
+  return {
+    evaluatedAt: parsedDate.toISOString(),
+    localTimeLabel: london.localTimeLabel,
+    totalAdjustment,
+    adjustedScore: clamp(baseScore + totalAdjustment, 1, 95),
+    summary,
+    factors,
+  };
+}
+
+export function calculateCrimeScore(categories = [], totalCrimes = 0, options = {}) {
   const safeCategories = Array.isArray(categories) ? categories : [];
   const incidentCount = Math.max(0, Number(totalCrimes) || 0);
 
   if (incidentCount === 0) {
+    const timingContext = buildTimingContext(safeCategories, incidentCount, options?.evaluationDate, 5);
     return {
       score: 5,
       model: SCORE_MODEL_VERSION,
       factors: [],
+      timingContext,
       explanation: 'No incidents were returned in the local search radius. A small baseline remains because public data coverage is not a guarantee of zero risk.',
     };
   }
@@ -130,11 +264,15 @@ export function calculateCrimeScore(categories = [], totalCrimes = 0) {
     addFactor(factors, 'violent-severity-floor', 'Violent-crime severity band', violentCount, floorAdjustment, `${violentCount} violent incidents set a minimum local risk band of ${violentMinimumScore}/100.`);
   }
 
+  const stableScore = clamp(Math.round(score), 1, 95);
+  const timingContext = buildTimingContext(safeCategories, incidentCount, options?.evaluationDate, stableScore);
+
   return {
-    score: clamp(Math.round(score), 1, 95),
+    score: stableScore,
     minimumScore: violentMinimumScore || 0,
     model: SCORE_MODEL_VERSION,
     factors,
+    timingContext,
     explanation: 'The score uses one month of incidents inside the selected local boundary. Total volume shapes the baseline, while violent-crime count and concentration establish stronger minimum severity bands.',
   };
 }
@@ -158,5 +296,6 @@ export const crimeScoreModel = {
   displayScaleMaximum: 100,
   modelCap: 95,
   postcodeWeightDescription: 'The 400 metre postcode score is primary. The wider 900 metre context can adjust it by no more than -2 to +5 points, without lowering a violent-crime severity floor.',
+  timingWeightDescription: 'Premium timing context can preview a small current-time uplift for late-night, weekend, student move-in, or Christmas theft windows when the visible category mix supports it.',
   homicideLimitation: 'The public UK Police street-level category feed normally groups homicide within violent crime, so a separate murder increment is only applied when a source explicitly supplies a homicide category.',
 };

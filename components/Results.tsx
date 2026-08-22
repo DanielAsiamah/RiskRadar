@@ -38,6 +38,7 @@ export default function Results({
   };
 
   const badge = getBadge(result.crimeData.crimeScore);
+  const timingContext = result.crimeData.timingContext ?? null;
 
   return (
     <View style={tw`flex-1 bg-white`}>
@@ -267,6 +268,62 @@ export default function Results({
               <View style={tw`rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4`}>
                 <Text style={tw`text-xs text-slate-600`}>
                   Unlock Premium to see sampled nearby postcode rank, safer-than percentage, and lower-risk alternatives around {result.postcodeData.postcode}.
+                </Text>
+              </View>
+            )}
+          </View>
+
+          <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
+            <View style={tw`flex-row items-start justify-between mb-3`}>
+              <View style={tw`flex-1 pr-4`}>
+                <Text style={tw`text-sm font-black text-slate-900 mb-2`}>Timing rules</Text>
+                <Text style={tw`text-xs text-slate-500 leading-5`}>
+                  {premium
+                    ? (timingContext?.summary ?? 'No late-night, weekend, or seasonal Premium timing uplift is active for this result right now.')
+                    : 'Premium explains when late-night, weekend, or seasonal pressures would push the current-time view above the baseline score.'}
+                </Text>
+              </View>
+              <View style={tw`w-11 h-11 rounded-2xl bg-amber-50 border border-amber-100 items-center justify-center`}>
+                {premium ? <Info size={18} color="#d97706" /> : <Lock size={18} color="#d97706" />}
+              </View>
+            </View>
+
+            {premium && timingContext ? (
+              <>
+                <View style={tw`rounded-2xl bg-amber-50 border border-amber-100 px-4 py-4 mb-4`}>
+                  <Text style={tw`text-[10px] font-bold tracking-widest text-amber-700 uppercase mb-2`}>Current UK timing view</Text>
+                  <Text style={tw`text-3xl font-black text-amber-700 mb-1`}>
+                    {timingContext.adjustedScore}/100
+                  </Text>
+                  <Text style={tw`text-xs text-slate-600`}>
+                    Base score {result.crimeData.crimeScore}/100, with a {timingContext.totalAdjustment > 0 ? '+' : ''}{timingContext.totalAdjustment} point Premium timing adjustment at {timingContext.localTimeLabel}.
+                  </Text>
+                </View>
+
+                {timingContext.factors.length ? (
+                  <View>
+                    {timingContext.factors.map((factor) => (
+                      <View key={factor.id} style={tw`rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 mb-3`}>
+                        <View style={tw`flex-row items-center justify-between mb-1`}>
+                          <Text style={tw`text-sm font-black text-slate-900`}>{factor.label}</Text>
+                          <Text style={tw`text-sm font-black text-amber-700`}>+{factor.points}</Text>
+                        </View>
+                        <Text style={tw`text-xs text-slate-600 leading-5`}>{factor.detail}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={tw`rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4`}>
+                    <Text style={tw`text-xs text-slate-600`}>
+                      The current UK time window does not add any extra Premium timing pressure to this result.
+                    </Text>
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={tw`rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4`}>
+                <Text style={tw`text-xs text-slate-600`}>
+                  Unlock Premium to see the current-time adjusted score, active timing rules, and the exact late-night or seasonal uplift that applies right now.
                 </Text>
               </View>
             )}

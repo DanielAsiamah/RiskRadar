@@ -75,3 +75,64 @@ test('wider context cannot lower a violent-crime severity floor', () => {
   const local = calculateCrimeScore([{ category: 'violent-crime', count: 10 }], 10);
   assert.equal(blendPostcodeScore(local, { score: 5 }).score, 35);
 });
+
+test('late-night local pressure adds a timing adjustment', () => {
+  const result = calculateCrimeScore([
+    { category: 'violent-crime', count: 12 },
+    { category: 'other-theft', count: 15 },
+    { category: 'drugs', count: 4 },
+  ], 31, {
+    evaluationDate: '2026-08-19T22:30:00+01:00',
+  });
+
+  assert.equal(result.timingContext?.totalAdjustment, 2);
+  assert.equal(result.timingContext?.factors[0]?.id, 'night');
+  assert.match(result.timingContext?.summary ?? '', /night/i);
+  assert.equal(result.score, 35);
+  assert.equal(result.timingContext?.adjustedScore, 37);
+});
+
+test('weekend nightlife pressure adds a weekend adjustment', () => {
+  const result = calculateCrimeScore([
+    { category: 'violent-crime', count: 8 },
+    { category: 'anti-social-behaviour', count: 18 },
+    { category: 'drugs', count: 6 },
+  ], 32, {
+    evaluationDate: '2026-08-22T18:15:00+01:00',
+  });
+
+  assert.equal(result.timingContext?.totalAdjustment, 1);
+  assert.equal(result.timingContext?.factors[0]?.id, 'weekend');
+  assert.match(result.timingContext?.summary ?? '', /weekend/i);
+  assert.equal(result.timingContext?.adjustedScore, result.score + 1);
+});
+
+test('student move-in season adds a small property-pressure adjustment', () => {
+  const result = calculateCrimeScore([
+    { category: 'burglary', count: 18 },
+    { category: 'other-theft', count: 12 },
+    { category: 'bicycle-theft', count: 4 },
+  ], 34, {
+    evaluationDate: '2026-09-03T14:00:00+01:00',
+  });
+
+  assert.equal(result.timingContext?.totalAdjustment, 1);
+  assert.equal(result.timingContext?.factors[0]?.id, 'student-season');
+  assert.match(result.timingContext?.summary ?? '', /student/i);
+  assert.equal(result.timingContext?.adjustedScore, result.score + 1);
+});
+
+test('christmas retail pressure adds a theft-season adjustment', () => {
+  const result = calculateCrimeScore([
+    { category: 'shoplifting', count: 25 },
+    { category: 'burglary', count: 14 },
+    { category: 'other-theft', count: 18 },
+  ], 57, {
+    evaluationDate: '2026-12-11T16:00:00+00:00',
+  });
+
+  assert.equal(result.timingContext?.totalAdjustment, 2);
+  assert.equal(result.timingContext?.factors[0]?.id, 'christmas');
+  assert.match(result.timingContext?.summary ?? '', /christmas|festive|theft season/i);
+  assert.equal(result.timingContext?.adjustedScore, result.score + 2);
+});

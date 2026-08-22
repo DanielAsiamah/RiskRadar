@@ -36,6 +36,19 @@ export interface CrimeData {
     impact: 'up' | 'down' | 'neutral';
     detail: string;
   }[];
+  timingContext?: {
+    evaluatedAt: string;
+    localTimeLabel: string;
+    totalAdjustment: number;
+    adjustedScore: number;
+    summary: string;
+    factors: Array<{
+      id: 'night' | 'weekend' | 'student-season' | 'christmas';
+      label: string;
+      points: number;
+      detail: string;
+    }>;
+  } | null;
 }
 
 export interface EvidenceReference {
@@ -111,7 +124,7 @@ export interface TrendData {
 }
 
 export interface PremiumInsight {
-  id: 'trend' | 'category-trend' | 'area-context' | 'hotspot-map';
+  id: 'trend' | 'category-trend' | 'area-context' | 'hotspot-map' | 'timing-rules';
   title: string;
   description: string;
   badge: string;
