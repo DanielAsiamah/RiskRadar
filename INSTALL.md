@@ -170,6 +170,8 @@ Use [.env.example](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/.en
 
 `MONTHLY_FETCH_CONCURRENCY` controls how many historical police-data months are requested at once. The default is `2`, and the backend enforces a range of `1` to `4` to avoid overwhelming the public API. Trend responses include `dataQuality` plus `dataAvailable` on every monthly point; failed months are excluded from trend calculations instead of being treated as zero-crime months.
 
+Postcode, point, and polygon analysis responses include `crimeData.dataFreshness`. This reports `high`, `medium`, `low`, or `unavailable` confidence, the public publication lag in calendar months, and whether the analysed month matches the latest month advertised by Police.uk. A high label means the result matches the latest public monthly release; it does not mean the incidents are live.
+
 ### Storage mode
 
 The backend now supports two state persistence modes:

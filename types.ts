@@ -49,6 +49,18 @@ export interface CrimeData {
       detail: string;
     }>;
   } | null;
+  dataFreshness?: {
+    confidence: 'high' | 'medium' | 'low' | 'unavailable';
+    label: string;
+    status: 'current-release' | 'behind-source' | 'delayed-release' | 'stale' | 'source-unverified' | 'unavailable';
+    dataMonth: string | null;
+    latestAvailableMonth: string | null;
+    publicationLagMonths: number | null;
+    sourceLagMonths: number | null;
+    checkedAt: string;
+    summary: string;
+    warning: string;
+  };
 }
 
 export interface EvidenceReference {

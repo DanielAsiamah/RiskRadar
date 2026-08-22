@@ -39,6 +39,14 @@ export default function Results({
 
   const badge = getBadge(result.crimeData.crimeScore);
   const timingContext = result.crimeData.timingContext ?? null;
+  const freshness = result.crimeData.dataFreshness;
+  const freshnessAccent = freshness?.confidence === 'high'
+    ? '#059669'
+    : freshness?.confidence === 'medium'
+      ? '#d97706'
+      : freshness?.confidence === 'low'
+        ? '#e11d48'
+        : '#64748b';
 
   return (
     <View style={tw`flex-1 bg-white`}>
@@ -81,6 +89,37 @@ export default function Results({
               </Text>
             </View>
           )}
+        </View>
+
+        <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-6`}>
+          <View style={tw`flex-row items-start justify-between mb-3`}>
+            <View style={tw`flex-1 pr-4`}>
+              <Text style={tw`text-[10px] font-bold tracking-widest text-slate-400 uppercase mb-2`}>Data freshness</Text>
+              <Text style={[tw`text-base font-black`, { color: freshnessAccent }]}>
+                {freshness?.label ?? 'Freshness unavailable'}
+              </Text>
+            </View>
+            <View style={[tw`rounded-full px-3 py-2`, { backgroundColor: `${freshnessAccent}14` }]}>
+              <Text style={[tw`text-[10px] font-black uppercase`, { color: freshnessAccent }]}>
+                {result.crimeData.monthDisplay}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={tw`text-sm text-slate-700 leading-5 mb-3`}>
+            {freshness?.summary ?? 'RiskRadar could not verify the recorded month for this result.'}
+          </Text>
+          <View style={tw`rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3`}>
+            <Text style={tw`text-xs text-slate-500 leading-5`}>
+              {freshness?.warning ?? 'Treat this result cautiously and check Police.uk for the latest published month.'}
+            </Text>
+          </View>
+
+          {result.trendData.dataQuality && !result.trendData.dataQuality.complete ? (
+            <Text style={tw`text-[11px] font-bold text-amber-700 mt-3`}>
+              Trend coverage: {result.trendData.dataQuality.loadedMonths} of {result.trendData.dataQuality.requestedMonths} requested months loaded.
+            </Text>
+          ) : null}
         </View>
 
         <View style={tw`bg-white border border-slate-200 rounded-3xl p-6 shadow-sm mb-6`}>

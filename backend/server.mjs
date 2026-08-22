@@ -5,6 +5,7 @@ import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { createCrimeFileSource } from './crime-file-source.mjs';
 import { blendPostcodeScore, calculateCrimeScore, crimeScoreModel } from './crime-score.mjs';
+import { buildDataFreshness, findLatestAdvertisedMonth } from './data-freshness.mjs';
 import { mapSettledWithConcurrency } from './bounded-concurrency.mjs';
 import { apiCatalog } from './api-catalog.mjs';
 import {
@@ -3648,6 +3649,12 @@ async function computeAreaAnalysis(area = {}) {
     monthCount: area.monthCount,
     categories: area.categories,
   });
+  const latestAvailableMonth = findLatestAdvertisedMonth(trendData.monthly);
+  const dataFreshness = buildDataFreshness({
+    dataMonth: latestAreaFeed.month,
+    latestAvailableMonth,
+    checkedAt: scoreResult.timingContext?.evaluatedAt,
+  });
   const areaCenter = averageCoordinates(polygonPoints);
   const riskSignals = buildRiskSignals({
     district: label,
@@ -3690,6 +3697,7 @@ async function computeAreaAnalysis(area = {}) {
         factors: scoreResult.factors,
       },
       timingContext: scoreResult.timingContext,
+      dataFreshness,
       riskSignals,
       scoreFactors,
       capExplanation: 'Area score is calculated only from incidents inside the selected polygon, using the same deliberately conservative thresholds as postcode analysis.',
@@ -3748,6 +3756,11 @@ async function computePointAnalysis(payload = {}) {
   const pointContext = await resolvePointContext(latitude, longitude);
   const crimeData = await fetchCrimeData(latitude, longitude);
   const trendData = await fetchCrimeHistory(latitude, longitude, monthCount);
+  const dataFreshness = buildDataFreshness({
+    dataMonth: crimeData.month,
+    latestAvailableMonth: findLatestAdvertisedMonth(trendData.monthly),
+    checkedAt: crimeData.timingContext?.evaluatedAt,
+  });
   const latestContextCrimes = await fetchStreetCrimesAtPoint(latitude, longitude);
   const hotspotData = summarizeHotspots({
     district: pointContext.district,
@@ -3791,6 +3804,7 @@ async function computePointAnalysis(payload = {}) {
     },
     crimeData: {
       ...crimeData,
+      dataFreshness,
       riskSignals,
       scoreFactors,
       capExplanation:
@@ -4039,6 +4053,11 @@ async function computeLocationAnalysis(query) {
   const location = await resolveLocation(query);
   const crimeData = await fetchCrimeData(location.latitude, location.longitude);
   const trendData = await fetchCrimeHistory(location.latitude, location.longitude);
+  const dataFreshness = buildDataFreshness({
+    dataMonth: crimeData.month,
+    latestAvailableMonth: findLatestAdvertisedMonth(trendData.monthly),
+    checkedAt: crimeData.timingContext?.evaluatedAt,
+  });
   const latestContextCrimes = await fetchStreetCrimesAtPoint(location.latitude, location.longitude);
   const hotspotData = summarizeHotspots({
     district: location.admin_district,
@@ -4089,6 +4108,7 @@ async function computeLocationAnalysis(query) {
     postcode: location.postcode,
     crimeData: {
       ...crimeData,
+      dataFreshness,
       riskSignals,
       riskSignalDetails,
       scoreFactors,

@@ -13,6 +13,7 @@ It combines postcode lookup, UK Police crime feeds, local boundaries, monthly tr
 - Hotspot clusters and raw map-ready incident feeds
 - Postcode, point, and area comparisons
 - Nearby postcode suggestions based on device location
+- Data freshness confidence that compares the analysed month with Police.uk's latest advertised release
 - Saved analyses and reusable search presets
 - Conservative, explainable scoring with a deliberately exceptional 50+ band
 - Live Radar with manual current-area scans, local alert history, reduced-alert controls, muted postcodes, and a lighter keep-open web mode
@@ -98,7 +99,7 @@ See [INSTALL.md](./INSTALL.md) for complete local, Docker, Render, website embed
 
 RiskRadar requests public data from UK Police, Postcodes.io, and OpenStreetMap-backed geocoding services. Coverage and release timing vary by source and location.
 
-The risk index is an informational local incident-pressure estimate, not an official safety rating. It is postcode-led, uses category and volume thresholds, and exposes its scoring factors in the API response. Public police street data normally groups homicide within violent crime, so a separate homicide increment is only used when an imported source explicitly identifies that category.
+The risk index is an informational local incident-pressure estimate, not an official safety rating. It is postcode-led, uses category and volume thresholds, and exposes its scoring factors in the API response. Each analysis also reports freshness confidence, publication lag, and whether the analysed month matches Police.uk's latest advertised release. Public police street data normally groups homicide within violent crime, so a separate homicide increment is only used when an imported source explicitly identifies that category.
 
 Live Radar and Route Guard are also informational. They can highlight higher-risk local context and route sections, but they do not provide emergency dispatch, guaranteed-safe routing, or live police incident feeds.
 
