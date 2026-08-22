@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { Shield, ShieldCheck, AlertTriangle, Search, ChevronDown, Info, ExternalLink, MapPin } from 'lucide-react-native';
+import { Shield, ShieldCheck, AlertTriangle, Search, ChevronDown, Info, ExternalLink, MapPin, Medal, Lock } from 'lucide-react-native';
 import tw from 'twrnc';
 import { EvidenceReference, PostcodeResult } from '../types';
 import AnimatedRiskScore from './AnimatedRiskScore';
@@ -211,6 +211,66 @@ export default function Results({
           <Text style={tw`text-xs text-slate-500 mb-6`}>
             {premium ? 'Your dashboard can now remember this postcode.' : 'Premium unlocks watched places, richer comparisons, and a personal dashboard.'}
           </Text>
+
+          <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
+            <View style={tw`flex-row items-start justify-between mb-3`}>
+              <View style={tw`flex-1 pr-4`}>
+                <Text style={tw`text-sm font-black text-slate-900 mb-2`}>Nearby ranking</Text>
+                <Text style={tw`text-xs text-slate-500 leading-5`}>
+                  {premium
+                    ? (result.nearbyRanking?.summary ?? 'Nearby postcode ranking will appear when enough local comparison samples are available.')
+                    : 'Premium shows whether this postcode is safer than nearby alternatives and highlights lower-risk options around it.'}
+                </Text>
+              </View>
+              <View style={tw`w-11 h-11 rounded-2xl bg-emerald-50 border border-emerald-100 items-center justify-center`}>
+                {premium ? <Medal size={20} color="#059669" /> : <Lock size={18} color="#059669" />}
+              </View>
+            </View>
+
+            {premium && result.nearbyRanking ? (
+              <>
+                <View style={tw`rounded-2xl bg-emerald-50 border border-emerald-100 px-4 py-4 mb-4`}>
+                  <Text style={tw`text-[10px] font-bold tracking-widest text-emerald-700 uppercase mb-2`}>Safer than nearby</Text>
+                  <Text style={tw`text-3xl font-black text-emerald-700 mb-1`}>
+                    {result.nearbyRanking.saferThanPercent ?? 0}%
+                  </Text>
+                  <Text style={tw`text-xs text-slate-600`}>
+                    Rank {result.nearbyRanking.localRank} of {result.nearbyRanking.totalCompared} in the sampled nearby postcode set.
+                  </Text>
+                </View>
+
+                {result.nearbyRanking.saferAlternatives.length ? (
+                  <View>
+                    <Text style={tw`text-xs font-black text-slate-500 uppercase tracking-widest mb-3`}>Safer nearby alternatives</Text>
+                    {result.nearbyRanking.saferAlternatives.map((alternative) => (
+                      <View key={alternative.postcode} style={tw`rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 mb-3`}>
+                        <View style={tw`flex-row items-center justify-between mb-1`}>
+                          <Text style={tw`text-base font-black text-slate-900`}>{alternative.postcode}</Text>
+                          <Text style={tw`text-base font-black text-emerald-700`}>{alternative.score}/100</Text>
+                        </View>
+                        <Text style={tw`text-xs text-slate-500 mb-2`}>{alternative.district}</Text>
+                        <Text style={tw`text-xs text-slate-600`}>
+                          {alternative.scoreDelta} points lower than {result.postcodeData.postcode}, with {alternative.totalCrimes} recorded local incidents in the latest month.
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : (
+                  <View style={tw`rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4`}>
+                    <Text style={tw`text-xs text-slate-600`}>
+                      RiskRadar did not find a clearly lower-scoring nearby sampled postcode yet, which usually means this postcode is already among the better results in the immediate local comparison pool.
+                    </Text>
+                  </View>
+                )}
+              </>
+            ) : (
+              <View style={tw`rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4`}>
+                <Text style={tw`text-xs text-slate-600`}>
+                  Unlock Premium to see sampled nearby postcode rank, safer-than percentage, and lower-risk alternatives around {result.postcodeData.postcode}.
+                </Text>
+              </View>
+            )}
+          </View>
 
           <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
             <View style={tw`flex-row items-start justify-between mb-3`}>

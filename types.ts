@@ -117,6 +117,23 @@ export interface PremiumInsight {
   badge: string;
 }
 
+export interface NearbyRankingAlternative {
+  postcode: string;
+  district: string;
+  score: number;
+  totalCrimes: number;
+  scoreDelta: number;
+}
+
+export interface NearbyRankingData {
+  sampledNearbyCount: number;
+  totalCompared: number;
+  localRank: number;
+  saferThanPercent: number | null;
+  summary: string;
+  saferAlternatives: NearbyRankingAlternative[];
+}
+
 export interface HotspotCluster {
   count: number;
   latitude: number;
@@ -163,6 +180,7 @@ export interface PostcodeResult {
   };
   trendData: TrendData;
   premiumInsights: PremiumInsight[];
+  nearbyRanking?: NearbyRankingData;
   hotspotData?: HotspotData;
   newsLink: string | null;
 }

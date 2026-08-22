@@ -40,6 +40,22 @@ const resultFixture = {
     summary: 'Stable.',
   },
   premiumInsights: [],
+  nearbyRanking: {
+    sampledNearbyCount: 4,
+    totalCompared: 5,
+    localRank: 2,
+    saferThanPercent: 75,
+    summary: 'SE10 8EP currently scores safer than 75% of the 4 nearby postcodes sampled for this comparison.',
+    saferAlternatives: [
+      {
+        postcode: 'SE10 8AA',
+        district: 'Lewisham',
+        score: 4,
+        totalCrimes: 41,
+        scoreDelta: 2,
+      },
+    ],
+  },
   newsLink: null,
 } satisfies PostcodeResult;
 

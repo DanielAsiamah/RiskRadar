@@ -3068,6 +3068,76 @@ function buildPremiumInsights({ trendData, areaContext, hotspotSummary }) {
   ];
 }
 
+async function buildNearbyRankingData(location, currentCrimeData) {
+  const nearbyPostcodes = await fetchNearbyPostcodes(location.latitude, location.longitude, 8).catch(() => []);
+  const normalizedCurrent = normalizeQuery(location.postcode);
+  const nearbyPool = nearbyPostcodes
+    .filter((entry) => normalizeQuery(entry.postcode) !== normalizedCurrent)
+    .slice(0, 5);
+
+  const candidates = [];
+
+  for (const entry of nearbyPool) {
+    try {
+      // Keep nearby ranking lookups sequential to reduce upstream bursts.
+      // eslint-disable-next-line no-await-in-loop
+      const resolved = await resolveLocation(entry.postcode);
+      // eslint-disable-next-line no-await-in-loop
+      const crimeData = await fetchCrimeData(resolved.latitude, resolved.longitude);
+      candidates.push({
+        postcode: resolved.postcode,
+        district: resolved.admin_district,
+        score: crimeData.crimeScore,
+        totalCrimes: crimeData.totalCrimes,
+      });
+    } catch {
+      // Ignore one failed nearby sample and keep the rest of the comparison pool.
+    }
+  }
+
+  const currentCandidate = {
+    postcode: location.postcode,
+    district: location.admin_district,
+    score: currentCrimeData.crimeScore,
+    totalCrimes: currentCrimeData.totalCrimes,
+  };
+
+  const comparisonPool = [currentCandidate, ...candidates]
+    .sort((left, right) => left.score - right.score || left.totalCrimes - right.totalCrimes || left.postcode.localeCompare(right.postcode));
+  const localRank = comparisonPool.findIndex((candidate) => candidate.postcode === currentCandidate.postcode) + 1;
+  const nearbyCount = candidates.length;
+  const worseCount = candidates.filter((candidate) => candidate.score > currentCandidate.score).length;
+  const saferThanPercent = nearbyCount ? Math.round((worseCount / nearbyCount) * 100) : null;
+  const saferAlternatives = comparisonPool
+    .filter((candidate) => candidate.postcode !== currentCandidate.postcode && candidate.score < currentCandidate.score)
+    .slice(0, 3)
+    .map((candidate) => ({
+      postcode: candidate.postcode,
+      district: candidate.district,
+      score: candidate.score,
+      totalCrimes: candidate.totalCrimes,
+      scoreDelta: currentCandidate.score - candidate.score,
+    }));
+
+  let summary;
+  if (!nearbyCount) {
+    summary = `RiskRadar could not build a nearby postcode ranking sample around ${location.postcode} right now.`;
+  } else if (saferThanPercent === 0) {
+    summary = `${location.postcode} currently sits among the highest-risk results in this nearby postcode sample, so RiskRadar could not place it safer than any sampled alternative.`;
+  } else {
+    summary = `${location.postcode} currently scores safer than ${saferThanPercent}% of the ${nearbyCount} nearby postcode${nearbyCount === 1 ? '' : 's'} sampled for this comparison.`;
+  }
+
+  return {
+    sampledNearbyCount: nearbyCount,
+    totalCompared: comparisonPool.length,
+    localRank,
+    saferThanPercent,
+    summary,
+    saferAlternatives,
+  };
+}
+
 function buildAiAnalysis({ district, safetyLevel, totalCrimes, topCategories, scoreFactors, areaContext, trendData }) {
   const primaryCategory = humanizeCategory(topCategories[0]?.category || 'reported incidents').toLowerCase();
   const scoreStory = scoreFactors.map((factor) => factor.detail);
@@ -4000,6 +4070,7 @@ async function computeLocationAnalysis(query) {
     categories: crimeData.categories,
     crimes: postcodeCrimes,
   });
+  const nearbyRanking = await buildNearbyRankingData(location, crimeData);
 
   return {
     postcode: location.postcode,
@@ -4030,6 +4101,7 @@ async function computeLocationAnalysis(query) {
       areaContext: `${areaContext} ${hotspotData.summary}`,
       hotspotSummary: hotspotData.summary,
     }),
+    nearbyRanking,
     hotspotData,
     newsLink: `https://news.google.com/search?q=${encodeURIComponent(`${location.admin_district} police OR crime`)}`,
   };
