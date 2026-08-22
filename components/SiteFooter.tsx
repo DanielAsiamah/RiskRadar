@@ -8,6 +8,10 @@ import { membershipColors } from './membershipStyles';
 
 export interface TrustNavigation {
   onOpenFaq(): void;
+  onOpenMethodology(): void;
+  onOpenLimitations(): void;
+  onOpenChangelog(): void;
+  onOpenAbout(): void;
   onOpenPrivacy(): void;
   onOpenAdvertise(): void;
 }
@@ -20,7 +24,7 @@ function openSupport() {
   void Linking.openURL(SUPPORT_URL).catch(() => undefined);
 }
 
-export default function SiteFooter({ onOpenFaq, onOpenPrivacy, onOpenAdvertise }: SiteFooterProps) {
+export default function SiteFooter({ onOpenFaq, onOpenMethodology, onOpenLimitations, onOpenChangelog, onOpenAbout, onOpenPrivacy, onOpenAdvertise }: SiteFooterProps) {
   return (
     <View style={tw`mt-10 pt-7 border-t border-slate-200`} accessibilityLabel="RiskRadar information links">
       <View style={tw`flex-row items-center mb-4`}>
@@ -35,6 +39,10 @@ export default function SiteFooter({ onOpenFaq, onOpenPrivacy, onOpenAdvertise }
 
       <View style={tw`flex-row flex-wrap items-center mb-4`}>
         <FooterLink label="FAQ" onPress={onOpenFaq} />
+        <FooterLink label="Methodology" onPress={onOpenMethodology} />
+        <FooterLink label="Limits" onPress={onOpenLimitations} />
+        <FooterLink label="Changelog" onPress={onOpenChangelog} />
+        <FooterLink label="About" onPress={onOpenAbout} />
         <FooterLink label="Privacy" onPress={onOpenPrivacy} />
         <FooterLink label="Advertise" onPress={onOpenAdvertise} />
         <Pressable

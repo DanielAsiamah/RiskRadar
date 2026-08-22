@@ -1,9 +1,13 @@
 import React from 'react';
 
+import About from './About';
 import Advertise from './Advertise';
 import Account from './Account';
+import Changelog from './Changelog';
+import DataLimitations from './DataLimitations';
 import Faq from './Faq';
 import Landing from './Landing';
+import Methodology from './Methodology';
 import PremiumDashboard from './PremiumDashboard';
 import Pricing from './Pricing';
 import Privacy from './Privacy';
@@ -11,6 +15,10 @@ import SiteFooter, { type TrustNavigation } from './SiteFooter';
 
 const trustNavigation: TrustNavigation = {
   onOpenFaq: () => undefined,
+  onOpenMethodology: () => undefined,
+  onOpenLimitations: () => undefined,
+  onOpenChangelog: () => undefined,
+  onOpenAbout: () => undefined,
   onOpenPrivacy: () => undefined,
   onOpenAdvertise: () => undefined,
 };
@@ -25,6 +33,22 @@ export const privacyFixture = React.createElement(Privacy, {
 });
 
 export const advertiseFixture = React.createElement(Advertise, {
+  onBack: () => undefined,
+});
+
+export const methodologyFixture = React.createElement(Methodology, {
+  onBack: () => undefined,
+});
+
+export const dataLimitationsFixture = React.createElement(DataLimitations, {
+  onBack: () => undefined,
+});
+
+export const changelogFixture = React.createElement(Changelog, {
+  onBack: () => undefined,
+});
+
+export const aboutFixture = React.createElement(About, {
   onBack: () => undefined,
 });
 

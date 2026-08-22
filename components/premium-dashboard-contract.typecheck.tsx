@@ -9,6 +9,10 @@ import type { TrustNavigation } from './SiteFooter';
 
 const trustNavigation: TrustNavigation = {
   onOpenFaq: () => undefined,
+  onOpenMethodology: () => undefined,
+  onOpenLimitations: () => undefined,
+  onOpenChangelog: () => undefined,
+  onOpenAbout: () => undefined,
   onOpenPrivacy: () => undefined,
   onOpenAdvertise: () => undefined,
 };

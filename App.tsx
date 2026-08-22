@@ -25,7 +25,11 @@ import RouteGuard from './components/RouteGuard';
 import SafetySession from './components/SafetySession';
 import LiveRadar from './components/LiveRadar';
 import Advertise from './components/Advertise';
+import About from './components/About';
+import Changelog from './components/Changelog';
+import DataLimitations from './components/DataLimitations';
 import Faq from './components/Faq';
+import Methodology from './components/Methodology';
 import Privacy from './components/Privacy';
 import type { TrustNavigation } from './components/SiteFooter';
 import { apiRequest } from './api/client';
@@ -86,10 +90,14 @@ type AppState =
   | 'LIVE_RADAR'
   | 'SAFETY_SESSION'
   | 'FAQ'
+  | 'METHODOLOGY'
+  | 'LIMITATIONS'
+  | 'CHANGELOG'
+  | 'ABOUT'
   | 'PRIVACY'
   | 'ADVERTISE';
 
-type TrustAppState = Extract<AppState, 'FAQ' | 'PRIVACY' | 'ADVERTISE'>;
+type TrustAppState = Extract<AppState, 'FAQ' | 'METHODOLOGY' | 'LIMITATIONS' | 'CHANGELOG' | 'ABOUT' | 'PRIVACY' | 'ADVERTISE'>;
 
 const DAILY_SEARCH_STORAGE_KEY = 'riskradar_daily_searches';
 const LEGACY_SEARCH_COUNT_KEY = 'riskradar_search_count';
@@ -1229,6 +1237,10 @@ export default function App() {
 
   const trustNavigation: TrustNavigation = {
     onOpenFaq: () => openTrustScreen('FAQ'),
+    onOpenMethodology: () => openTrustScreen('METHODOLOGY'),
+    onOpenLimitations: () => openTrustScreen('LIMITATIONS'),
+    onOpenChangelog: () => openTrustScreen('CHANGELOG'),
+    onOpenAbout: () => openTrustScreen('ABOUT'),
     onOpenPrivacy: () => openTrustScreen('PRIVACY'),
     onOpenAdvertise: () => openTrustScreen('ADVERTISE'),
   };
@@ -1281,6 +1293,10 @@ export default function App() {
             {...trustNavigation}
           />
         )}
+        {appState === 'METHODOLOGY' && <Methodology onBack={closeTrustScreen} />}
+        {appState === 'LIMITATIONS' && <DataLimitations onBack={closeTrustScreen} />}
+        {appState === 'CHANGELOG' && <Changelog onBack={closeTrustScreen} />}
+        {appState === 'ABOUT' && <About onBack={closeTrustScreen} />}
         {appState === 'PRIVACY' && <Privacy onBack={closeTrustScreen} />}
         {appState === 'ADVERTISE' && <Advertise onBack={closeTrustScreen} />}
 
