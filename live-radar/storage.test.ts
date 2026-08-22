@@ -6,6 +6,7 @@ import {
   createDefaultLiveRadarStore,
   parseLiveRadarStore,
   serializeLiveRadarStore,
+  withLiveRadarPermissions,
 } from './storage.ts';
 import type { LiveRadarAlertEvent } from './types.ts';
 
@@ -75,4 +76,17 @@ test('preserves the newest alert first in history order', () => {
 
   assert.equal(withHistory.history[0]?.id, 'newer');
   assert.equal(withHistory.history[1]?.id, 'older');
+});
+
+test('keeps a freshly granted permission snapshot in the store used by the next scan', () => {
+  const store = createDefaultLiveRadarStore();
+  const updated = withLiveRadarPermissions(store, {
+    foreground: 'granted',
+    background: 'unsupported',
+    notifications: 'unsupported',
+  });
+
+  assert.equal(updated.permissions.foreground, 'granted');
+  assert.deepEqual(updated.settings, store.settings);
+  assert.notEqual(updated, store);
 });

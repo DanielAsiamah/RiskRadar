@@ -20,11 +20,17 @@ let liveRadarTaskHandler: LiveRadarTaskHandler | null = null;
 
 if (!TaskManager.isTaskDefined(LIVE_RADAR_TASK_NAME)) {
   TaskManager.defineTask(LIVE_RADAR_TASK_NAME, async ({ data, error }) => {
-    if (!liveRadarTaskHandler) return;
-    await liveRadarTaskHandler({
+    const input = {
       data: (data as LiveRadarTaskPayload | null) ?? null,
       error: (error as Error | null) ?? null,
-    });
+    };
+    if (liveRadarTaskHandler) {
+      await liveRadarTaskHandler(input);
+      return;
+    }
+
+    const { processHeadlessLiveRadarTask } = await import('./background-worker.ts');
+    await processHeadlessLiveRadarTask(input);
   });
 }
 

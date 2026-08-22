@@ -5,6 +5,8 @@ import type {
   LiveRadarStore,
 } from './types.ts';
 
+export const LIVE_RADAR_STORAGE_KEY = 'riskradar_live_radar';
+
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -135,6 +137,16 @@ export function parseLiveRadarStore(raw: string | null): LiveRadarStore {
 
 export function serializeLiveRadarStore(store: LiveRadarStore): string {
   return JSON.stringify(store);
+}
+
+export function withLiveRadarPermissions(
+  store: LiveRadarStore,
+  permissions: LiveRadarPermissionSnapshot,
+): LiveRadarStore {
+  return {
+    ...store,
+    permissions: { ...permissions },
+  };
 }
 
 export function appendAlertHistory(

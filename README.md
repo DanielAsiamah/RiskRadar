@@ -57,8 +57,9 @@ The backend listens on `http://0.0.0.0:3001`. Set `EXPO_PUBLIC_API_BASE_URL` whe
 
 Live Radar notes:
 
-- Web uses a keep-open Journey Radar flow and does not promise background monitoring.
+- Web uses a free keep-open Journey Radar flow, works without Supabase, and does not promise background monitoring after the page closes or reloads.
 - Native background Live Radar requires a development build or standalone app because Expo Go does not expose the full background-location path needed here.
+- Native background wakes are processed from local device state even when the Live Radar screen is not mounted; turning Live Radar off prevents further scans.
 - The public explorer still works when Supabase or Stripe are not configured.
 
 For a production-style single-service run, export the web app and start the API, then open `http://localhost:3001`:

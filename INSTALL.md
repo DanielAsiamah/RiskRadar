@@ -54,9 +54,10 @@ Then open `http://localhost:3001`.
 ### Live Radar local notes
 
 - `Scan My Current Location Now` works with foreground location permission.
-- `Turn On Live Radar` on the web starts a keep-open Journey Radar session. Keep the page open to monitor your current area.
-- Native background Live Radar requires foreground location, background location, and notification permission.
+- `Start Journey Radar` on the web is free and starts a keep-open session without Supabase. Keep the page open to monitor your current area; closing or reloading it stops the session.
+- Native background Live Radar is a Premium feature and requires foreground and background location permission. Notification permission is needed for device banners, but denied notifications do not block local status and alert-history updates.
 - Native background Live Radar also requires a development build or standalone app. Expo Go is not enough for this path.
+- Native background scans must be able to reach the RiskRadar backend. Set `EXPO_PUBLIC_API_BASE_URL` to the deployed API URL, or to the computer's LAN URL while testing on a phone.
 - RiskRadar still runs without Supabase or Stripe configured. Public search, maps, and local intelligence remain available while membership features stay in a controlled fallback state.
 - Live Radar is informational area intelligence, not an emergency service or guaranteed-safety system.
 

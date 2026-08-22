@@ -58,7 +58,7 @@ export const FAQ_ITEMS = [
     id: 'live-radar-web-vs-native',
     category: 'premium-and-billing',
     question: 'How does Live Radar differ on the web versus on a phone app?',
-    answer: 'On the web, Live Radar works as a keep-open Journey Radar session and refreshes only while the page stays open. On a native build, Premium members can enable background monitoring on the device after granting foreground location, background location, and notification permissions.',
+    answer: 'On the web, the free Journey Radar session refreshes only while the page stays open and works without a Premium account. On a native build, Premium members can enable background monitoring after granting foreground and background location permission. Notification permission adds device banners; local status and history still update if banners are denied.',
   },
   {
     id: 'live-radar-pro-only',
@@ -82,13 +82,13 @@ export const FAQ_ITEMS = [
     id: 'current-location',
     category: 'privacy-and-safety',
     question: 'Does the website continuously track my location?',
-    answer: 'No. On the website, Use my current location requests permission for a one-time nearby-area lookup. RiskRadar does not claim background GPS monitoring in Safari or other browsers. Any future native Live Radar mode will require separate foreground, background-location, and notification permissions.',
+    answer: 'No hidden tracking occurs. A normal Use my current location search is a one-time lookup. If you explicitly start Journey Radar, the website refreshes your current area only while that page stays open; closing or reloading the page stops the session. Native background Live Radar uses separate foreground and background-location permissions.',
   },
   {
     id: 'live-radar-permission-denied',
     category: 'privacy-and-safety',
     question: 'What happens if I deny Live Radar permissions?',
-    answer: 'RiskRadar falls back safely. Without foreground location, it cannot scan your current area. Without background location or notifications, native Live Radar cannot keep monitoring in the background or surface local alerts, but normal postcode search and other public tools still work.',
+    answer: 'RiskRadar falls back safely. Without foreground location, it cannot scan your current area. Without background location, native Live Radar stays off. If notifications are denied, monitoring can still update local status and history but cannot show device banners. Normal postcode search and other public tools still work.',
   },
   {
     id: 'safety-limit',

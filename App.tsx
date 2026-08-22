@@ -42,9 +42,18 @@ import { useAuth } from './auth/useAuth';
 import {
   appendAlertHistory,
   createDefaultLiveRadarStore,
+  LIVE_RADAR_STORAGE_KEY,
   parseLiveRadarStore,
   serializeLiveRadarStore,
+  withLiveRadarPermissions,
 } from './live-radar/storage.ts';
+import { getLiveRadarAccess, hasRequiredLiveRadarPermissions } from './live-radar/access.ts';
+import {
+  disableLiveRadarStore,
+  restoreLiveRadarStoreForPlatform,
+  shouldStopLiveRadarForEntitlement,
+} from './live-radar/session-state.ts';
+import { readCurrentLiveRadarLocation } from './live-radar/location-reader.ts';
 import { readLiveRadarPermissions, requestBackgroundPermission, requestForegroundPermission, requestNotificationPermission } from './live-radar/permissions.ts';
 import type { LiveRadarPermissionSnapshot, LiveRadarStore } from './live-radar/types.ts';
 import { scanLiveRadarCoordinates } from './live-radar/client.ts';
@@ -52,6 +61,15 @@ import { evaluateLiveRadarTransition } from './live-radar/evaluator.ts';
 import { createWebJourneyRadarSession, type WebJourneyRadarSession } from './live-radar/web-session.ts';
 import { ensureNativeLiveRadarTaskRegistered, setLiveRadarTaskHandler, startNativeLiveRadarTask, stopNativeLiveRadarTask } from './live-radar/native-task.ts';
 import { scheduleLocalRiskNotification } from './live-radar/notifications.ts';
+import {
+  defaultLiveRadarBackgroundDependencies,
+  processLiveRadarBackgroundUpdate,
+} from './live-radar/background-processor.ts';
+import {
+  createLiveRadarOperationEpoch,
+  persistLiveRadarOperation,
+  runLiveRadarExclusive,
+} from './live-radar/operation-lock.ts';
 import type { DashboardView } from './membership/dashboard-types';
 import {
   BILLING_CONFIRMATION_WINDOW_MS,
@@ -105,8 +123,6 @@ const RECENT_SEARCHES_STORAGE_KEY = 'riskradar_recent_searches';
 const PENDING_PREMIUM_STORAGE_KEY = 'riskradar_pending_premium_destination';
 const PENDING_WATCHED_POSTCODE_STORAGE_KEY = 'riskradar_pending_watch_postcode';
 const ROUTE_GUARD_USAGE_STORAGE_KEY = 'riskradar_route_guard_usage';
-const LIVE_RADAR_STORAGE_KEY = 'riskradar_live_radar';
-
 function currentRouteGuardMonth() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
@@ -190,6 +206,8 @@ export default function App() {
   const [liveRadarOnboardingVisible, setLiveRadarOnboardingVisible] = useState(false);
   const searchRequestId = useRef(0);
   const liveRadarStoreRef = useRef<LiveRadarStore>(createDefaultLiveRadarStore());
+  const liveRadarOperationEpochRef = useRef(createLiveRadarOperationEpoch());
+  const liveRadarShutdownRef = useRef<Promise<void>>(Promise.resolve());
   const webJourneyRadarSessionRef = useRef<WebJourneyRadarSession | null>(null);
   const accountRequests = useRef(createLatestRequestCoordinator());
   const dashboardRequests = useRef(createLatestRequestCoordinator());
@@ -211,7 +229,10 @@ export default function App() {
         ]);
         setDailySearchUsage(parseDailySearchUsage(savedUsage));
         setRouteScansUsed(parseRouteGuardUsage(savedRouteGuardUsage));
-        const parsedLiveRadarStore = parseLiveRadarStore(savedLiveRadarStore);
+        const parsedLiveRadarStore = restoreLiveRadarStoreForPlatform(
+          parseLiveRadarStore(savedLiveRadarStore),
+          Platform.OS === 'web' ? 'web' : 'native',
+        );
         setLiveRadarStore(parsedLiveRadarStore);
         setLiveRadarPermissions(parsedLiveRadarStore.permissions);
         setLiveRadarWarning(parsedLiveRadarStore.lastWarning);
@@ -250,13 +271,33 @@ export default function App() {
     void refreshPermissions();
   }, []);
 
-  const persistLiveRadarStore = async (nextStore: LiveRadarStore) => {
+  const applyLiveRadarStore = (nextStore: LiveRadarStore) => {
     liveRadarStoreRef.current = nextStore;
     setLiveRadarStore(nextStore);
     setLiveRadarPermissions(nextStore.permissions);
     setLiveRadarWarning(nextStore.lastWarning);
+  };
+
+  const writeLiveRadarStore = async (nextStore: LiveRadarStore) => {
     await AsyncStorage.setItem(LIVE_RADAR_STORAGE_KEY, serializeLiveRadarStore(nextStore));
   };
+
+  const persistLiveRadarStore = async (nextStore: LiveRadarStore) => {
+    applyLiveRadarStore(nextStore);
+    await writeLiveRadarStore(nextStore);
+  };
+
+  const persistLiveRadarStoreForOperation = (
+    nextStore: LiveRadarStore,
+    operationToken: number,
+  ) => persistLiveRadarOperation({
+    epoch: liveRadarOperationEpochRef.current,
+    token: operationToken,
+    value: nextStore,
+    apply: applyLiveRadarStore,
+    write: writeLiveRadarStore,
+    getCurrent: () => liveRadarStoreRef.current,
+  });
 
   useEffect(() => {
     liveRadarStoreRef.current = liveRadarStore;
@@ -976,6 +1017,11 @@ export default function App() {
 
   const handleSignOut = async () => {
     try {
+      await disableLiveRadarMonitoring('Live Radar was turned off because you signed out.');
+    } catch {
+      setLiveRadarWarning('RiskRadar could not fully confirm Live Radar shutdown. Review device location settings.');
+    }
+    try {
       await signOut();
     } finally {
       accountRequests.current.cancel();
@@ -1041,46 +1087,62 @@ export default function App() {
 
   const handleOpenLiveRadar = () => {
     setLiveRadarWarning(null);
+    const access = getLiveRadarAccess({
+      platform: Platform.OS === 'web' ? 'web' : 'native',
+      premium: account?.premium === true,
+    });
+    if (
+      Platform.OS !== 'web'
+      && access.canStart
+      && !hasRequiredLiveRadarPermissions(access, liveRadarPermissions)
+    ) {
+      setLiveRadarOnboardingVisible(true);
+    }
     setAppState('LIVE_RADAR');
   };
 
   const performLiveRadarScan = async (
     source: 'manual' | 'background' | 'web-session',
     locationOverride?: { latitude: number; longitude: number; accuracyMetres: number },
-  ) => {
-    const currentStore = liveRadarStoreRef.current;
+    operationToken = liveRadarOperationEpochRef.current.capture(),
+  ) => runLiveRadarExclusive(async () => {
+    const operationEpoch = liveRadarOperationEpochRef.current;
+    if (!operationEpoch.isCurrent(operationToken)) return;
+
+    let currentStore = liveRadarStoreRef.current;
     const checkedAtIso = new Date().toISOString();
 
-    if (source === 'manual' && liveRadarPermissions.foreground !== 'granted') {
+    if (source === 'manual' && currentStore.permissions.foreground !== 'granted') {
       const permissions = await requestForegroundPermission();
-      setLiveRadarPermissions(permissions);
+      if (!operationEpoch.isCurrent(operationToken)) return;
+      currentStore = withLiveRadarPermissions(liveRadarStoreRef.current, permissions);
+      if (!await persistLiveRadarStoreForOperation(currentStore, operationToken)) return;
       if (permissions.foreground !== 'granted') {
         const deniedStore = {
-          ...liveRadarStoreRef.current,
-          permissions,
+          ...currentStore,
           lastWarning: 'Foreground location permission is required to scan your current area.',
         };
-        await persistLiveRadarStore(deniedStore);
+        await persistLiveRadarStoreForOperation(deniedStore, operationToken);
         return;
       }
     }
 
-    const location = locationOverride ?? await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Balanced,
-    }).then((result) => ({
-      latitude: result.coords.latitude,
-      longitude: result.coords.longitude,
-      accuracyMetres: result.coords.accuracy ?? 999,
-    }));
+    const locationResult = locationOverride
+      ? { ok: true as const, location: locationOverride }
+      : await readCurrentLiveRadarLocation(() => Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        }));
+    if (!operationEpoch.isCurrent(operationToken)) return;
 
-    if (!location) {
+    if (!locationResult.ok) {
       const nextStore: LiveRadarStore = {
         ...liveRadarStoreRef.current,
-        lastWarning: 'Live Radar could not determine your current location.',
+        lastWarning: locationResult.warning,
       };
-      await persistLiveRadarStore(nextStore);
+      await persistLiveRadarStoreForOperation(nextStore, operationToken);
       return;
     }
+    const location = locationResult.location;
 
     const scanResult = await scanLiveRadarCoordinates({
       latitude: location.latitude,
@@ -1089,13 +1151,14 @@ export default function App() {
       checkedAtIso,
       source,
     });
+    if (!operationEpoch.isCurrent(operationToken)) return;
 
     if (!scanResult.ok) {
       const failedStore: LiveRadarStore = {
         ...liveRadarStoreRef.current,
         lastWarning: scanResult.warning,
       };
-      await persistLiveRadarStore(failedStore);
+      await persistLiveRadarStoreForOperation(failedStore, operationToken);
       return;
     }
 
@@ -1121,6 +1184,13 @@ export default function App() {
         trigger: evaluation.trigger,
         explanation: evaluation.explanation,
       });
+      if (!operationEpoch.isCurrent(operationToken)) return;
+      if (!notification.delivered) {
+        nextStore = {
+          ...nextStore,
+          lastWarning: 'Alert saved locally, but a device banner could not be shown. Review notification permission.',
+        };
+      }
 
       nextStore = appendAlertHistory(nextStore, {
         id: `alert_${Date.now()}`,
@@ -1141,94 +1211,200 @@ export default function App() {
       };
     }
 
-    await persistLiveRadarStore(nextStore);
+    await persistLiveRadarStoreForOperation(nextStore, operationToken);
+  });
+
+  const handleLiveRadarRequestForeground = () => {
+    const operationToken = liveRadarOperationEpochRef.current.capture();
+    return runLiveRadarExclusive(async () => {
+      const permissions = await requestForegroundPermission();
+      if (!liveRadarOperationEpochRef.current.isCurrent(operationToken)) return;
+      const nextStore = withLiveRadarPermissions(liveRadarStoreRef.current, permissions);
+      await persistLiveRadarStoreForOperation(nextStore, operationToken);
+    });
   };
 
-  const handleLiveRadarRequestForeground = async () => {
-    const permissions = await requestForegroundPermission();
-    const nextStore = { ...liveRadarStore, permissions };
-    await persistLiveRadarStore(nextStore);
+  const handleLiveRadarRequestBackground = () => {
+    const operationToken = liveRadarOperationEpochRef.current.capture();
+    return runLiveRadarExclusive(async () => {
+      const permissions = await requestBackgroundPermission();
+      if (!liveRadarOperationEpochRef.current.isCurrent(operationToken)) return;
+      const nextStore = withLiveRadarPermissions(liveRadarStoreRef.current, permissions);
+      await persistLiveRadarStoreForOperation(nextStore, operationToken);
+    });
   };
 
-  const handleLiveRadarRequestBackground = async () => {
-    const permissions = await requestBackgroundPermission();
-    const nextStore = { ...liveRadarStore, permissions };
-    await persistLiveRadarStore(nextStore);
-  };
-
-  const handleLiveRadarRequestNotifications = async () => {
-    const permissions = await requestNotificationPermission();
-    const nextStore = { ...liveRadarStore, permissions };
-    await persistLiveRadarStore(nextStore);
+  const handleLiveRadarRequestNotifications = () => {
+    const operationToken = liveRadarOperationEpochRef.current.capture();
+    return runLiveRadarExclusive(async () => {
+      const permissions = await requestNotificationPermission();
+      if (!liveRadarOperationEpochRef.current.isCurrent(operationToken)) return;
+      const nextStore = withLiveRadarPermissions(liveRadarStoreRef.current, permissions);
+      await persistLiveRadarStoreForOperation(nextStore, operationToken);
+    });
   };
 
   const handleLiveRadarStart = async () => {
     setLiveRadarBusy(true);
-    if (!account?.premium) {
-      setPricingError(null);
-      setAppState('PRICING');
-      setLiveRadarBusy(false);
-      return;
-    }
+    const operationToken = liveRadarOperationEpochRef.current.advance();
+    let monitoringStarted = false;
 
-    try {
-      if (liveRadarPermissions.foreground !== 'granted' || (Platform.OS !== 'web' && liveRadarPermissions.background !== 'granted')) {
-        setLiveRadarOnboardingVisible(true);
-        setLiveRadarWarning('Grant the required permissions before turning on Live Radar.');
-        return;
-      }
-
+    const stopStartedMonitoring = async () => {
       if (Platform.OS === 'web') {
         webJourneyRadarSessionRef.current?.stop();
-        webJourneyRadarSessionRef.current = createWebJourneyRadarSession(() => performLiveRadarScan('web-session'));
-      } else {
-        const taskState = await ensureNativeLiveRadarTaskRegistered();
-        if (!taskState.available) {
-          setLiveRadarWarning('Background Live Radar requires a development build or standalone app on this platform.');
-          return;
+        webJourneyRadarSessionRef.current = null;
+      } else if (monitoringStarted) {
+        try {
+          await stopNativeLiveRadarTask();
+        } catch {
+          // The persisted disabled state prevents late task callbacks from scanning.
         }
-        await startNativeLiveRadarTask();
       }
+    };
 
-      const nextStore: LiveRadarStore = {
-        ...liveRadarStoreRef.current,
-        settings: {
-          ...liveRadarStoreRef.current.settings,
-          enabled: true,
-          mode: Platform.OS === 'web' ? 'web-session' : 'native-background',
-          onboardingCompleted: true,
-        },
-        lastWarning: Platform.OS === 'web'
-          ? 'Journey Radar is active. Keep this page open to monitor your current area.'
-          : 'Live Radar is active on this device.',
-      };
-      setLiveRadarOnboardingVisible(false);
-      await persistLiveRadarStore(nextStore);
-      await performLiveRadarScan(Platform.OS === 'web' ? 'web-session' : 'manual');
+    try {
+      const started = await runLiveRadarExclusive(async () => {
+        const operationEpoch = liveRadarOperationEpochRef.current;
+        if (!operationEpoch.isCurrent(operationToken)) return false;
+
+        await liveRadarShutdownRef.current;
+        if (!operationEpoch.isCurrent(operationToken)) return false;
+
+        const access = getLiveRadarAccess({
+          platform: Platform.OS === 'web' ? 'web' : 'native',
+          premium: account?.premium === true,
+        });
+        if (!access.canStart) {
+          setPricingError(null);
+          setAppState('PRICING');
+          return false;
+        }
+
+        const currentStore = liveRadarStoreRef.current;
+        const missingForeground = currentStore.permissions.foreground !== 'granted';
+        const missingBackground = access.requiresBackgroundPermission
+          && currentStore.permissions.background !== 'granted';
+        if (missingForeground || missingBackground) {
+          setLiveRadarOnboardingVisible(true);
+          setLiveRadarWarning('Grant the required permissions before turning on Live Radar.');
+          return false;
+        }
+
+        if (Platform.OS === 'web') {
+          webJourneyRadarSessionRef.current?.stop();
+          webJourneyRadarSessionRef.current = createWebJourneyRadarSession(() => performLiveRadarScan('web-session'));
+          monitoringStarted = true;
+        } else {
+          const taskState = await ensureNativeLiveRadarTaskRegistered();
+          if (!operationEpoch.isCurrent(operationToken)) return false;
+          if (!taskState.available) {
+            setLiveRadarWarning('Background Live Radar requires a development build or standalone app on this platform.');
+            return false;
+          }
+          await startNativeLiveRadarTask();
+          monitoringStarted = true;
+          if (!operationEpoch.isCurrent(operationToken)) {
+            await stopStartedMonitoring();
+            return false;
+          }
+        }
+
+        const nextStore: LiveRadarStore = {
+          ...liveRadarStoreRef.current,
+          settings: {
+            ...liveRadarStoreRef.current.settings,
+            enabled: true,
+            mode: Platform.OS === 'web' ? 'web-session' : 'native-background',
+            onboardingCompleted: true,
+          },
+          lastWarning: Platform.OS === 'web'
+            ? 'Journey Radar is active. Keep this page open to monitor your current area.'
+            : 'Live Radar is active on this device.',
+        };
+        if (!await persistLiveRadarStoreForOperation(nextStore, operationToken)) {
+          await stopStartedMonitoring();
+          return false;
+        }
+        setLiveRadarOnboardingVisible(false);
+        return true;
+      });
+
+      if (started) {
+        await performLiveRadarScan(
+          Platform.OS === 'web' ? 'web-session' : 'manual',
+          undefined,
+          operationToken,
+        );
+      }
+    } catch {
+      await stopStartedMonitoring();
+      if (!liveRadarOperationEpochRef.current.isCurrent(operationToken)) return;
+
+      const failureWarning = 'Live Radar could not start. Check device permissions and try again.';
+      try {
+        await persistLiveRadarStoreForOperation(
+          disableLiveRadarStore(liveRadarStoreRef.current, failureWarning),
+          operationToken,
+        );
+      } catch {
+        setLiveRadarWarning(failureWarning);
+      }
     } finally {
       setLiveRadarBusy(false);
     }
   };
 
+  const disableLiveRadarMonitoring = async (warning: string | null = null) => {
+    liveRadarOperationEpochRef.current.advance();
+    webJourneyRadarSessionRef.current?.stop();
+    webJourneyRadarSessionRef.current = null;
+
+    const disabledStore = disableLiveRadarStore(liveRadarStoreRef.current, warning);
+    applyLiveRadarStore(disabledStore);
+
+    const shutdown = (async () => {
+      let persistenceFailed = false;
+      try {
+        await writeLiveRadarStore(disabledStore);
+      } catch {
+        persistenceFailed = true;
+      }
+
+      let taskStopFailed = false;
+      if (Platform.OS !== 'web') {
+        try {
+          await stopNativeLiveRadarTask();
+        } catch {
+          taskStopFailed = true;
+        }
+      }
+
+      if (persistenceFailed || taskStopFailed) {
+        const failureWarning = 'Live Radar is disabled locally, but the device could not fully confirm the change. Review location settings before relying on it.';
+        applyLiveRadarStore({ ...disabledStore, lastWarning: failureWarning });
+      }
+    })();
+
+    liveRadarShutdownRef.current = shutdown;
+    await shutdown;
+  };
+
+  useEffect(() => {
+    const entitlementResolved = !supabaseConfigured || account !== null;
+    if (!shouldStopLiveRadarForEntitlement({
+      platform: Platform.OS === 'web' ? 'web' : 'native',
+      store: liveRadarStore,
+      entitlementResolved,
+      premium: account?.premium === true,
+    })) return;
+
+    void disableLiveRadarMonitoring('Live Radar was turned off because Premium access is no longer active.');
+  }, [account?.premium, liveRadarStore.settings.enabled, liveRadarStore.settings.mode]);
+
   const handleLiveRadarStop = async () => {
     setLiveRadarBusy(true);
     try {
-      webJourneyRadarSessionRef.current?.stop();
-      webJourneyRadarSessionRef.current = null;
-      if (Platform.OS !== 'web') {
-        await stopNativeLiveRadarTask();
-      }
-
-      const nextStore: LiveRadarStore = {
-        ...liveRadarStoreRef.current,
-        settings: {
-          ...liveRadarStoreRef.current.settings,
-          enabled: false,
-        },
-        lastWarning: null,
-      };
-      await persistLiveRadarStore(nextStore);
-      setLiveRadarWarning(null);
+      await disableLiveRadarMonitoring();
     } finally {
       setLiveRadarBusy(false);
     }
@@ -1243,63 +1419,64 @@ export default function App() {
     }
   };
 
-  const handleToggleReducedAlerts = async () => {
-    const nextStore: LiveRadarStore = {
-      ...liveRadarStore,
-      settings: {
-        ...liveRadarStore.settings,
-        alertsReduced: !liveRadarStore.settings.alertsReduced,
-      },
-    };
-    await persistLiveRadarStore(nextStore);
+  const handleToggleReducedAlerts = () => {
+    const operationToken = liveRadarOperationEpochRef.current.capture();
+    return runLiveRadarExclusive(async () => {
+      if (!liveRadarOperationEpochRef.current.isCurrent(operationToken)) return;
+      const currentStore = liveRadarStoreRef.current;
+      const nextStore: LiveRadarStore = {
+        ...currentStore,
+        settings: {
+          ...currentStore.settings,
+          alertsReduced: !currentStore.settings.alertsReduced,
+        },
+      };
+      await persistLiveRadarStoreForOperation(nextStore, operationToken);
+    });
   };
 
-  const handleMuteLiveRadarPostcode = async () => {
-    const postcode = liveRadarStore.currentReading?.postcode;
-    if (!postcode) {
-      setLiveRadarWarning('No Live Radar postcode is available to mute yet.');
-      return;
-    }
-    const mutedPostcodes = liveRadarStore.settings.mutedPostcodes.includes(postcode)
-      ? liveRadarStore.settings.mutedPostcodes.filter((value) => value !== postcode)
-      : [...liveRadarStore.settings.mutedPostcodes, postcode];
-    const nextStore: LiveRadarStore = {
-      ...liveRadarStore,
-      settings: {
-        ...liveRadarStore.settings,
-        mutedPostcodes,
-      },
-      lastWarning: mutedPostcodes.includes(postcode)
-        ? `${postcode} is muted in Live Radar.`
-        : `${postcode} was removed from muted Live Radar postcodes.`,
-    };
-    await persistLiveRadarStore(nextStore);
+  const handleMuteLiveRadarPostcode = () => {
+    const operationToken = liveRadarOperationEpochRef.current.capture();
+    return runLiveRadarExclusive(async () => {
+      if (!liveRadarOperationEpochRef.current.isCurrent(operationToken)) return;
+      const currentStore = liveRadarStoreRef.current;
+      const postcode = currentStore.currentReading?.postcode;
+      if (!postcode) {
+        setLiveRadarWarning('No Live Radar postcode is available to mute yet.');
+        return;
+      }
+      const mutedPostcodes = currentStore.settings.mutedPostcodes.includes(postcode)
+        ? currentStore.settings.mutedPostcodes.filter((value) => value !== postcode)
+        : [...currentStore.settings.mutedPostcodes, postcode];
+      const nextStore: LiveRadarStore = {
+        ...currentStore,
+        settings: {
+          ...currentStore.settings,
+          mutedPostcodes,
+        },
+        lastWarning: mutedPostcodes.includes(postcode)
+          ? `${postcode} is muted in Live Radar.`
+          : `${postcode} was removed from muted Live Radar postcodes.`,
+      };
+      await persistLiveRadarStoreForOperation(nextStore, operationToken);
+    });
   };
 
   useEffect(() => {
     setLiveRadarTaskHandler(async ({ data, error }) => {
-      if (error) {
-        const nextStore: LiveRadarStore = {
-          ...liveRadarStoreRef.current,
-          lastWarning: error.message || 'Live Radar could not process a background update.',
-        };
-        await persistLiveRadarStore(nextStore);
-        return;
-      }
-
-      const latestLocation = data?.locations?.[data.locations.length - 1];
-      const latitude = latestLocation?.coords?.latitude;
-      const longitude = latestLocation?.coords?.longitude;
-
-      if (typeof latitude !== 'number' || typeof longitude !== 'number') {
-        return;
-      }
-
-      await performLiveRadarScan('background', {
-        latitude,
-        longitude,
-        accuracyMetres: latestLocation?.coords?.accuracy ?? 999,
-      });
+      const operationToken = liveRadarOperationEpochRef.current.capture();
+      await runLiveRadarExclusive(() => processLiveRadarBackgroundUpdate(
+        { data, error },
+        {
+          ...defaultLiveRadarBackgroundDependencies,
+          loadStore: async () => liveRadarStoreRef.current,
+          saveStore: async (nextStore) => {
+            await persistLiveRadarStoreForOperation(nextStore, operationToken);
+          },
+          nowIso: () => new Date().toISOString(),
+          createAlertId: () => `alert_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        },
+      ));
     });
 
     return () => {

@@ -8,6 +8,8 @@ import type {
   LiveRadarPermissionSnapshot,
   LiveRadarReading,
 } from '../live-radar/types.ts';
+import { getLiveRadarAccess, hasRequiredLiveRadarPermissions } from '../live-radar/access.ts';
+import { findCurrentLiveRadarAlert, formatLiveRadarDataMonth } from '../live-radar/presentation.ts';
 import { membershipColors, membershipStyles } from './membershipStyles';
 
 export interface LiveRadarProps {
@@ -74,8 +76,14 @@ export default function LiveRadar({
   onToggleReducedAlerts,
   onMutePostcode,
 }: LiveRadarProps) {
+  const isWeb = Platform.OS === 'web';
+  const access = getLiveRadarAccess({ platform: isWeb ? 'web' : 'native', premium });
   const badge = currentReading ? RISK_COLORS[currentReading.riskLevel] : null;
-  const monitoringCopy = Platform.OS === 'web'
+  const currentAlert = findCurrentLiveRadarAlert(currentReading, history);
+  const dataMonth = formatLiveRadarDataMonth(currentReading?.dataMonth ?? null);
+  const hasRequiredPermissions = hasRequiredLiveRadarPermissions(access, permissions);
+  const canActivate = access.canStart && (isWeb || hasRequiredPermissions);
+  const monitoringCopy = isWeb
     ? 'Keep this page open to monitor your current area.'
     : 'Live Radar can watch for higher-risk area changes on this device.';
 
@@ -87,11 +95,13 @@ export default function LiveRadar({
             <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mb-3`}>LIVE RADAR SETUP</Text>
             <Text style={tw`text-2xl font-black text-slate-950 mb-3`}>Enable the permissions Live Radar needs.</Text>
             <Text style={tw`text-sm text-slate-500 leading-6 mb-5`}>
-              Foreground location scans your current area, background location keeps Live Radar running on native devices, and notifications surface alerts on this device.
+              {isWeb
+                ? 'Foreground location scans your current area. Journey Radar refreshes only while this page remains open.'
+                : 'Foreground location scans your current area, background location keeps Live Radar running on native devices, and notifications surface alerts on this device.'}
             </Text>
             <PermissionRow title="Foreground location" state={permissions.foreground} onPress={() => void onRequestForeground()} />
-            <PermissionRow title="Background location" state={permissions.background} onPress={() => void onRequestBackground()} />
-            <PermissionRow title="Notifications" state={permissions.notifications} onPress={() => void onRequestNotifications()} />
+            {!isWeb ? <PermissionRow title="Background location" state={permissions.background} onPress={() => void onRequestBackground()} /> : null}
+            {!isWeb ? <PermissionRow title="Notifications" state={permissions.notifications} onPress={() => void onRequestNotifications()} /> : null}
             <Pressable onPress={onDismissOnboarding} style={({ pressed }) => [membershipStyles.secondaryButton, tw`mt-4`, pressed && tw`bg-slate-50`]}>
               <Text style={tw`text-sm font-black text-slate-700`}>Close</Text>
             </Pressable>
@@ -115,7 +125,7 @@ export default function LiveRadar({
               <Radar size={22} color={membershipColors.indigo} />
             </View>
             <View>
-              <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600`}>LIVE RADAR</Text>
+              <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600`}>{isWeb ? 'JOURNEY RADAR' : 'LIVE RADAR'}</Text>
               <Text style={tw`text-lg font-black text-slate-950`}>Current-area monitoring</Text>
             </View>
           </View>
@@ -127,7 +137,7 @@ export default function LiveRadar({
             {monitoringCopy}
           </Text>
 
-          {!premium ? (
+          {access.showUpgradeGate ? (
             <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`border-indigo-100 mb-5`]}>
               <View style={tw`w-12 h-12 rounded-2xl bg-indigo-50 items-center justify-center mb-4`}>
                 <LockKeyhole size={22} color={membershipColors.indigo} />
@@ -170,6 +180,11 @@ export default function LiveRadar({
               <Text style={tw`text-base font-black text-slate-950 mb-1`}>
                 {currentReading?.postcode || 'No postcode detected yet'}
               </Text>
+              {dataMonth ? (
+                <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 uppercase mb-2`}>
+                  Police data month: {dataMonth}
+                </Text>
+              ) : null}
               <Text style={tw`text-xs text-slate-500 leading-5`}>
                 {currentReading?.mainReason || 'Use Scan My Current Location Now to populate your first Live Radar reading.'}
               </Text>
@@ -183,18 +198,18 @@ export default function LiveRadar({
             <View style={tw`flex-row gap-3 mb-3`}>
               <Pressable
                 onPress={() => void onStart()}
-                disabled={busy || !premium}
-                style={({ pressed }) => [membershipStyles.primaryButton, tw`flex-1`, (busy || !premium) && tw`opacity-60`, pressed && premium && tw`opacity-80`]}
+                disabled={busy || !canActivate}
+                style={({ pressed }) => [membershipStyles.primaryButton, tw`flex-1`, (busy || !canActivate) && tw`opacity-60`, pressed && canActivate && tw`opacity-80`]}
               >
                 <ShieldAlert size={18} color="white" />
-                <Text style={tw`text-white font-black ml-2`}>Turn On Live Radar</Text>
+                <Text style={tw`text-white font-black ml-2`}>{isWeb ? 'Start Journey Radar' : 'Turn On Live Radar'}</Text>
               </Pressable>
               <Pressable
                 onPress={() => void onStop()}
                 disabled={busy}
                 style={({ pressed }) => [membershipStyles.secondaryButton, tw`flex-1`, busy && tw`opacity-60`, pressed && !busy && tw`bg-slate-50`]}
               >
-                <Text style={tw`text-sm font-black text-slate-700`}>Turn Off Live Radar</Text>
+                <Text style={tw`text-sm font-black text-slate-700`}>{isWeb ? 'Stop Journey Radar' : 'Turn Off Live Radar'}</Text>
               </Pressable>
             </View>
 
@@ -210,9 +225,33 @@ export default function LiveRadar({
             </Pressable>
           </View>
 
+          {isWeb && currentAlert ? (
+            <View
+              style={{
+                backgroundColor: RISK_COLORS[currentAlert.riskLevel].badge,
+                borderColor: RISK_COLORS[currentAlert.riskLevel].ring,
+                borderWidth: 1,
+                borderRadius: 24,
+                paddingHorizontal: 20,
+                paddingVertical: 16,
+                marginBottom: 20,
+              }}
+            >
+              <View style={tw`flex-row items-center mb-2`}>
+                <ShieldAlert size={17} color={RISK_COLORS[currentAlert.riskLevel].text} />
+                <Text style={{ color: RISK_COLORS[currentAlert.riskLevel].text, fontSize: 12, fontWeight: '900', marginLeft: 8 }}>
+                  Journey Radar area alert
+                </Text>
+              </View>
+              <Text selectable style={{ color: RISK_COLORS[currentAlert.riskLevel].text, fontSize: 13, lineHeight: 20, fontWeight: '700' }}>
+                {currentAlert.postcode} is {currentAlert.score}/100. {currentAlert.explanation}
+              </Text>
+            </View>
+          ) : null}
+
           {warning ? (
             <View style={tw`rounded-3xl border border-amber-100 bg-amber-50 px-5 py-4 mb-5`}>
-              <Text style={tw`text-xs font-black text-amber-800 mb-1`}>Live Radar warning</Text>
+              <Text style={tw`text-xs font-black text-amber-800 mb-1`}>{isWeb ? 'Journey Radar notice' : 'Live Radar warning'}</Text>
               <Text selectable style={tw`text-xs text-amber-700 leading-5`}>{warning}</Text>
             </View>
           ) : null}
@@ -226,9 +265,14 @@ export default function LiveRadar({
                 </Text>
               </Pressable>
             </View>
-            <PermissionStateLine label="Foreground location" state={permissions.foreground} />
-            <PermissionStateLine label="Background location" state={permissions.background} />
-            <PermissionStateLine label="Notifications" state={permissions.notifications} />
+            <PermissionStateLine label="Foreground location" state={permissions.foreground} onPress={() => void onRequestForeground()} />
+            {!isWeb ? <PermissionStateLine label="Background location" state={permissions.background} onPress={() => void onRequestBackground()} /> : null}
+            {!isWeb ? <PermissionStateLine label="Notifications" state={permissions.notifications} onPress={() => void onRequestNotifications()} /> : null}
+            {!isWeb && permissions.notifications === 'denied' ? (
+              <Text style={tw`text-xs text-amber-700 leading-5 mt-3`}>
+                Alerts will still be saved locally, but RiskRadar cannot show device banners while notification permission is denied.
+              </Text>
+            ) : null}
             {currentReading?.postcode ? (
               <Pressable onPress={() => void onMutePostcode()} style={({ pressed }) => [membershipStyles.secondaryButton, tw`mt-4`, pressed && tw`bg-slate-50`]}>
                 <Text style={tw`text-sm font-black text-slate-700`}>Mute {currentReading.postcode}</Text>
@@ -249,6 +293,9 @@ export default function LiveRadar({
                 </View>
                 <Text style={tw`text-xs font-black text-indigo-700 mb-1`}>Why was I alerted? {event.explanation}</Text>
                 <Text style={tw`text-xs text-slate-500`}>Score {event.score} · {event.trigger}</Text>
+                <Text style={tw`text-[10px] font-black text-slate-400 uppercase mt-1`}>
+                  {event.notificationSent ? 'Device banner sent' : 'Saved locally · device banner not shown'}
+                </Text>
               </View>
             )) : (
               <Text style={tw`text-sm text-slate-500 leading-6`}>
@@ -283,11 +330,18 @@ function PermissionRow({ title, state, onPress }: { title: string; state: string
   );
 }
 
-function PermissionStateLine({ label, state }: { label: string; state: string }) {
+function PermissionStateLine({ label, state, onPress }: { label: string; state: string; onPress(): void }) {
   return (
-    <View style={tw`flex-row items-center justify-between border-b border-slate-100 py-3`}>
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      style={({ pressed }) => [tw`flex-row items-center justify-between border-b border-slate-100 py-3`, pressed && tw`opacity-65`]}
+    >
       <Text style={tw`text-sm text-slate-700`}>{label}</Text>
-      <Text style={tw`text-xs font-black text-slate-500 uppercase`}>{state}</Text>
-    </View>
+      <View style={tw`items-end`}>
+        <Text style={tw`text-xs font-black text-slate-500 uppercase`}>{state}</Text>
+        <Text style={tw`text-[9px] font-black text-indigo-600 uppercase mt-1`}>Review</Text>
+      </View>
+    </Pressable>
   );
 }
