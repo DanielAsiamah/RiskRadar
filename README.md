@@ -15,6 +15,8 @@ It combines postcode lookup, UK Police crime feeds, local boundaries, monthly tr
 - Nearby postcode suggestions based on device location
 - Saved analyses and reusable search presets
 - Conservative, explainable scoring with a deliberately exceptional 50+ band
+- Live Radar with manual current-area scans, local alert history, reduced-alert controls, muted postcodes, and a lighter keep-open web mode
+- Route Guard route hotzone scans with a mock provider ready to swap to Google later
 - Live API mode or imported monthly police CSV snapshots
 - Persistent JSON or SQLite backend state
 - Rate limiting, retries, request deduplication, caching, and stale-data fallback
@@ -50,6 +52,12 @@ npm run start
 ```
 
 The backend listens on `http://0.0.0.0:3001`. Set `EXPO_PUBLIC_API_BASE_URL` when a phone or separately hosted frontend must reach the backend through another hostname.
+
+Live Radar notes:
+
+- Web uses a keep-open Journey Radar flow and does not promise background monitoring.
+- Native background Live Radar requires a development build or standalone app because Expo Go does not expose the full background-location path needed here.
+- The public explorer still works when Supabase or Stripe are not configured.
 
 For a production-style single-service run, export the web app and start the API, then open `http://localhost:3001`:
 
@@ -91,6 +99,8 @@ See [INSTALL.md](./INSTALL.md) for complete local, Docker, Render, website embed
 RiskRadar requests public data from UK Police, Postcodes.io, and OpenStreetMap-backed geocoding services. Coverage and release timing vary by source and location.
 
 The risk index is an informational local incident-pressure estimate, not an official safety rating. It is postcode-led, uses category and volume thresholds, and exposes its scoring factors in the API response. Public police street data normally groups homicide within violent crime, so a separate homicide increment is only used when an imported source explicitly identifies that category.
+
+Live Radar and Route Guard are also informational. They can highlight higher-risk local context and route sections, but they do not provide emergency dispatch, guaranteed-safe routing, or live police incident feeds.
 
 Public data, map tiles, Expo template material, and installed dependencies remain subject to their source licences and attribution requirements; the MIT licence below applies to RiskRadar's source code. See [THIRD_PARTY_NOTICES.md](./THIRD_PARTY_NOTICES.md) for attribution details.
 

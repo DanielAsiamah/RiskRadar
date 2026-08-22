@@ -41,6 +41,25 @@ cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
 npm run start
 ```
 
+If you want the production-style website only, build the web bundle first and then run the backend:
+
+```powershell
+cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
+npm run build:web
+npm run api
+```
+
+Then open `http://localhost:3001`.
+
+### Live Radar local notes
+
+- `Scan My Current Location Now` works with foreground location permission.
+- `Turn On Live Radar` on the web starts a keep-open Journey Radar session. Keep the page open to monitor your current area.
+- Native background Live Radar requires foreground location, background location, and notification permission.
+- Native background Live Radar also requires a development build or standalone app. Expo Go is not enough for this path.
+- RiskRadar still runs without Supabase or Stripe configured. Public search, maps, and local intelligence remain available while membership features stay in a controlled fallback state.
+- Live Radar is informational area intelligence, not an emergency service or guaranteed-safety system.
+
 Optional:
 
 ```powershell
@@ -255,6 +274,8 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 - A production web build uses its own origin automatically when this variable is not set.
 - You can override the backend port with:
   - `EXPO_PUBLIC_API_PORT`
+
+For a web-only local run, `npm run build:web` followed by `npm run api` serves the site and API together from `http://localhost:3001`.
 
 ## Backend endpoints
 

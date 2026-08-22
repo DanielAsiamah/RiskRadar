@@ -55,6 +55,18 @@ export const FAQ_ITEMS = [
     answer: 'No. Monthly area alerts explain meaningful changes after a new Police.uk data month is available. They are not emergency notifications, live dispatch information, or a substitute for official travel, police, or emergency advice.',
   },
   {
+    id: 'live-radar-web-vs-native',
+    category: 'premium-and-billing',
+    question: 'How does Live Radar differ on the web versus on a phone app?',
+    answer: 'On the web, Live Radar works as a keep-open Journey Radar session and refreshes only while the page stays open. On a native build, Premium members can enable background monitoring on the device after granting foreground location, background location, and notification permissions.',
+  },
+  {
+    id: 'live-radar-pro-only',
+    category: 'premium-and-billing',
+    question: 'Why is background Live Radar a Premium feature?',
+    answer: 'Background monitoring uses additional device permissions, repeated area scans, and higher ongoing infrastructure cost than a normal postcode search. RiskRadar keeps public search available for everyone, while Premium funds the heavier monitoring experience and alert controls.',
+  },
+  {
     id: 'cancellation',
     category: 'premium-and-billing',
     question: 'Can I cancel Premium?',
@@ -71,6 +83,12 @@ export const FAQ_ITEMS = [
     category: 'privacy-and-safety',
     question: 'Does the website continuously track my location?',
     answer: 'No. On the website, Use my current location requests permission for a one-time nearby-area lookup. RiskRadar does not claim background GPS monitoring in Safari or other browsers. Any future native Live Radar mode will require separate foreground, background-location, and notification permissions.',
+  },
+  {
+    id: 'live-radar-permission-denied',
+    category: 'privacy-and-safety',
+    question: 'What happens if I deny Live Radar permissions?',
+    answer: 'RiskRadar falls back safely. Without foreground location, it cannot scan your current area. Without background location or notifications, native Live Radar cannot keep monitoring in the background or surface local alerts, but normal postcode search and other public tools still work.',
   },
   {
     id: 'safety-limit',
