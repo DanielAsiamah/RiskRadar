@@ -48,6 +48,18 @@ test('lets a backend-verified Premium member bypass the local product limit', ()
   assert.equal(canUseFreeSearch(usage, true), true);
 });
 
+test('keeps core search available when membership services are not configured', () => {
+  const usage = { date: '2026-08-05', count: FREE_DAILY_SEARCH_LIMIT };
+
+  assert.equal(canUseFreeSearch(usage, false, false), true);
+});
+
+test('does not attempt account authentication when Supabase is unavailable', () => {
+  assert.equal(clientState.membershipEntryDecision?.(false, false), 'unavailable');
+  assert.equal(clientState.membershipEntryDecision?.(true, false), 'sign-in');
+  assert.equal(clientState.membershipEntryDecision?.(true, true), 'account');
+});
+
 test('counts only the successful search recorded for the current day', () => {
   const today = new Date(2026, 7, 5, 12, 0, 0);
 

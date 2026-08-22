@@ -106,18 +106,18 @@ export default function RouteGuard({
                 <Text style={tw`text-lg font-black text-slate-950`}>Route Guard</Text>
                 <View style={tw`ml-2 rounded-full bg-indigo-600 px-2 py-1`}><Text style={tw`text-[9px] font-black tracking-widest text-white`}>PRO</Text></View>
               </View>
-              <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mt-1`}>MOCK ROUTING MVP</Text>
+              <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mt-1`}>ROUTE PLANNING PREVIEW</Text>
             </View>
           </View>
 
           <Text style={tw`text-3xl font-black tracking-tight text-slate-950 leading-9 mb-3`}>Scan the journey, not just the destination.</Text>
-          <Text style={tw`text-sm text-slate-500 leading-6 mb-7`}>Enter a start and destination to preview sampled area risk along a mock route. No Google route request is made.</Text>
+          <Text style={tw`text-sm text-slate-500 leading-6 mb-7`}>Enter a start and destination to preview estimated area-risk samples along a planned journey. Live turn-by-turn routing is not enabled yet.</Text>
 
           {!premium ? (
             <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`border-indigo-100 mb-5`]}>
               <View style={tw`w-12 h-12 rounded-2xl bg-indigo-50 items-center justify-center mb-4`}><LockKeyhole size={23} color={membershipColors.indigo} /></View>
               <Text style={tw`text-xl font-black text-slate-950 mb-2`}>Route Guard is a PRO feature</Text>
-              <Text style={tw`text-sm text-slate-500 leading-6 mb-5`}>PRO includes 100 route scans each calendar month, with walking, driving, and transit mock previews.</Text>
+              <Text style={tw`text-sm text-slate-500 leading-6 mb-5`}>PRO includes 100 route scans each calendar month, with walking, driving, and transit planning previews.</Text>
               <Pressable onPress={onUpgrade} accessibilityRole="button" style={({ pressed }) => [membershipStyles.primaryButton, pressed && tw`opacity-80`]}>
                 <Sparkles size={18} color="white" />
                 <Text style={tw`text-white font-black ml-2`}>Explore RiskRadar PRO</Text>
@@ -145,7 +145,7 @@ export default function RouteGuard({
                 {error ? <Text selectable style={tw`text-sm font-bold text-rose-600 mb-4`}>{error}</Text> : null}
                 <Pressable onPress={() => void handleScan()} disabled={!canScan} accessibilityRole="button" accessibilityState={{ disabled: !canScan }} style={({ pressed }) => [membershipStyles.primaryButton, (!canScan || loading) && tw`opacity-50`, pressed && canScan && tw`opacity-80`]}>
                   {loading ? <ActivityIndicator color="white" /> : <ShieldAlert size={19} color="white" />}
-                  <Text style={tw`text-white font-black ml-2`}>{loading ? 'Scanning mock route...' : usageReady ? 'Scan route' : 'Loading allowance...'}</Text>
+                  <Text style={tw`text-white font-black ml-2`}>{loading ? 'Building route preview...' : usageReady ? 'Scan route' : 'Loading allowance...'}</Text>
                 </Pressable>
                 <Text style={tw`text-[11px] text-slate-400 text-center mt-3`}>{Math.max(0, 100 - routeScansUsed)} of 100 scans remaining this month</Text>
               </View>
@@ -156,7 +156,7 @@ export default function RouteGuard({
 
           <View style={tw`rounded-3xl border border-amber-100 bg-amber-50 px-5 py-4`}>
             <Text style={tw`text-xs font-black text-amber-800 mb-1`}>Area intelligence, not guaranteed safety</Text>
-            <Text style={tw`text-xs text-amber-700 leading-5`}>This MVP uses deterministic mock routing and sample risk values. It does not provide live navigation, incident avoidance, or emergency guidance.</Text>
+            <Text style={tw`text-xs text-amber-700 leading-5`}>Route shape, distance, timings, and sampled scores are generated planning estimates. This preview does not provide live navigation, incident avoidance, or emergency guidance.</Text>
           </View>
         </View>
       </ScrollView>
@@ -182,7 +182,7 @@ function RouteResult({ result }: { result: RouteGuardScan }) {
     <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`mb-5`]}>
       <View style={tw`flex-row items-start justify-between mb-5`}>
         <View style={tw`flex-1 pr-3`}>
-          <Text style={tw`text-[10px] font-black tracking-widest text-slate-400 mb-1`}>MOCK ROUTE RESULT</Text>
+          <Text style={tw`text-[10px] font-black tracking-widest text-slate-400 mb-1`}>ROUTE PREVIEW RESULT</Text>
           <Text style={tw`text-lg font-black text-slate-950`}>{result.start} to {result.destination}</Text>
           <View style={tw`flex-row items-center mt-2`}><Clock3 size={15} color={membershipColors.slate} /><Text style={tw`text-xs font-bold text-slate-500 ml-2`}>{result.distanceEstimate.kilometres} km - about {result.durationEstimate.minutes} min</Text></View>
         </View>
@@ -211,10 +211,10 @@ function RouteResult({ result }: { result: RouteGuardScan }) {
             <Text style={{ color: color.strong, fontSize: 16, fontWeight: '900' }}>{hotzone.riskScore}</Text>
           </View>
         );
-      }) : <Text style={tw`text-xs text-slate-500 mb-3`}>No elevated mock sections were found on this route.</Text>}
+      }) : <Text style={tw`text-xs text-slate-500 mb-3`}>No elevated preview sections were found on this route.</Text>}
 
       <Text style={tw`text-[10px] text-slate-400 leading-4 mt-3`}>{result.disclaimer}</Text>
-      <Text style={tw`text-[10px] font-bold text-indigo-600 mt-2`}>Provider: mock - Google requests made: 0</Text>
+      <Text style={tw`text-[10px] font-bold text-indigo-600 mt-2`}>Planning preview - live navigation requests: 0</Text>
     </View>
   );
 }

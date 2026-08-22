@@ -32,7 +32,7 @@ export default function Paywall({ onOpenRouteGuard, onOpenSafetySession }: Paywa
     <View>
       <FeatureCard
         title="Route Guard"
-        detail="Plan walking, driving, or transit journeys and scan mock hotzone sections. Includes 100 route scans each month."
+        detail="Plan walking, driving, or transit journeys and preview estimated hotzone sections. Includes 100 route scans each month."
         icon={<Navigation size={21} color={membershipColors.indigo} />}
         onPress={onOpenRouteGuard}
       />

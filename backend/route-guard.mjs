@@ -1,6 +1,6 @@
 const PRO_MONTHLY_ROUTE_SCANS = 100;
 const SUPPORTED_TRAVEL_MODES = new Set(['walking', 'driving', 'transit']);
-const RISK_DISCLAIMER = 'Route Guard provides area intelligence from mock route samples, not guaranteed safety or live incident avoidance.';
+const RISK_DISCLAIMER = 'Route Guard provides generated planning estimates for area intelligence, not guaranteed safety, live routing, or incident avoidance.';
 
 export class RouteGuardError extends Error {
   constructor(message, statusCode = 400, code = 'INVALID_ROUTE_GUARD_INPUT') {
@@ -78,7 +78,7 @@ function buildRoutePoints(seed, start, destination) {
       index,
       latitude: round(origin.latitude + latitudeDelta * progress + curve),
       longitude: round(origin.longitude + longitudeDelta * progress - curve / 2),
-      label: index === 0 ? start : index === pointCount - 1 ? destination : `Mock route sample ${index}`,
+      label: index === 0 ? start : index === pointCount - 1 ? destination : `Route preview sample ${index}`,
     };
   });
 }
@@ -90,7 +90,7 @@ function buildSampledRiskScores(seed, routePoints) {
       pointIndex: point.index,
       score,
       riskLevel: riskLevel(score),
-      basis: 'Deterministic mock area-risk sample',
+      basis: 'Generated planning-preview area-risk sample',
     };
   });
 }
@@ -111,7 +111,7 @@ function buildHotzoneSections(samples) {
         endPointIndex: index - 1,
         riskScore: highest.score,
         riskLevel: riskLevel(highest.score),
-        summary: `${riskLevel(highest.score) === 'red' ? 'Higher' : 'Elevated'} mock area-risk section`,
+        summary: `${riskLevel(highest.score) === 'red' ? 'Higher' : 'Elevated'} planning-preview area-risk section`,
       });
       sectionStart = null;
     }

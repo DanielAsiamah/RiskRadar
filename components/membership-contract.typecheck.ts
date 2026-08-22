@@ -25,6 +25,7 @@ const freeAccount: AccountEntitlement = {
 };
 
 export const signInFixture = React.createElement(SignIn, {
+  authAvailable: false,
   onSubmit: async (_email: string) => undefined,
   onBack: () => undefined,
   onContinueFree: () => undefined,
@@ -32,6 +33,7 @@ export const signInFixture = React.createElement(SignIn, {
 
 export const pricingFixture = React.createElement(Pricing, {
   authenticated: true,
+  membershipAvailable: false,
   busy: false,
   error: null,
   onBack: () => undefined,

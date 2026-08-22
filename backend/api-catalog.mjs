@@ -27,7 +27,7 @@ export const apiCatalog = Object.freeze({
     endpoint('POST', '/api/watchlist', 'Create a watched postcode for the current member.', '{ label, postcode }', 'member'),
     endpoint('PATCH', '/api/watchlist/:id', 'Rename a watched postcode owned by the current member.', '{ label }', 'member'),
     endpoint('DELETE', '/api/watchlist/:id', 'Delete a watched postcode owned by the current member.', 'None', 'member'),
-    endpoint('POST', '/api/route-guard', 'Build a mock route and scan its sampled sections for elevated area risk.', '{ start, destination, travelMode, entitlement, routeScansUsed }', 'member'),
+    endpoint('POST', '/api/route-guard', 'Build a planning preview and scan its sampled sections for elevated area risk.', '{ start, destination, travelMode, entitlement, routeScansUsed }', 'member'),
     endpoint('GET', '/api/filter-metadata', 'List supported months, crime categories, and default radii.'),
     endpoint('POST', '/api/analyze-postcode', 'Build a complete postcode or place risk analysis.', '{ postcode|string query }'),
     endpoint('POST', '/api/analyze-point', 'Build a complete analysis centred on map coordinates.', '{ latitude, longitude, monthCount? }'),

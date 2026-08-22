@@ -36,8 +36,13 @@ export function incrementDailySearchUsage(usage, now = new Date()) {
   return { ...current, count: current.count + 1 };
 }
 
-export function canUseFreeSearch(usage, premium) {
-  return Boolean(premium) || usage.count < FREE_DAILY_SEARCH_LIMIT;
+export function canUseFreeSearch(usage, premium, membershipAvailable = true) {
+  return Boolean(premium) || !membershipAvailable || usage.count < FREE_DAILY_SEARCH_LIMIT;
+}
+
+export function membershipEntryDecision(authConfigured, authenticated) {
+  if (!authConfigured) return 'unavailable';
+  return authenticated ? 'account' : 'sign-in';
 }
 
 export function isValidEmailAddress(value) {

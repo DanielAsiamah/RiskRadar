@@ -18,6 +18,7 @@ const BENEFITS = [
 
 export interface PricingProps {
   authenticated: boolean;
+  membershipAvailable: boolean;
   busy: boolean;
   error: string | null;
   onBack(): void;
@@ -27,7 +28,7 @@ export interface PricingProps {
   trustNavigation: TrustNavigation;
 }
 
-export default function Pricing({ authenticated, busy, error, onBack, onCheckout, onOpenRouteGuard, onOpenSafetySession, trustNavigation }: PricingProps) {
+export default function Pricing({ authenticated, membershipAvailable, busy, error, onBack, onCheckout, onOpenRouteGuard, onOpenSafetySession, trustNavigation }: PricingProps) {
   return (
     <View style={membershipStyles.screen}>
       <ScrollView contentContainerStyle={membershipStyles.scrollContent} contentInsetAdjustmentBehavior="automatic">
@@ -87,17 +88,20 @@ export default function Pricing({ authenticated, busy, error, onBack, onCheckout
 
             <Pressable
               onPress={() => void onCheckout()}
-              disabled={busy}
+              disabled={busy || !membershipAvailable}
               accessibilityRole="button"
-              style={({ pressed }) => [membershipStyles.primaryButton, pressed && tw`opacity-80`, busy && tw`opacity-60`]}
+              accessibilityState={{ disabled: busy || !membershipAvailable }}
+              style={({ pressed }) => [membershipStyles.primaryButton, pressed && membershipAvailable && tw`opacity-80`, (busy || !membershipAvailable) && tw`opacity-60`]}
             >
               {busy ? <ActivityIndicator color="white" /> : authenticated ? <CreditCard size={19} color="white" /> : <ShieldCheck size={19} color="white" />}
               <Text style={tw`text-white font-black ml-2`}>
-                {busy ? 'Opening secure checkout...' : authenticated ? 'Continue securely with Stripe' : 'Sign in to start Premium'}
+                {busy ? 'Opening secure checkout...' : !membershipAvailable ? 'Premium setup in progress' : authenticated ? 'Continue securely with Stripe' : 'Sign in to start Premium'}
               </Text>
             </Pressable>
             <Text style={tw`text-[11px] text-slate-400 text-center leading-4 mt-3`}>
-              Stripe securely handles payment details. RiskRadar does not store your card number.
+              {membershipAvailable
+                ? 'Stripe securely handles payment details. RiskRadar does not store your card number.'
+                : 'Free postcode search remains available while secure accounts and automatic Premium activation are connected.'}
             </Text>
           </View>
 

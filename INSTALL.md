@@ -295,6 +295,13 @@ curl -H "x-api-key: YOUR_ADMIN_KEY" "http://127.0.0.1:3001/api/admin/state-expor
 
 ### Supabase and Stripe setup
 
+Supabase and Stripe are optional for the public explorer. With those variables
+missing, RiskRadar still starts normally and keeps postcode search, maps,
+nearby suggestions, and public evidence available. Account sign-in, checkout,
+saved places, and other member-only actions show a controlled setup state until
+the membership environment is complete; the frontend does not attempt a broken
+Supabase request.
+
 Providing only a Supabase secret key is not enough. Apply all SQL migrations in
 `supabase/migrations`, enable Email authentication, configure local and
 production magic-link redirect URLs, and provide separate frontend publishable

@@ -16,12 +16,13 @@ import { isValidEmailAddress, visibleMagicLinkError } from '../membership/client
 import { membershipColors, membershipStyles } from './membershipStyles';
 
 export interface SignInProps {
+  authAvailable: boolean;
   onSubmit(email: string): Promise<void>;
   onBack(): void;
   onContinueFree(): void;
 }
 
-export default function SignIn({ onSubmit, onBack, onContinueFree }: SignInProps) {
+export default function SignIn({ authAvailable, onSubmit, onBack, onContinueFree }: SignInProps) {
   const [email, setEmail] = useState('');
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -63,15 +64,29 @@ export default function SignIn({ onSubmit, onBack, onContinueFree }: SignInProps
           <View style={tw`w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-100 items-center justify-center mb-7`}>
             <ShieldCheck size={27} color={membershipColors.indigo} />
           </View>
-          <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mb-3`}>RISKRADAR ACCOUNT</Text>
+          <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mb-3`}>
+            {authAvailable ? 'RISKRADAR ACCOUNT' : 'FREE ACCESS READY'}
+          </Text>
           <Text style={tw`text-4xl font-black tracking-tight text-slate-950 leading-10 mb-4`}>
-            Your areas. Always remembered.
+            {authAvailable ? 'Your areas. Always remembered.' : 'Keep exploring without an account.'}
           </Text>
           <Text style={tw`text-base text-slate-500 leading-6 mb-8`}>
-            Sign in without a password. We will email a secure, single-use link that returns you to RiskRadar.
+            {authAvailable
+              ? 'Sign in without a password. We will email a secure, single-use link that returns you to RiskRadar.'
+              : 'Secure Premium accounts are being connected. Postcode search, maps, nearby suggestions, and public evidence continue to work without an account.'}
           </Text>
 
-          {sentTo ? (
+          {!authAvailable ? (
+            <View style={[membershipStyles.card, membershipStyles.elevatedCard]}>
+              <View style={tw`w-12 h-12 rounded-full bg-emerald-50 items-center justify-center mb-5`}>
+                <CheckCircle2 size={24} color={membershipColors.emerald} />
+              </View>
+              <Text style={tw`text-2xl font-black text-slate-950 mb-2`}>Core RiskRadar is available</Text>
+              <Text style={tw`text-sm text-slate-500 leading-6`}>
+                No sign-in is required for the public area-intelligence experience. Premium checkout and saved member areas will appear after account setup is ready.
+              </Text>
+            </View>
+          ) : sentTo ? (
             <View style={[membershipStyles.card, membershipStyles.elevatedCard]}>
               <View style={tw`w-12 h-12 rounded-full bg-emerald-50 items-center justify-center mb-5`}>
                 <CheckCircle2 size={24} color={membershipColors.emerald} />
@@ -140,12 +155,12 @@ export default function SignIn({ onSubmit, onBack, onContinueFree }: SignInProps
             </View>
           )}
 
-          <View style={tw`flex-row items-start px-2 mt-5 mb-4`}>
+          {authAvailable ? <View style={tw`flex-row items-start px-2 mt-5 mb-4`}>
             <LockKeyhole size={15} color={membershipColors.muted} />
             <Text style={tw`flex-1 text-xs text-slate-400 leading-5 ml-2`}>
               RiskRadar never asks for a password. The link expires and can only sign in to the account tied to this email.
             </Text>
-          </View>
+          </View> : <View style={tw`mt-5 mb-4`} />}
 
           <Pressable
             onPress={onContinueFree}

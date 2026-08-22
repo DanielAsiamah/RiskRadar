@@ -11,7 +11,16 @@ export const BILLING_CONFIRMATION_WINDOW_MS: 20000;
 export function calendarDateKey(date?: Date): string;
 export function parseDailySearchUsage(raw: string | DailySearchUsage | null, now?: Date): DailySearchUsage;
 export function incrementDailySearchUsage(usage: DailySearchUsage, now?: Date): DailySearchUsage;
-export function canUseFreeSearch(usage: DailySearchUsage, premium: boolean): boolean;
+export function canUseFreeSearch(
+  usage: DailySearchUsage,
+  premium: boolean,
+  membershipAvailable?: boolean,
+): boolean;
+export type MembershipEntryDecision = 'unavailable' | 'sign-in' | 'account';
+export function membershipEntryDecision(
+  authConfigured: boolean,
+  authenticated: boolean,
+): MembershipEntryDecision;
 export function isValidEmailAddress(value: string): boolean;
 export function membershipReturnRoute(value: string | null): 'BILLING_SUCCESS' | 'ACCOUNT' | null;
 export function normalizePendingDestination(value: string | null): PremiumDestination | null;

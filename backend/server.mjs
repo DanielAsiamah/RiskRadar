@@ -4527,7 +4527,7 @@ const server = http.createServer(async (request, response) => {
       contactEmail: CONTACT_EMAIL,
       proIncludes: [
         'Unlimited UK area checks',
-        'Route Guard with 100 mock route scans each month',
+        'Route Guard with 100 planning-preview route scans each month',
         'Safety Sessions for trips, holidays, dates, and marketplace meetups',
         'Trusted-contact share links',
         'Saved places and comparisons',

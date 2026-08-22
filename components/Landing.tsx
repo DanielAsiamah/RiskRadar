@@ -28,6 +28,7 @@ interface LandingProps {
   searchCount: number;
   freeSearchLimit: number;
   premium: boolean;
+  membershipAvailable: boolean;
   searchHydrated: boolean;
   accountLabel: string;
   nearbySuggestions?: NearbySuggestion[];
@@ -54,6 +55,7 @@ export default function Landing({
   searchCount,
   freeSearchLimit,
   premium,
+  membershipAvailable,
   searchHydrated,
   accountLabel,
   nearbySuggestions = [],
@@ -111,10 +113,12 @@ export default function Landing({
           <View style={tw`rounded-3xl border border-indigo-100 bg-indigo-50 p-4 mb-4`}>
             <Text style={tw`text-[10px] font-bold tracking-widest text-indigo-500 mb-2`}>FREE PLAN</Text>
             <Text style={tw`text-slate-900 text-lg font-black mb-1`}>
-              {freeSearchesRemaining} of {freeSearchLimit} checks left today
+              {membershipAvailable ? `${freeSearchesRemaining} of ${freeSearchLimit} checks left today` : 'Core checks available'}
             </Text>
             <Text style={tw`text-slate-500 leading-5 mb-3`}>
-              Premium is GBP 15/month for unlimited checks, Route Guard, and Safety Sessions.
+              {membershipAvailable
+                ? 'Premium is GBP 15/month for unlimited checks, Route Guard, and Safety Sessions.'
+                : 'Account setup is being connected. Search, maps, nearby suggestions, and public evidence remain available.'}
             </Text>
             <Pressable onPress={openPremium} hitSlop={6} accessibilityRole="button">
               <Text style={tw`text-indigo-700 font-black`}>Explore Premium</Text>
@@ -179,7 +183,11 @@ export default function Landing({
             <View style={tw`flex-1`}>
               <Text style={tw`text-sm font-black text-slate-950`}>{premium ? 'RiskRadar Premium is active' : 'Explore RiskRadar Premium'}</Text>
               <Text style={tw`text-xs text-slate-500 mt-1`}>
-                {premium ? 'Unlimited searches and member intelligence.' : `${freeSearchesRemaining} free ${freeSearchesRemaining === 1 ? 'search' : 'searches'} left today.`}
+                {premium
+                  ? 'Unlimited searches and member intelligence.'
+                  : membershipAvailable
+                    ? `${freeSearchesRemaining} free ${freeSearchesRemaining === 1 ? 'search' : 'searches'} left today.`
+                    : 'Core area intelligence is available without an account.'}
               </Text>
             </View>
             <ChevronRight size={18} color={INDIGO} />

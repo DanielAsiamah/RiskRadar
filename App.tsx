@@ -32,7 +32,7 @@ import { getAlertPreferences, updateAlertPreferences, type AlertPreferences, typ
 import { addWatchedPlace, getDashboard, removeWatchedPlace, renameWatchedPlace } from './api/dashboard';
 import { beginCheckout, getAccount, openCustomerPortal } from './api/membership';
 import { getMemberReport, type MemberReport } from './api/reports';
-import { webAppUrl } from './auth/client';
+import { supabaseConfigured, webAppUrl } from './auth/client';
 import { useAuth } from './auth/useAuth';
 import type { DashboardView } from './membership/dashboard-types';
 import {
@@ -42,6 +42,7 @@ import {
   canUseFreeSearch,
   createLatestRequestCoordinator,
   incrementDailySearchUsage,
+  membershipEntryDecision,
   membershipReturnRoute,
   normalizePendingDestination,
   parseDailySearchUsage,
@@ -480,7 +481,7 @@ export default function App() {
       await AsyncStorage.setItem(DAILY_SEARCH_STORAGE_KEY, JSON.stringify(currentUsage));
     }
 
-    if (!canUseFreeSearch(currentUsage, account?.premium === true)) {
+    if (!canUseFreeSearch(currentUsage, account?.premium === true, supabaseConfigured)) {
       setError(null);
       setPricingError(null);
       setAppState('PRICING');
@@ -606,12 +607,25 @@ export default function App() {
       return;
     }
 
+    if (!supabaseConfigured) {
+      await clearPremiumDestination();
+      setPricingError('Premium accounts are being connected. Core RiskRadar search remains available without signing in.');
+      setAppState('PRICING');
+      return;
+    }
+
     await rememberPremiumDestination(destination);
     setAppState(user ? 'PRICING' : 'SIGN_IN');
   };
 
   const handleOpenDashboard = async () => {
     setPricingError(null);
+    if (!supabaseConfigured) {
+      await clearPremiumDestination();
+      setPricingError('Premium accounts are being connected. Core RiskRadar search remains available without signing in.');
+      setAppState('PRICING');
+      return;
+    }
     if (!user) {
       await rememberPremiumDestination('DASHBOARD');
       setAppState('SIGN_IN');
@@ -762,6 +776,10 @@ export default function App() {
   };
 
   const handleCheckout = async () => {
+    if (!supabaseConfigured) {
+      setPricingError('Premium checkout will be enabled after secure account setup is connected. Free search is still available.');
+      return;
+    }
     if (!user) {
       await rememberPremiumDestination('DASHBOARD');
       setAppState('SIGN_IN');
@@ -892,7 +910,7 @@ export default function App() {
   };
 
   const currentDailyUsage = parseDailySearchUsage(dailySearchUsage);
-  const accountLabel = account?.premium ? 'Premium active' : user ? 'Account' : 'Sign in';
+  const accountLabel = !supabaseConfigured ? 'Free access' : account?.premium ? 'Premium active' : user ? 'Account' : 'Sign in';
   const latestDashboardDataMonth = dashboard?.selectedPlace?.snapshot?.dataMonth ?? null;
 
   return (
@@ -910,6 +928,7 @@ export default function App() {
             searchCount={currentDailyUsage.count}
             freeSearchLimit={FREE_DAILY_SEARCH_LIMIT}
             premium={account?.premium === true}
+            membershipAvailable={supabaseConfigured}
             searchHydrated={dailySearchUsageHydrated}
             accountLabel={accountLabel}
             nearbySuggestions={nearbySuggestions}
@@ -921,7 +940,10 @@ export default function App() {
               routeGuardBackState.current = 'HOME';
               setAppState('ROUTE_GUARD');
             }}
-            openAccount={() => setAppState(user ? 'ACCOUNT' : 'SIGN_IN')}
+            openAccount={() => {
+              const decision = membershipEntryDecision(supabaseConfigured, Boolean(user));
+              setAppState(decision === 'account' ? 'ACCOUNT' : 'SIGN_IN');
+            }}
             openPremium={() => { void handleOpenDashboard(); }}
             openSafetySession={() => setAppState('SAFETY_SESSION')}
             trustNavigation={trustNavigation}
@@ -995,6 +1017,7 @@ export default function App() {
         )}
         {appState === 'SIGN_IN' && (
           <SignIn
+            authAvailable={supabaseConfigured}
             onSubmit={signInWithEmail}
             onBack={() => setAppState(pendingPremiumDestination ? 'PRICING' : 'HOME')}
             onContinueFree={() => void handleContinueFree()}
@@ -1004,6 +1027,7 @@ export default function App() {
         {appState === 'PRICING' && (
           <Pricing
             authenticated={Boolean(user)}
+            membershipAvailable={supabaseConfigured}
             busy={membershipBusy}
             error={pricingError}
             onBack={() => void handlePricingBack()}
