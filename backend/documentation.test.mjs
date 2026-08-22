@@ -22,6 +22,9 @@ test('documents every public HTTP route', async () => {
   if (combinedSource.includes("/^\\/api\\/reports\\/([^/]+)$/")) {
     routes.push('/api/reports/:watchId');
   }
+  if (combinedSource.includes("/^\\/api\\/reports\\/([^/]+)\\/share$/")) {
+    routes.push('/api/reports/:watchId/share');
+  }
 
   assert.ok(routes.length > 20, 'Expected the server route extractor to find public routes.');
   for (const route of new Set(routes)) {
@@ -52,6 +55,9 @@ test('catalogues every method and path implemented by the router', async () => {
       : [])
     .concat(reportRoutesSource.includes("/^\\/api\\/reports\\/([^/]+)$/")
       ? ['GET /api/reports/:watchId']
+      : [])
+    .concat(reportRoutesSource.includes("/^\\/api\\/reports\\/([^/]+)\\/share$/")
+      ? ['GET /api/reports/:watchId/share']
       : [])
     .concat(combinedSource.includes("/^\\/api\\/watchlist\\/([^/]+)$/")
       ? ['PATCH /api/watchlist/:id', 'DELETE /api/watchlist/:id']

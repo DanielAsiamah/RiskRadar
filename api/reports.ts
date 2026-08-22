@@ -71,3 +71,17 @@ export interface MemberReport {
 export function getMemberReport(watchId: string, timeoutMs = 40_000, signal?: AbortSignal): Promise<MemberReport> {
   return apiRequest<MemberReport>(`/api/reports/${encodeURIComponent(watchId)}`, { signal }, timeoutMs, 'required');
 }
+
+export interface ReportShareLink {
+  watchId: string;
+  shareUrl: string;
+  expiresAt: string;
+}
+
+export function createMemberReportShareLink(watchId: string, timeoutMs = 40_000, signal?: AbortSignal): Promise<ReportShareLink> {
+  return apiRequest<ReportShareLink>(`/api/reports/${encodeURIComponent(watchId)}/share`, { signal }, timeoutMs, 'required');
+}
+
+export function getSharedMemberReport(token: string, timeoutMs = 40_000, signal?: AbortSignal): Promise<MemberReport> {
+  return apiRequest<MemberReport>(`/api/report-share?token=${encodeURIComponent(token)}`, { signal }, timeoutMs, 'none');
+}

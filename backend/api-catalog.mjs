@@ -19,6 +19,8 @@ export const apiCatalog = Object.freeze({
     endpoint('GET', '/api/alert-preferences', 'Return the current member monthly alert settings.', 'None', 'member'),
     endpoint('GET', '/api/dashboard', 'Return the Premium dashboard view for watched postcodes.', 'Query: watchId?', 'member'),
     endpoint('GET', '/api/reports/:watchId', 'Return a private Premium report for one watched postcode.', 'Route: watchId', 'member'),
+    endpoint('GET', '/api/reports/:watchId/share', 'Create a signed share link for one Premium report.', 'Route: watchId', 'member'),
+    endpoint('GET', '/api/report-share', 'Resolve a signed public share link into a shared report view.', 'Query: token'),
     endpoint('POST', '/api/billing/checkout-reference', 'Create a signed Stripe checkout URL for the current member.', 'None', 'member'),
     endpoint('POST', '/api/billing/customer-portal', 'Create a Stripe customer-portal session for the current member.', '{ returnUrl? }', 'member'),
     endpoint('POST', '/api/billing/webhook', 'Process Stripe webhook events that change Premium access.', 'Raw Stripe webhook payload', 'member'),

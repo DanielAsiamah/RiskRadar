@@ -153,6 +153,7 @@ function createDependencies(overrides = {}) {
     config: {
       configured: true,
       webAppUrl: 'https://riskradar.app',
+      billingReferenceSecret: '0123456789abcdef0123456789abcdef',
       ...overrides.config,
     },
     store: overrides.store || {
@@ -335,4 +336,98 @@ test('report route returns a private report view for an owned watched place', as
   assert.equal(snapshotCalls.length, 1);
   assert.equal(snapshotCalls[0].watchId, 'watch-1');
   assert.equal(snapshotCalls[0].payload.dataMonth, '2026-05');
+});
+
+test('report routes create a share link and resolve a public shared report view', async () => {
+  const routes = createMembershipRouteHandler(createDependencies({
+    watchlistStore: {
+      async list(userId) {
+        assert.equal(userId, '123e4567-e89b-12d3-a456-426614174000');
+        return [
+          {
+            id: 'watch-1',
+            label: 'Home',
+            postcode: 'SE10 8EP',
+            normalizedPostcode: 'SE10 8EP',
+            lastCheckedMonth: '2026-05',
+            lastSnapshot: {
+              dataMonth: '2026-05',
+              score: 6,
+              totalIncidents: 66,
+              categories: [
+                { category: 'violent-crime', count: 25 },
+              ],
+              trend: [
+                { month: '2026-04', total: 68 },
+                { month: '2026-05', total: 66 },
+              ],
+              topRoads: [{ name: 'On or near Blackheath Hill', count: 8 }],
+              generatedAt: '2026-08-12T10:00:00.000Z',
+            },
+          },
+        ];
+      },
+      async saveSnapshot() {
+        throw new Error('share flow should not persist snapshots');
+      },
+    },
+  }));
+
+  const shareResponse = createResponse();
+  await routes.handle(
+    createRequest({
+      method: 'GET',
+      path: '/api/reports/watch-1/share',
+      headers: { authorization: 'Bearer valid-token' },
+    }),
+    shareResponse,
+    new URL('http://localhost/api/reports/watch-1/share'),
+  );
+
+  assert.equal(shareResponse.statusCode, 200);
+  const sharePayload = JSON.parse(shareResponse.body);
+  assert.match(sharePayload.shareUrl, /\?report=/);
+  assert.match(sharePayload.expiresAt, /^20/);
+
+  const shareUrl = new URL(sharePayload.shareUrl);
+  const token = shareUrl.searchParams.get('report');
+  assert.ok(token);
+
+  const publicResponse = createResponse();
+  await routes.handle(
+    createRequest({
+      method: 'GET',
+      path: `/api/report-share?token=${encodeURIComponent(token)}`,
+    }),
+    publicResponse,
+    new URL(`http://localhost/api/report-share?token=${encodeURIComponent(token)}`),
+  );
+
+  assert.equal(publicResponse.statusCode, 200);
+  assert.equal(publicResponse.headers['Cache-Control'], 'public, max-age=300');
+  const sharedReport = JSON.parse(publicResponse.body);
+  assert.equal(sharedReport.watchId, '');
+  assert.equal(sharedReport.label, 'SE10 8EP');
+  assert.equal(sharedReport.postcode, 'SE10 8EP');
+  assert.match(sharedReport.disclaimer, /shared links/i);
+});
+
+test('report share route rejects a malformed token safely', async () => {
+  const routes = createMembershipRouteHandler(createDependencies());
+  const response = createResponse();
+
+  await routes.handle(
+    createRequest({
+      method: 'GET',
+      path: '/api/report-share?token=not-a-valid-token',
+    }),
+    response,
+    new URL('http://localhost/api/report-share?token=not-a-valid-token'),
+  );
+
+  assert.equal(response.statusCode, 400);
+  assert.deepEqual(JSON.parse(response.body), {
+    error: 'A valid report share token is required.',
+    code: 'INVALID_SHARE_TOKEN',
+  });
 });

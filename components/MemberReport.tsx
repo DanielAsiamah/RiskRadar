@@ -1,12 +1,14 @@
 import React from 'react';
-import { ActivityIndicator, Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Linking, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import {
   ArrowLeft,
   BarChart3,
+  Copy,
   ExternalLink,
   FileText,
   MapPin,
   RefreshCw,
+  Share2,
   ShieldCheck,
 } from 'lucide-react-native';
 import tw from 'twrnc';
@@ -19,8 +21,13 @@ export interface MemberReportScreenProps {
   report: MemberReport | null;
   loading: boolean;
   error: string | null;
+  publicView?: boolean;
+  shareBusy?: boolean;
+  shareError?: string | null;
+  shareUrl?: string | null;
   onBack(): void;
   onRetry(): Promise<void>;
+  onCreateShareLink?(): Promise<void>;
 }
 
 function directionColor(direction: string) {
@@ -37,8 +44,13 @@ export default function MemberReportScreen({
   report,
   loading,
   error,
+  publicView = false,
+  shareBusy = false,
+  shareError = null,
+  shareUrl = null,
   onBack,
   onRetry,
+  onCreateShareLink,
 }: MemberReportScreenProps) {
   return (
     <View style={membershipStyles.screen}>
@@ -50,13 +62,17 @@ export default function MemberReportScreen({
             style={({ pressed }) => [tw`self-start flex-row items-center px-4 py-3 rounded-full bg-slate-100 mb-8`, pressed && tw`opacity-70`]}
           >
             <ArrowLeft size={17} color={membershipColors.slate} />
-            <Text style={tw`text-sm font-black text-slate-700 ml-2`}>Back to dashboard</Text>
+            <Text style={tw`text-sm font-black text-slate-700 ml-2`}>{publicView ? 'Back to home' : 'Back to dashboard'}</Text>
           </Pressable>
 
-          <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mb-3`}>PREMIUM REPORT</Text>
+          <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mb-3`}>{publicView ? 'SHARED REPORT' : 'PREMIUM REPORT'}</Text>
           <Text style={tw`text-4xl font-black tracking-tight text-slate-950 mb-3`}>Safety report</Text>
           <Text style={tw`text-base text-slate-500 leading-6 mb-6`}>
-            {report ? `${report.label} report generated from ${report.dataMonthDisplay} Police.uk data.` : 'Preparing the latest report for this watched place.'}
+            {report
+              ? `${report.label} report generated from ${report.dataMonthDisplay} Police.uk data.`
+              : publicView
+                ? 'Preparing the shared report view.'
+                : 'Preparing the latest report for this watched place.'}
           </Text>
 
           {loading ? (
@@ -77,14 +93,37 @@ export default function MemberReportScreen({
             </View>
           ) : null}
 
-          {report ? <ReportContent report={report} /> : null}
+          {report ? (
+            <ReportContent
+              report={report}
+              publicView={publicView}
+              shareBusy={shareBusy}
+              shareError={shareError}
+              shareUrl={shareUrl}
+              onCreateShareLink={onCreateShareLink}
+            />
+          ) : null}
         </View>
       </ScrollView>
     </View>
   );
 }
 
-function ReportContent({ report }: { report: MemberReport }) {
+function ReportContent({
+  report,
+  publicView,
+  shareBusy,
+  shareError,
+  shareUrl,
+  onCreateShareLink,
+}: {
+  report: MemberReport;
+  publicView: boolean;
+  shareBusy: boolean;
+  shareError: string | null;
+  shareUrl: string | null;
+  onCreateShareLink?: () => Promise<void>;
+}) {
   const trendPoints = topTrendPoints(report);
   const trendColor = directionColor(report.trend.direction);
 
@@ -116,6 +155,57 @@ function ReportContent({ report }: { report: MemberReport }) {
 
         <Text style={tw`text-sm text-slate-600 leading-6 mb-5`}>{report.summary}</Text>
         <PrintReport report={report} />
+
+        {!publicView ? (
+          <View style={tw`mt-4`}>
+            <Pressable
+              onPress={() => void onCreateShareLink?.()}
+              disabled={shareBusy}
+              accessibilityRole="button"
+              style={({ pressed }) => [membershipStyles.secondaryButton, shareBusy && tw`opacity-60`, pressed && !shareBusy && tw`bg-slate-50`]}
+            >
+              {shareBusy ? <ActivityIndicator color={membershipColors.indigo} /> : <Share2 size={17} color={membershipColors.indigo} />}
+              <Text style={tw`text-sm font-black text-indigo-700 ml-2`}>{shareBusy ? 'Creating share link' : 'Create share link'}</Text>
+            </Pressable>
+            {shareUrl ? (
+              <View style={tw`rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4 mt-3`}>
+                <Text style={tw`text-[10px] font-black tracking-widest text-emerald-700 uppercase mb-2`}>Shareable report link</Text>
+                <Text selectable style={tw`text-xs text-emerald-900 leading-5 mb-3`}>{shareUrl}</Text>
+                <View style={tw`flex-row gap-3`}>
+                  <Pressable
+                    onPress={() => void Linking.openURL(shareUrl).catch(() => undefined)}
+                    accessibilityRole="link"
+                    style={({ pressed }) => [membershipStyles.secondaryButton, tw`flex-1`, pressed && tw`bg-emerald-100`]}
+                  >
+                    <ExternalLink size={15} color={membershipColors.emerald} />
+                    <Text style={tw`text-xs font-black text-emerald-800 ml-2`}>Open link</Text>
+                  </Pressable>
+                  {Platform.OS === 'web' ? (
+                    <Pressable
+                      onPress={() => {
+                        void globalThis.navigator?.clipboard?.writeText?.(shareUrl);
+                      }}
+                      accessibilityRole="button"
+                      style={({ pressed }) => [membershipStyles.secondaryButton, tw`flex-1`, pressed && tw`bg-emerald-100`]}
+                    >
+                      <Copy size={15} color={membershipColors.emerald} />
+                      <Text style={tw`text-xs font-black text-emerald-800 ml-2`}>Copy link</Text>
+                    </Pressable>
+                  ) : null}
+                </View>
+              </View>
+            ) : null}
+            {shareError ? (
+              <Text selectable style={tw`text-xs font-bold text-rose-600 mt-3`}>{shareError}</Text>
+            ) : null}
+          </View>
+        ) : (
+          <View style={tw`rounded-2xl border border-indigo-100 bg-indigo-50 px-4 py-4 mt-4`}>
+            <Text style={tw`text-xs text-indigo-900 leading-5`}>
+              This shared report is a public informational snapshot. It is not an emergency alert, live police feed, or guarantee of personal safety.
+            </Text>
+          </View>
+        )}
       </View>
 
       <View style={[membershipStyles.card, tw`mb-5`]}>

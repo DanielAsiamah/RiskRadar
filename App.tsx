@@ -36,7 +36,7 @@ import { apiRequest } from './api/client';
 import { getAlertPreferences, updateAlertPreferences, type AlertPreferences, type AlertPreferencesInput } from './api/alerts';
 import { addWatchedPlace, getDashboard, removeWatchedPlace, renameWatchedPlace } from './api/dashboard';
 import { beginCheckout, getAccount, openCustomerPortal } from './api/membership';
-import { getMemberReport, type MemberReport } from './api/reports';
+import { createMemberReportShareLink, getMemberReport, getSharedMemberReport, type MemberReport } from './api/reports';
 import { supabaseConfigured, webAppUrl } from './auth/client';
 import { useAuth } from './auth/useAuth';
 import {
@@ -127,6 +127,15 @@ function parseRouteGuardUsage(raw: string | null) {
 const initialMembershipRoute = Platform.OS === 'web' && typeof globalThis.location?.href === 'string'
   ? membershipReturnRoute(globalThis.location.href)
   : null;
+const initialSharedReportToken = Platform.OS === 'web' && typeof globalThis.location?.href === 'string'
+  ? (() => {
+      try {
+        return new URL(globalThis.location.href).searchParams.get('report');
+      } catch {
+        return null;
+      }
+    })()
+  : null;
 
 function premiumStateForDestination(destination: PremiumDestination): AppState {
   return destination === 'COMPARE' ? 'COMPARE' : 'DASHBOARD';
@@ -134,7 +143,7 @@ function premiumStateForDestination(destination: PremiumDestination): AppState {
 
 export default function App() {
   const { user, loading: authLoading, signInWithEmail, signOut } = useAuth();
-  const [appState, setAppState] = useState<AppState>(initialMembershipRoute ? 'ACCOUNT' : 'HOME');
+  const [appState, setAppState] = useState<AppState>(initialSharedReportToken ? 'REPORT' : initialMembershipRoute ? 'ACCOUNT' : 'HOME');
   const [postcodeInput, setPostcodeInput] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PostcodeResult | null>(null);
@@ -167,6 +176,11 @@ export default function App() {
   const [memberReportLoading, setMemberReportLoading] = useState(false);
   const [memberReportError, setMemberReportError] = useState<string | null>(null);
   const [selectedReportWatchId, setSelectedReportWatchId] = useState<string | null>(null);
+  const [memberReportPublicView, setMemberReportPublicView] = useState(Boolean(initialSharedReportToken));
+  const [memberReportShareBusy, setMemberReportShareBusy] = useState(false);
+  const [memberReportShareError, setMemberReportShareError] = useState<string | null>(null);
+  const [memberReportShareUrl, setMemberReportShareUrl] = useState<string | null>(null);
+  const [sharedReportToken, setSharedReportToken] = useState<string | null>(initialSharedReportToken);
   const [routeScansUsed, setRouteScansUsed] = useState(0);
   const [routeScanUsageHydrated, setRouteScanUsageHydrated] = useState(false);
   const [liveRadarStore, setLiveRadarStore] = useState<LiveRadarStore>(() => createDefaultLiveRadarStore());
@@ -313,6 +327,7 @@ export default function App() {
     try {
       setMemberReportLoading(true);
       setMemberReportError(null);
+      setMemberReportPublicView(false);
       const report = await getMemberReport(watchId, timeoutMs, request.signal);
       if (!request.isCurrent()) return null;
       setMemberReport(report);
@@ -320,6 +335,25 @@ export default function App() {
     } catch (requestError) {
       if (!request.isCurrent()) return null;
       setMemberReportError(requestError instanceof Error ? requestError.message : 'Unable to load this Premium report.');
+      return null;
+    } finally {
+      if (request.isCurrent()) setMemberReportLoading(false);
+    }
+  };
+
+  const loadSharedReport = async (token: string, timeoutMs = 60_000) => {
+    const request = reportRequests.current.begin();
+    try {
+      setMemberReportLoading(true);
+      setMemberReportError(null);
+      setMemberReportPublicView(true);
+      const report = await getSharedMemberReport(token, timeoutMs, request.signal);
+      if (!request.isCurrent()) return null;
+      setMemberReport(report);
+      return report;
+    } catch (requestError) {
+      if (!request.isCurrent()) return null;
+      setMemberReportError(requestError instanceof Error ? requestError.message : 'Unable to load this shared report.');
       return null;
     } finally {
       if (request.isCurrent()) setMemberReportLoading(false);
@@ -405,6 +439,10 @@ export default function App() {
     setMemberReport(null);
     setMemberReportLoading(false);
     setMemberReportError(null);
+    setMemberReportShareBusy(false);
+    setMemberReportShareError(null);
+    setMemberReportShareUrl(null);
+    setMemberReportPublicView(Boolean(initialSharedReportToken));
     setSelectedReportWatchId(null);
   }, [user?.id]);
 
@@ -430,10 +468,10 @@ export default function App() {
   }, [account?.premium, appState, authLoading, pendingPremiumDestination, user?.id]);
 
   useEffect(() => {
-    if (!authLoading && !user && (appState === 'ACCOUNT' || appState === 'DASHBOARD' || appState === 'ALERT_SETTINGS' || appState === 'REPORT') && !billingReturnPending) {
+    if (!authLoading && !user && (appState === 'ACCOUNT' || appState === 'DASHBOARD' || appState === 'ALERT_SETTINGS' || (appState === 'REPORT' && !memberReportPublicView)) && !billingReturnPending) {
       setAppState('SIGN_IN');
     }
-  }, [appState, authLoading, billingReturnPending, user?.id]);
+  }, [appState, authLoading, billingReturnPending, memberReportPublicView, user?.id]);
 
   useEffect(() => {
     if (appState !== 'DASHBOARD' || !user || !account?.premium) return;
@@ -528,6 +566,12 @@ export default function App() {
       if (deadlineTimer) clearTimeout(deadlineTimer);
     };
   }, [authLoading, billingReturnPending, user?.id]);
+
+  useEffect(() => {
+    if (!sharedReportToken || Platform.OS !== 'web') return;
+    setAppState('REPORT');
+    void loadSharedReport(sharedReportToken);
+  }, [sharedReportToken]);
 
   const handleSearch = async () => {
     const submissionDecision = searchSubmissionDecision(dailySearchUsageHydrated, postcodeInput);
@@ -810,6 +854,10 @@ export default function App() {
 
   const handleOpenReport = async (watchId: string) => {
     setPricingError(null);
+    setMemberReportShareBusy(false);
+    setMemberReportShareError(null);
+    setMemberReportShareUrl(null);
+    setMemberReportPublicView(false);
     if (!user) {
       await rememberPremiumDestination('REPORTS');
       setAppState('SIGN_IN');
@@ -829,12 +877,43 @@ export default function App() {
   };
 
   const handleReportRetry = async () => {
+    if (memberReportPublicView) {
+      if (!sharedReportToken) {
+        setMemberReportError('No shared report token is available.');
+        return;
+      }
+
+      await loadSharedReport(sharedReportToken, 40_000);
+      return;
+    }
+
     if (!selectedReportWatchId) {
       setMemberReportError('No watched place is selected for this report.');
       return;
     }
 
     await loadMemberReport(selectedReportWatchId, 40_000);
+  };
+
+  const handleCreateReportShareLink = async () => {
+    if (!selectedReportWatchId) {
+      setMemberReportShareError('No watched place is selected for sharing.');
+      return;
+    }
+
+    setMemberReportShareBusy(true);
+    setMemberReportShareError(null);
+    try {
+      const share = await createMemberReportShareLink(selectedReportWatchId);
+      setMemberReportShareUrl(share.shareUrl);
+      if (Platform.OS === 'web') {
+        await globalThis.navigator?.clipboard?.writeText?.(share.shareUrl);
+      }
+    } catch (shareError) {
+      setMemberReportShareError(shareError instanceof Error ? shareError.message : 'Unable to create a report share link.');
+    } finally {
+      setMemberReportShareBusy(false);
+    }
   };
 
   const handleCheckout = async () => {
@@ -919,6 +998,11 @@ export default function App() {
       setMemberReport(null);
       setMemberReportLoading(false);
       setMemberReportError(null);
+      setMemberReportShareBusy(false);
+      setMemberReportShareError(null);
+      setMemberReportShareUrl(null);
+      setMemberReportPublicView(false);
+      setSharedReportToken(null);
       setSelectedReportWatchId(null);
       await clearPremiumDestination();
       await clearPendingWatchPostcode();
@@ -1448,8 +1532,13 @@ export default function App() {
             report={memberReport}
             loading={memberReportLoading}
             error={memberReportError}
-            onBack={() => setAppState('DASHBOARD')}
+            publicView={memberReportPublicView}
+            shareBusy={memberReportShareBusy}
+            shareError={memberReportShareError}
+            shareUrl={memberReportShareUrl}
+            onBack={() => setAppState(memberReportPublicView ? 'HOME' : 'DASHBOARD')}
             onRetry={handleReportRetry}
+            onCreateShareLink={memberReportPublicView ? undefined : handleCreateReportShareLink}
           />
         )}
 

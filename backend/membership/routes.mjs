@@ -66,6 +66,7 @@ export function createMembershipRouteHandler({
   });
   const alertPreferencesRoutes = createAlertPreferencesRouteHandler({ store });
   const reportRoutes = createReportRouteHandler({
+    config,
     watchlistStore,
     analyzeLocation,
     fetchMonthlyCrimeSeries,

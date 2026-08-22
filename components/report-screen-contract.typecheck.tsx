@@ -75,8 +75,13 @@ export const memberReportScreenFixture = React.createElement(MemberReportScreen,
   report: reportFixture,
   loading: false,
   error: null,
+  publicView: false,
+  shareBusy: false,
+  shareError: null,
+  shareUrl: 'https://riskradar.app/?report=token_123',
   onBack: () => undefined,
   onRetry: async () => undefined,
+  onCreateShareLink: async () => undefined,
 });
 
 export const printReportFixture = React.createElement(PrintReport, {

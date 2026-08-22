@@ -305,6 +305,14 @@ For a web-only local run, `npm run build:web` followed by `npm run api` serves t
 - `GET /api/reports/:watchId`
   Returns a private Premium report for one watched postcode, including the published data month, twelve-month trend, category changes, hotspot roads, official evidence links, and the printable disclosure copy.
 
+- `GET /api/reports/:watchId/share`
+  Creates a signed share link for one Premium report owned by the signed-in member.
+
+- `GET /api/report-share`
+  Returns a public shared report view from a signed share token.
+  - Query parameter:
+    - `token`
+
 - `POST /api/billing/checkout-reference`
   Creates a signed Stripe checkout URL for the signed-in member.
 
