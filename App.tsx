@@ -23,6 +23,7 @@ import Pricing from './components/Pricing';
 import SignIn from './components/SignIn';
 import RouteGuard from './components/RouteGuard';
 import SafetySession from './components/SafetySession';
+import LiveRadar from './components/LiveRadar';
 import Advertise from './components/Advertise';
 import Faq from './components/Faq';
 import Privacy from './components/Privacy';
@@ -34,6 +35,13 @@ import { beginCheckout, getAccount, openCustomerPortal } from './api/membership'
 import { getMemberReport, type MemberReport } from './api/reports';
 import { supabaseConfigured, webAppUrl } from './auth/client';
 import { useAuth } from './auth/useAuth';
+import {
+  createDefaultLiveRadarStore,
+  parseLiveRadarStore,
+  serializeLiveRadarStore,
+} from './live-radar/storage.ts';
+import { readLiveRadarPermissions, requestBackgroundPermission, requestForegroundPermission, requestNotificationPermission } from './live-radar/permissions.ts';
+import type { LiveRadarPermissionSnapshot, LiveRadarStore } from './live-radar/types.ts';
 import type { DashboardView } from './membership/dashboard-types';
 import {
   BILLING_CONFIRMATION_WINDOW_MS,
@@ -69,6 +77,7 @@ type AppState =
   | 'REPORT'
   | 'ACCOUNT'
   | 'ROUTE_GUARD'
+  | 'LIVE_RADAR'
   | 'SAFETY_SESSION'
   | 'FAQ'
   | 'PRIVACY'
@@ -82,6 +91,7 @@ const RECENT_SEARCHES_STORAGE_KEY = 'riskradar_recent_searches';
 const PENDING_PREMIUM_STORAGE_KEY = 'riskradar_pending_premium_destination';
 const PENDING_WATCHED_POSTCODE_STORAGE_KEY = 'riskradar_pending_watch_postcode';
 const ROUTE_GUARD_USAGE_STORAGE_KEY = 'riskradar_route_guard_usage';
+const LIVE_RADAR_STORAGE_KEY = 'riskradar_live_radar';
 
 function currentRouteGuardMonth() {
   const now = new Date();
@@ -145,6 +155,11 @@ export default function App() {
   const [selectedReportWatchId, setSelectedReportWatchId] = useState<string | null>(null);
   const [routeScansUsed, setRouteScansUsed] = useState(0);
   const [routeScanUsageHydrated, setRouteScanUsageHydrated] = useState(false);
+  const [liveRadarStore, setLiveRadarStore] = useState<LiveRadarStore>(() => createDefaultLiveRadarStore());
+  const [liveRadarPermissions, setLiveRadarPermissions] = useState<LiveRadarPermissionSnapshot>(createDefaultLiveRadarStore().permissions);
+  const [liveRadarBusy, setLiveRadarBusy] = useState(false);
+  const [liveRadarWarning, setLiveRadarWarning] = useState<string | null>(null);
+  const [liveRadarOnboardingVisible, setLiveRadarOnboardingVisible] = useState(false);
   const searchRequestId = useRef(0);
   const accountRequests = useRef(createLatestRequestCoordinator());
   const dashboardRequests = useRef(createLatestRequestCoordinator());
@@ -156,15 +171,20 @@ export default function App() {
   useEffect(() => {
     const loadState = async () => {
       try {
-        const [savedUsage, savedSearches, savedDestination, savedPendingWatchPostcode, savedRouteGuardUsage] = await Promise.all([
+        const [savedUsage, savedSearches, savedDestination, savedPendingWatchPostcode, savedRouteGuardUsage, savedLiveRadarStore] = await Promise.all([
           AsyncStorage.getItem(DAILY_SEARCH_STORAGE_KEY),
           AsyncStorage.getItem(RECENT_SEARCHES_STORAGE_KEY),
           AsyncStorage.getItem(PENDING_PREMIUM_STORAGE_KEY),
           AsyncStorage.getItem(PENDING_WATCHED_POSTCODE_STORAGE_KEY),
           AsyncStorage.getItem(ROUTE_GUARD_USAGE_STORAGE_KEY),
+          AsyncStorage.getItem(LIVE_RADAR_STORAGE_KEY),
         ]);
         setDailySearchUsage(parseDailySearchUsage(savedUsage));
         setRouteScansUsed(parseRouteGuardUsage(savedRouteGuardUsage));
+        const parsedLiveRadarStore = parseLiveRadarStore(savedLiveRadarStore);
+        setLiveRadarStore(parsedLiveRadarStore);
+        setLiveRadarPermissions(parsedLiveRadarStore.permissions);
+        setLiveRadarWarning(parsedLiveRadarStore.lastWarning);
         if (savedSearches) {
           const parsedSearches = JSON.parse(savedSearches);
           if (Array.isArray(parsedSearches)) setRecentSearches(parsedSearches.filter((value) => typeof value === 'string').slice(0, 3));
@@ -185,6 +205,27 @@ export default function App() {
     };
     void loadState();
   }, []);
+
+  useEffect(() => {
+    const refreshPermissions = async () => {
+      try {
+        const permissions = await readLiveRadarPermissions();
+        setLiveRadarPermissions(permissions);
+        setLiveRadarStore((current) => ({ ...current, permissions }));
+      } catch {
+        // Keep the last known local snapshot if permissions cannot be read yet.
+      }
+    };
+
+    void refreshPermissions();
+  }, []);
+
+  const persistLiveRadarStore = async (nextStore: LiveRadarStore) => {
+    setLiveRadarStore(nextStore);
+    setLiveRadarPermissions(nextStore.permissions);
+    setLiveRadarWarning(nextStore.lastWarning);
+    await AsyncStorage.setItem(LIVE_RADAR_STORAGE_KEY, serializeLiveRadarStore(nextStore));
+  };
 
   const refreshAccount = async (timeoutMs = 40_000) => {
     if (!user) {
@@ -893,6 +934,113 @@ export default function App() {
     }));
   };
 
+  const handleOpenLiveRadar = () => {
+    setLiveRadarWarning(null);
+    setAppState('LIVE_RADAR');
+  };
+
+  const handleLiveRadarRequestForeground = async () => {
+    const permissions = await requestForegroundPermission();
+    const nextStore = { ...liveRadarStore, permissions };
+    await persistLiveRadarStore(nextStore);
+  };
+
+  const handleLiveRadarRequestBackground = async () => {
+    const permissions = await requestBackgroundPermission();
+    const nextStore = { ...liveRadarStore, permissions };
+    await persistLiveRadarStore(nextStore);
+  };
+
+  const handleLiveRadarRequestNotifications = async () => {
+    const permissions = await requestNotificationPermission();
+    const nextStore = { ...liveRadarStore, permissions };
+    await persistLiveRadarStore(nextStore);
+  };
+
+  const handleLiveRadarStart = async () => {
+    if (!account?.premium) {
+      setPricingError(null);
+      setAppState('PRICING');
+      return;
+    }
+
+    if (liveRadarPermissions.foreground !== 'granted' || (Platform.OS !== 'web' && liveRadarPermissions.background !== 'granted')) {
+      setLiveRadarOnboardingVisible(true);
+      setLiveRadarWarning('Grant the required permissions before turning on Live Radar.');
+      return;
+    }
+
+    const nextStore: LiveRadarStore = {
+      ...liveRadarStore,
+      settings: {
+        ...liveRadarStore.settings,
+        enabled: true,
+        mode: Platform.OS === 'web' ? 'web-session' : 'native-background',
+        onboardingCompleted: true,
+      },
+      lastWarning: Platform.OS === 'web'
+        ? 'Journey Radar is ready. Keep this page open to monitor your current area.'
+        : 'Live Radar is ready. Scan My Current Location Now will populate the first reading in the next task.',
+    };
+    setLiveRadarOnboardingVisible(false);
+    await persistLiveRadarStore(nextStore);
+  };
+
+  const handleLiveRadarStop = async () => {
+    const nextStore: LiveRadarStore = {
+      ...liveRadarStore,
+      settings: {
+        ...liveRadarStore.settings,
+        enabled: false,
+      },
+      lastWarning: null,
+    };
+    await persistLiveRadarStore(nextStore);
+    setLiveRadarWarning(null);
+  };
+
+  const handleLiveRadarScanNow = async () => {
+    setLiveRadarBusy(true);
+    try {
+      setLiveRadarWarning('Scan My Current Location Now is wired in. The live location analysis loop is connected in the next task.');
+    } finally {
+      setLiveRadarBusy(false);
+    }
+  };
+
+  const handleToggleReducedAlerts = async () => {
+    const nextStore: LiveRadarStore = {
+      ...liveRadarStore,
+      settings: {
+        ...liveRadarStore.settings,
+        alertsReduced: !liveRadarStore.settings.alertsReduced,
+      },
+    };
+    await persistLiveRadarStore(nextStore);
+  };
+
+  const handleMuteLiveRadarPostcode = async () => {
+    const postcode = liveRadarStore.currentReading?.postcode;
+    if (!postcode) {
+      setLiveRadarWarning('No Live Radar postcode is available to mute yet.');
+      return;
+    }
+    const mutedPostcodes = liveRadarStore.settings.mutedPostcodes.includes(postcode)
+      ? liveRadarStore.settings.mutedPostcodes.filter((value) => value !== postcode)
+      : [...liveRadarStore.settings.mutedPostcodes, postcode];
+    const nextStore: LiveRadarStore = {
+      ...liveRadarStore,
+      settings: {
+        ...liveRadarStore.settings,
+        mutedPostcodes,
+      },
+      lastWarning: mutedPostcodes.includes(postcode)
+        ? `${postcode} is muted in Live Radar.`
+        : `${postcode} was removed from muted Live Radar postcodes.`,
+    };
+    await persistLiveRadarStore(nextStore);
+  };
+
   const openTrustScreen = (nextState: TrustAppState) => {
     if (appState === nextState) return;
     trustBackStack.current.push(appState);
@@ -940,6 +1088,7 @@ export default function App() {
               routeGuardBackState.current = 'HOME';
               setAppState('ROUTE_GUARD');
             }}
+            openLiveRadar={handleOpenLiveRadar}
             openAccount={() => {
               const decision = membershipEntryDecision(supabaseConfigured, Boolean(user));
               setAppState(decision === 'account' ? 'ACCOUNT' : 'SIGN_IN');
@@ -978,6 +1127,31 @@ export default function App() {
               setPricingError(null);
               setAppState('PRICING');
             }}
+          />
+        )}
+        {appState === 'LIVE_RADAR' && (
+          <LiveRadar
+            premium={account?.premium === true}
+            membershipAvailable={supabaseConfigured}
+            status={liveRadarStore.settings.enabled ? 'active' : 'disabled'}
+            permissions={liveRadarPermissions}
+            onboardingVisible={liveRadarOnboardingVisible}
+            busy={liveRadarBusy}
+            currentReading={liveRadarStore.currentReading}
+            history={liveRadarStore.history}
+            warning={liveRadarWarning}
+            alertsReduced={liveRadarStore.settings.alertsReduced}
+            onBack={() => setAppState('HOME')}
+            onOpenUpgrade={() => setAppState('PRICING')}
+            onDismissOnboarding={() => setLiveRadarOnboardingVisible(false)}
+            onStart={handleLiveRadarStart}
+            onStop={handleLiveRadarStop}
+            onScanNow={handleLiveRadarScanNow}
+            onRequestForeground={handleLiveRadarRequestForeground}
+            onRequestBackground={handleLiveRadarRequestBackground}
+            onRequestNotifications={handleLiveRadarRequestNotifications}
+            onToggleReducedAlerts={handleToggleReducedAlerts}
+            onMutePostcode={handleMuteLiveRadarPostcode}
           />
         )}
         {appState === 'SAFETY_SESSION' && <SafetySession onBack={() => setAppState('HOME')} />}
@@ -1036,6 +1210,7 @@ export default function App() {
               routeGuardBackState.current = 'PRICING';
               setAppState('ROUTE_GUARD');
             }}
+            onOpenLiveRadar={handleOpenLiveRadar}
             onOpenSafetySession={() => setAppState('SAFETY_SESSION')}
             trustNavigation={trustNavigation}
           />
@@ -1056,6 +1231,7 @@ export default function App() {
             onSelectWatchedPlace={handleSelectWatchedPlace}
             onClearPendingPostcode={() => { void clearPendingWatchPostcode(); }}
             onOpenCompare={() => setAppState('COMPARE')}
+            onOpenLiveRadar={handleOpenLiveRadar}
             onOpenAlertSettings={() => { void handleOpenAlertSettings(); }}
             onOpenReport={(watchId) => { void handleOpenReport(watchId); }}
             trustNavigation={trustNavigation}

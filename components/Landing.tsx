@@ -8,7 +8,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { BarChart3, ChevronRight, Compass, LocateFixed, Map, MapPin, Navigation, Search, ShieldCheck, Sparkles } from 'lucide-react-native';
+import { BarChart3, ChevronRight, Compass, LocateFixed, Map, MapPin, Navigation, Radar, Search, ShieldCheck, Sparkles } from 'lucide-react-native';
 import tw from 'twrnc';
 import { searchSubmissionDecision } from '../membership/client-state.mjs';
 import SiteFooter, { type TrustNavigation } from './SiteFooter';
@@ -37,6 +37,7 @@ interface LandingProps {
   openMapExplorer: () => void;
   openComparison: () => void;
   openRouteGuard: () => void;
+  openLiveRadar: () => void;
   openAccount: () => void;
   openPremium: () => void;
   openSafetySession: () => void;
@@ -64,6 +65,7 @@ export default function Landing({
   openMapExplorer,
   openComparison,
   openRouteGuard,
+  openLiveRadar,
   openAccount,
   openPremium,
   openSafetySession,
@@ -117,7 +119,7 @@ export default function Landing({
             </Text>
             <Text style={tw`text-slate-500 leading-5 mb-3`}>
               {membershipAvailable
-                ? 'Premium is GBP 15/month for unlimited checks, Route Guard, and Safety Sessions.'
+                ? 'Premium is GBP 15/month for unlimited checks, Route Guard, Live Radar, and Safety Sessions.'
                 : 'Account setup is being connected. Search, maps, nearby suggestions, and public evidence remain available.'}
             </Text>
             <Pressable onPress={openPremium} hitSlop={6} accessibilityRole="button">
@@ -171,6 +173,25 @@ export default function Landing({
             <FeatureButton label="Compare" icon={<BarChart3 size={21} color="#0f172a" />} onPress={openComparison} />
             <FeatureButton label="Route Guard" badge="PRO" icon={<Navigation size={21} color="#4f46e5" />} onPress={openRouteGuard} />
           </View>
+
+          <Pressable
+            onPress={openLiveRadar}
+            accessibilityRole="button"
+            style={({ pressed }) => [tw`rounded-3xl border border-emerald-100 bg-emerald-50 px-5 py-4 flex-row items-center mb-8`, pressed && tw`opacity-75`]}
+          >
+            <View style={tw`w-11 h-11 rounded-2xl bg-white items-center justify-center mr-3`}>
+              <Radar size={20} color="#059669" />
+            </View>
+            <View style={tw`flex-1`}>
+              <Text style={tw`text-sm font-black text-slate-950`}>Journey Radar</Text>
+              <Text style={tw`text-xs text-slate-500 mt-1`}>
+                {Platform.OS === 'web'
+                  ? 'Keep this page open to monitor your current area.'
+                  : 'Live Radar can watch for higher-risk area changes on this device.'}
+              </Text>
+            </View>
+            <ChevronRight size={18} color="#059669" />
+          </Pressable>
 
           <Pressable
             onPress={openPremium}

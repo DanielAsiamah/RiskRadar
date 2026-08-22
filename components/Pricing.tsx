@@ -1,6 +1,6 @@
 import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
-import { ArrowLeft, Check, CreditCard, ShieldCheck, Sparkles } from 'lucide-react-native';
+import { ArrowLeft, Check, CreditCard, Radar, ShieldCheck, Sparkles } from 'lucide-react-native';
 import tw from 'twrnc';
 
 import { membershipColors, membershipStyles } from './membershipStyles';
@@ -24,11 +24,12 @@ export interface PricingProps {
   onBack(): void;
   onCheckout(): Promise<void>;
   onOpenRouteGuard(): void;
+  onOpenLiveRadar(): void;
   onOpenSafetySession(): void;
   trustNavigation: TrustNavigation;
 }
 
-export default function Pricing({ authenticated, membershipAvailable, busy, error, onBack, onCheckout, onOpenRouteGuard, onOpenSafetySession, trustNavigation }: PricingProps) {
+export default function Pricing({ authenticated, membershipAvailable, busy, error, onBack, onCheckout, onOpenRouteGuard, onOpenLiveRadar, onOpenSafetySession, trustNavigation }: PricingProps) {
   return (
     <View style={membershipStyles.screen}>
       <ScrollView contentContainerStyle={membershipStyles.scrollContent} contentInsetAdjustmentBehavior="automatic">
@@ -60,6 +61,15 @@ export default function Pricing({ authenticated, membershipAvailable, busy, erro
           </Text>
 
           <Paywall onOpenRouteGuard={onOpenRouteGuard} onOpenSafetySession={onOpenSafetySession} />
+
+          <Pressable
+            onPress={onOpenLiveRadar}
+            style={({ pressed }) => [membershipStyles.secondaryButton, tw`mb-5`, pressed && tw`bg-slate-50`]}
+            accessibilityRole="button"
+          >
+            <Radar size={17} color={membershipColors.indigo} />
+            <Text style={tw`text-sm font-black text-indigo-700 ml-2`}>Preview Live Radar</Text>
+          </Pressable>
 
           <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`border-indigo-100 mb-5`]}>
             <View style={tw`flex-row items-end mb-2`}>

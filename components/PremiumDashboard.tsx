@@ -26,6 +26,7 @@ export interface PremiumDashboardProps {
   onSelectWatchedPlace(id: string): Promise<void>;
   onClearPendingPostcode(): void;
   onOpenCompare(): void;
+  onOpenLiveRadar(): void;
   onOpenAlertSettings(): void;
   onOpenReport(watchId: string): void;
   trustNavigation: TrustNavigation;
@@ -110,6 +111,7 @@ export default function PremiumDashboard({
   onSelectWatchedPlace,
   onClearPendingPostcode,
   onOpenCompare,
+  onOpenLiveRadar,
   onOpenAlertSettings,
   onOpenReport,
   trustNavigation,
@@ -186,6 +188,15 @@ export default function PremiumDashboard({
               <Text style={tw`text-sm font-black text-slate-700 ml-2`}>Compare areas</Text>
             </Pressable>
           </View>
+
+          <Pressable
+            onPress={onOpenLiveRadar}
+            style={({ pressed }) => [membershipStyles.secondaryButton, tw`mb-5`, pressed && tw`bg-slate-50`]}
+            accessibilityRole="button"
+          >
+            <ShieldCheck size={17} color={membershipColors.indigo} />
+            <Text style={tw`text-sm font-black text-indigo-700 ml-2`}>Open Live Radar</Text>
+          </Pressable>
 
           <Pressable
             onPress={onOpenAlertSettings}

@@ -108,6 +108,7 @@ export const premiumDashboardFixture = React.createElement(PremiumDashboard, {
   onSelectWatchedPlace: async (_id: string) => undefined,
   onClearPendingPostcode: () => undefined,
   onOpenCompare: () => undefined,
+  onOpenLiveRadar: () => undefined,
   onOpenAlertSettings: () => undefined,
   onOpenReport: (_watchId: string) => undefined,
   trustNavigation,

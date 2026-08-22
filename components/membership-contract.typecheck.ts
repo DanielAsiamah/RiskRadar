@@ -39,6 +39,7 @@ export const pricingFixture = React.createElement(Pricing, {
   onBack: () => undefined,
   onCheckout: async () => undefined,
   onOpenRouteGuard: () => undefined,
+  onOpenLiveRadar: () => undefined,
   onOpenSafetySession: () => undefined,
   trustNavigation,
 });
