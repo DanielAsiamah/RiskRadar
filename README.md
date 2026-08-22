@@ -10,6 +10,7 @@ It combines postcode lookup, UK Police crime feeds, local boundaries, monthly tr
 - Clickable point analysis for map-selected coordinates
 - Polygon area analysis for user-defined boundaries
 - Six-to-twelve-month crime and category trends
+- Noise-resistant recent spike detection against the previous three usable months
 - Hotspot clusters and raw map-ready incident feeds
 - Postcode, point, and area comparisons
 - Nearby postcode suggestions based on device location

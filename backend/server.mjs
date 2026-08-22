@@ -3,8 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { buildAnalysisCacheStorageKey } from './analysis-cache-key.mjs';
 import { createCrimeFileSource } from './crime-file-source.mjs';
 import { blendPostcodeScore, calculateCrimeScore, crimeScoreModel } from './crime-score.mjs';
+import { detectRecentCrimeSpike } from './crime-spike.mjs';
 import { buildDataFreshness, findLatestAdvertisedMonth } from './data-freshness.mjs';
 import { mapSettledWithConcurrency } from './bounded-concurrency.mjs';
 import { apiCatalog } from './api-catalog.mjs';
@@ -72,7 +74,6 @@ const SAFETY_SESSION_MAX_ENTRIES = Math.min(1000, Math.max(20, Number(process.en
 const CRIME_SOURCE_MODE = String(process.env.CRIME_SOURCE_MODE || 'api').trim().toLowerCase() === 'files' ? 'files' : 'api';
 const CRIME_DATA_ROOT = process.env.CRIME_DATA_ROOT || path.join(process.cwd(), 'backend', 'data', 'police');
 const CRIME_SOURCE_FALLBACK_TO_API = process.env.CRIME_SOURCE_FALLBACK_TO_API !== 'false';
-const ANALYSIS_CACHE_SCHEMA_VERSION = 'structured-risk-evidence-v5';
 const SERVER_STARTED_AT = new Date();
 const STARTUP_GRACE_PERIOD_MS = Math.max(0, Number(process.env.STARTUP_GRACE_PERIOD_MS) || 5000);
 const SHUTDOWN_TIMEOUT_MS = Math.max(1000, Number(process.env.SHUTDOWN_TIMEOUT_MS) || 10000);
@@ -1991,7 +1992,7 @@ function buildMapCompareCacheKey(payload = {}) {
 }
 
 function getCachedAnalysisResult(cacheKey) {
-  const versionedCacheKey = `${crimeScoreModel.id}:${ANALYSIS_CACHE_SCHEMA_VERSION}:${cacheKey}`;
+  const versionedCacheKey = buildAnalysisCacheStorageKey(crimeScoreModel.id, cacheKey);
   const entry = analysisResultCache.find((item) => item.key === versionedCacheKey);
 
   if (!entry) {
@@ -2012,7 +2013,7 @@ function getCachedAnalysisResult(cacheKey) {
 
 function setCachedAnalysisResult(cacheKey, value) {
   const entry = {
-    key: `${crimeScoreModel.id}:${ANALYSIS_CACHE_SCHEMA_VERSION}:${cacheKey}`,
+    key: buildAnalysisCacheStorageKey(crimeScoreModel.id, cacheKey),
     value: cloneJsonValue(value),
     expiresAt: Date.now() + ANALYSIS_CACHE_TTL_MS,
   };
@@ -3040,7 +3041,7 @@ function averageCoordinates(points) {
   };
 }
 
-function buildPremiumInsights({ trendData, areaContext, hotspotSummary, timingContext }) {
+function buildPremiumInsights({ trendData, areaContext, hotspotSummary, timingContext, recentSpike }) {
   return [
     {
       id: 'trend',
@@ -3059,6 +3060,12 @@ function buildPremiumInsights({ trendData, areaContext, hotspotSummary, timingCo
       title: 'Timing Rules',
       description: timingContext?.summary || 'No late-night, weekend, or seasonal Premium timing uplift is active right now.',
       badge: timingContext?.totalAdjustment ? `+${timingContext.totalAdjustment}` : 'Quiet',
+    },
+    {
+      id: 'recent-spike',
+      title: 'Recent Spike Detection',
+      description: recentSpike?.summary || 'Not enough usable monthly snapshots are available to test for a recent spike.',
+      badge: recentSpike?.status === 'spike' ? 'Spike' : recentSpike?.status === 'stable' ? 'Clear' : 'Waiting',
     },
     {
       id: 'area-context',
@@ -3649,6 +3656,7 @@ async function computeAreaAnalysis(area = {}) {
     monthCount: area.monthCount,
     categories: area.categories,
   });
+  const recentSpike = detectRecentCrimeSpike(trendData.monthly);
   const latestAvailableMonth = findLatestAdvertisedMonth(trendData.monthly);
   const dataFreshness = buildDataFreshness({
     dataMonth: latestAreaFeed.month,
@@ -3712,11 +3720,13 @@ async function computeAreaAnalysis(area = {}) {
       trendData,
     }),
     trendData,
+    recentSpike,
     premiumInsights: buildPremiumInsights({
       trendData,
       areaContext: `${areaContext} ${hotspotPayload.summary}`,
       hotspotSummary: hotspotPayload.summary,
       timingContext: scoreResult.timingContext,
+      recentSpike,
     }),
     hotspotData: {
       clusters: hotspotPayload.clusters,
@@ -3756,6 +3766,7 @@ async function computePointAnalysis(payload = {}) {
   const pointContext = await resolvePointContext(latitude, longitude);
   const crimeData = await fetchCrimeData(latitude, longitude);
   const trendData = await fetchCrimeHistory(latitude, longitude, monthCount);
+  const recentSpike = detectRecentCrimeSpike(trendData.monthly);
   const dataFreshness = buildDataFreshness({
     dataMonth: crimeData.month,
     latestAvailableMonth: findLatestAdvertisedMonth(trendData.monthly),
@@ -3820,11 +3831,13 @@ async function computePointAnalysis(payload = {}) {
       trendData,
     }),
     trendData,
+    recentSpike,
     premiumInsights: buildPremiumInsights({
       trendData,
       areaContext: `${areaContext} ${hotspotData.summary}`,
       hotspotSummary: hotspotData.summary,
       timingContext: crimeData.timingContext,
+      recentSpike,
     }),
     hotspotData,
     newsLink: `https://news.google.com/search?q=${encodeURIComponent(`${pointContext.district} police OR crime`)}`,
@@ -4053,6 +4066,7 @@ async function computeLocationAnalysis(query) {
   const location = await resolveLocation(query);
   const crimeData = await fetchCrimeData(location.latitude, location.longitude);
   const trendData = await fetchCrimeHistory(location.latitude, location.longitude);
+  const recentSpike = detectRecentCrimeSpike(trendData.monthly);
   const dataFreshness = buildDataFreshness({
     dataMonth: crimeData.month,
     latestAvailableMonth: findLatestAdvertisedMonth(trendData.monthly),
@@ -4129,11 +4143,13 @@ async function computeLocationAnalysis(query) {
       trendData,
     }),
     trendData,
+    recentSpike,
     premiumInsights: buildPremiumInsights({
       trendData,
       areaContext: `${areaContext} ${hotspotData.summary}`,
       hotspotSummary: hotspotData.summary,
       timingContext: crimeData.timingContext,
+      recentSpike,
     }),
     nearbyRanking,
     hotspotData,

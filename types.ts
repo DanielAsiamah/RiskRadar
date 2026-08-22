@@ -136,10 +136,30 @@ export interface TrendData {
 }
 
 export interface PremiumInsight {
-  id: 'trend' | 'category-trend' | 'area-context' | 'hotspot-map' | 'timing-rules';
+  id: 'trend' | 'category-trend' | 'area-context' | 'hotspot-map' | 'timing-rules' | 'recent-spike';
   title: string;
   description: string;
   badge: string;
+}
+
+export interface CrimeSpikeMetric {
+  latestCount: number;
+  baselineAverage: number;
+  delta: number;
+  changePercent: number;
+  spiking: boolean;
+}
+
+export interface RecentCrimeSpike {
+  status: 'spike' | 'stable' | 'insufficient-data';
+  latestMonth: string | null;
+  baselineMonths: number;
+  total: CrimeSpikeMetric;
+  categorySpikes: Array<CrimeSpikeMetric & {
+    category: 'violent-crime' | 'anti-social-behaviour' | 'robbery';
+    label: string;
+  }>;
+  summary: string;
 }
 
 export interface NearbyRankingAlternative {
@@ -204,6 +224,7 @@ export interface PostcodeResult {
     areaContext: string;
   };
   trendData: TrendData;
+  recentSpike?: RecentCrimeSpike;
   premiumInsights: PremiumInsight[];
   nearbyRanking?: NearbyRankingData;
   hotspotData?: HotspotData;

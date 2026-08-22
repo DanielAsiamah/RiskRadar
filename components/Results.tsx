@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ActivityIndicator, View, Text, ScrollView, TouchableOpacity } from 'react-native';
-import { Shield, ShieldCheck, AlertTriangle, Search, ChevronDown, Info, ExternalLink, MapPin, Medal, Lock } from 'lucide-react-native';
+import { Shield, ShieldCheck, AlertTriangle, Search, ChevronDown, Info, ExternalLink, MapPin, Medal, Lock, TrendingUp } from 'lucide-react-native';
 import tw from 'twrnc';
 import { EvidenceReference, PostcodeResult } from '../types';
 import AnimatedRiskScore from './AnimatedRiskScore';
@@ -40,6 +40,7 @@ export default function Results({
   const badge = getBadge(result.crimeData.crimeScore);
   const timingContext = result.crimeData.timingContext ?? null;
   const freshness = result.crimeData.dataFreshness;
+  const recentSpike = result.recentSpike;
   const freshnessAccent = freshness?.confidence === 'high'
     ? '#059669'
     : freshness?.confidence === 'medium'
@@ -315,6 +316,59 @@ export default function Results({
           <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
             <View style={tw`flex-row items-start justify-between mb-3`}>
               <View style={tw`flex-1 pr-4`}>
+                <Text style={tw`text-sm font-black text-slate-900 mb-2`}>Recent spike check</Text>
+                <Text style={tw`text-xs text-slate-500 leading-5`}>
+                  {premium
+                    ? (recentSpike?.summary ?? 'Spike detection is waiting for enough usable monthly snapshots.')
+                    : 'Premium compares the latest month with the previous three usable months and filters out low-volume noise.'}
+                </Text>
+              </View>
+              <View style={tw`w-11 h-11 rounded-2xl bg-rose-50 border border-rose-100 items-center justify-center`}>
+                {premium ? <TrendingUp size={19} color="#e11d48" /> : <Lock size={18} color="#e11d48" />}
+              </View>
+            </View>
+
+            {premium && recentSpike ? (
+              <>
+                <View style={tw`${recentSpike.status === 'spike' ? 'bg-rose-50 border-rose-100' : recentSpike.status === 'stable' ? 'bg-emerald-50 border-emerald-100' : 'bg-slate-50 border-slate-200'} border rounded-2xl px-4 py-4 mb-4`}>
+                  <Text style={tw`${recentSpike.status === 'spike' ? 'text-rose-700' : recentSpike.status === 'stable' ? 'text-emerald-700' : 'text-slate-600'} text-[10px] font-black tracking-widest uppercase mb-2`}>
+                    {recentSpike.status === 'spike' ? 'Spike detected' : recentSpike.status === 'stable' ? 'No recent spike' : 'More history needed'}
+                  </Text>
+                  {recentSpike.status !== 'insufficient-data' ? (
+                    <View style={tw`flex-row items-end justify-between`}>
+                      <View>
+                        <Text style={tw`text-3xl font-black text-slate-950`}>{recentSpike.total.latestCount}</Text>
+                        <Text style={tw`text-[10px] font-bold text-slate-500 uppercase`}>Latest month</Text>
+                      </View>
+                      <View style={tw`items-end`}>
+                        <Text style={tw`text-lg font-black ${recentSpike.total.changePercent > 0 ? 'text-rose-600' : 'text-emerald-700'}`}>
+                          {recentSpike.total.changePercent > 0 ? '+' : ''}{recentSpike.total.changePercent}%
+                        </Text>
+                        <Text style={tw`text-[10px] font-bold text-slate-500`}>vs {recentSpike.total.baselineAverage} average</Text>
+                      </View>
+                    </View>
+                  ) : null}
+                </View>
+
+                {recentSpike.categorySpikes.map((category) => (
+                  <View key={category.category} style={tw`flex-row items-center justify-between rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 mb-2`}>
+                    <Text style={tw`text-xs font-black text-slate-800`}>{category.label}</Text>
+                    <Text style={tw`text-xs font-black text-rose-700`}>+{category.changePercent}%</Text>
+                  </View>
+                ))}
+              </>
+            ) : (
+              <View style={tw`rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4`}>
+                <Text style={tw`text-xs text-slate-600`}>
+                  Unlock Premium to see whether total crime or a tracked category has crossed RiskRadar's recent-spike thresholds.
+                </Text>
+              </View>
+            )}
+          </View>
+
+          <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
+            <View style={tw`flex-row items-start justify-between mb-3`}>
+              <View style={tw`flex-1 pr-4`}>
                 <Text style={tw`text-sm font-black text-slate-900 mb-2`}>Timing rules</Text>
                 <Text style={tw`text-xs text-slate-500 leading-5`}>
                   {premium
@@ -397,12 +451,36 @@ export default function Results({
 
           <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
             <Text style={tw`text-sm font-black text-slate-900 mb-4`}>Crime trend</Text>
-            <TrendChart trendData={result.trendData} />
+            {premium ? (
+              <TrendChart trendData={result.trendData} />
+            ) : (
+              <View style={tw`rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4`}>
+                <View style={tw`flex-row items-center mb-2`}>
+                  <Lock size={15} color="#4f46e5" />
+                  <Text style={tw`text-xs font-black text-indigo-700 ml-2`}>Premium trend intelligence</Text>
+                </View>
+                <Text style={tw`text-xs text-slate-600 leading-5`}>
+                  Unlock the six-month total and category graph, direction labels, and month-by-month values.
+                </Text>
+              </View>
+            )}
           </View>
 
           <View style={tw`bg-white border border-slate-200 rounded-3xl p-5 shadow-sm mb-5`}>
             <Text style={tw`text-sm font-black text-slate-900 mb-4`}>Latest hotspot clusters</Text>
-            <HotspotView hotspotData={result.hotspotData} onOpenEvidence={onOpenEvidence} />
+            {premium ? (
+              <HotspotView hotspotData={result.hotspotData} onOpenEvidence={onOpenEvidence} />
+            ) : (
+              <View style={tw`rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4`}>
+                <View style={tw`flex-row items-center mb-2`}>
+                  <Lock size={15} color="#4f46e5" />
+                  <Text style={tw`text-xs font-black text-indigo-700 ml-2`}>Premium hotspot intelligence</Text>
+                </View>
+                <Text style={tw`text-xs text-slate-600 leading-5`}>
+                  Unlock concentrated incident clusters, approximate road context, and linked Police.uk evidence.
+                </Text>
+              </View>
+            )}
           </View>
         </View>
 

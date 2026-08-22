@@ -172,6 +172,8 @@ Use [.env.example](C:/Users/china/.gemini/antigravity/scratch/riskradar-expo/.en
 
 Postcode, point, and polygon analysis responses include `crimeData.dataFreshness`. This reports `high`, `medium`, `low`, or `unavailable` confidence, the public publication lag in calendar months, and whether the analysed month matches the latest month advertised by Police.uk. A high label means the result matches the latest public monthly release; it does not mean the incidents are live.
 
+The same analysis responses include `recentSpike`. RiskRadar compares the newest usable month with the previous three usable months and requires both a percentage increase and a minimum incident delta. This avoids presenting tiny low-volume movements as meaningful spikes. Total crime, violent crime, anti-social behaviour, and robbery use separate minimum-delta thresholds.
+
 ### Storage mode
 
 The backend now supports two state persistence modes:

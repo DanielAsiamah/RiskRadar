@@ -46,7 +46,7 @@ export const FAQ_ITEMS = [
     id: 'premium',
     category: 'premium-and-billing',
     question: 'What is included with RiskRadar Premium?',
-    answer: 'Premium is planned at GBP 15 per month and adds unlimited fair-use checks, watched places, deeper trends and comparisons, reports, Route Guard scans, Safety Sessions, alert controls, and an ad-free experience. Features that depend on newly published Police.uk data update when that source updates.',
+    answer: 'Premium is planned at GBP 15 per month and adds unlimited fair-use checks, watched places, deeper trends and comparisons, noise-resistant spike detection, reports, Route Guard scans, Safety Sessions, alert controls, and an ad-free experience. Features that depend on newly published Police.uk data update when that source updates.',
   },
   {
     id: 'monthly-alerts',
