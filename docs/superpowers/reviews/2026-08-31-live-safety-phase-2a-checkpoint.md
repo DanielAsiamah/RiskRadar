@@ -30,3 +30,9 @@ Add failing regression tests for each issue first, verify RED, apply the fixes, 
 ## Transfer Verification
 
 The transfer audit intentionally excludes local `.env*`, dependency folders, build output, and ignored implementation-ledger scratch files. Secrets must be recreated from the new computer's private environment or service dashboards and must never be committed.
+
+## Session Access
+
+- Codex share link for this working session: `https://chatgpt.com/s/cx_6a959d3b5610819192549aba5fac3c3f`
+- Raw hidden Codex transcript export is not available from the agent interface, so this checkpoint plus the share link is the durable handoff artifact.
+- If the same ChatGPT/Codex account is used on the new laptop, the task history and share link should remain accessible there.
