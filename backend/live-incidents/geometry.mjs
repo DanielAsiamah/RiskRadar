@@ -14,8 +14,9 @@ function normalizePointInput(value, label = 'coordinate') {
     throw new TypeError(`${label} must contain longitude and latitude`);
   }
 
-  const [longitude, latitude] = pair.map(Number);
-  if (!Number.isFinite(longitude) || !Number.isFinite(latitude)) {
+  const [longitude, latitude] = pair;
+  if (typeof longitude !== 'number' || typeof latitude !== 'number'
+    || !Number.isFinite(longitude) || !Number.isFinite(latitude)) {
     throw new TypeError(`${label} values must be finite numbers`);
   }
   if (longitude < -180 || longitude > 180) {

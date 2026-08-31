@@ -123,7 +123,12 @@ function normalizeJson(value, seen = new WeakSet()) {
     }
     result = {};
     for (const key of Object.keys(value).sort()) {
-      result[key] = normalizeJson(value[key], seen);
+      Object.defineProperty(result, key, {
+        configurable: true,
+        enumerable: true,
+        value: normalizeJson(value[key], seen),
+        writable: true,
+      });
     }
   }
   seen.delete(value);
@@ -163,15 +168,29 @@ function normalizeCentroid(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('centroid must contain latitude and longitude');
   }
-  const latitude = Number(value.latitude);
-  const longitude = Number(value.longitude);
-  if (!Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
+  const { latitude, longitude } = value;
+  if (typeof latitude !== 'number' || !Number.isFinite(latitude) || latitude < -90 || latitude > 90) {
     throw new RangeError('centroid latitude must be between -90 and 90');
   }
-  if (!Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
+  if (typeof longitude !== 'number' || !Number.isFinite(longitude) || longitude < -180 || longitude > 180) {
     throw new RangeError('centroid longitude must be between -180 and 180');
   }
   return { latitude, longitude };
+}
+
+function normalizePublicRiskConstraints(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError('riskConstraints must be an object');
+  }
+  const maxScoreDelta = value.maxScoreDelta ?? null;
+  if (maxScoreDelta !== null && (!Number.isFinite(maxScoreDelta) || typeof maxScoreDelta !== 'number')) {
+    throw new TypeError('riskConstraints.maxScoreDelta must be a finite number or null');
+  }
+  return {
+    maxScoreDelta,
+    canTriggerMajorAlert: value.canTriggerMajorAlert === true,
+    canTriggerRouteAvoidance: value.canTriggerRouteAvoidance === true,
+  };
 }
 
 export function createSourceObservation(input, options = {}) {
@@ -263,18 +282,17 @@ function pickPublicIncidentFields(incident) {
   }
   const result = {};
   for (const field of PUBLIC_INCIDENT_FIELDS) {
-    if (Object.prototype.hasOwnProperty.call(incident, field)) result[field] = incident[field];
+    if (!Object.prototype.hasOwnProperty.call(incident, field)) continue;
+    if (field === 'geometry') {
+      result.geometry = normalizeGeoJsonGeometry(incident.geometry);
+    } else if (field === 'centroid') {
+      result.centroid = normalizeCentroid(incident.centroid);
+    } else {
+      result[field] = incident[field];
+    }
   }
   if (Object.prototype.hasOwnProperty.call(incident, 'riskConstraints')) {
-    const constraints = incident.riskConstraints;
-    if (!constraints || typeof constraints !== 'object' || Array.isArray(constraints)) {
-      throw new TypeError('riskConstraints must be an object');
-    }
-    result.riskConstraints = {
-      maxScoreDelta: constraints.maxScoreDelta ?? null,
-      canTriggerMajorAlert: constraints.canTriggerMajorAlert === true,
-      canTriggerRouteAvoidance: constraints.canTriggerRouteAvoidance === true,
-    };
+    result.riskConstraints = normalizePublicRiskConstraints(incident.riskConstraints);
   }
   return result;
 }

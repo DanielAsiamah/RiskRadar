@@ -219,6 +219,88 @@ test('public versions expose only the allow-listed snapshot and change metadata'
   });
 });
 
+test('public projections reconstruct nested metadata without leaking nested source evidence', () => {
+  const incident = {
+    ...normalizeIncidentDraft(incidentInput),
+    id: 'inc_123',
+    fingerprint: 'fp_123',
+    publicationState: 'published',
+    verificationLevel: 'Official',
+    confidence: 0.98,
+    sourceUrl: observationInput.sourceUrl,
+    sourceUpdatedAt: observationInput.sourceUpdatedAt,
+    riskConstraints: {
+      maxScoreDelta: 12,
+      canTriggerMajorAlert: true,
+      canTriggerRouteAvoidance: false,
+      sourceApiKey: 'must-not-leak',
+    },
+    geometry: {
+      type: 'Point',
+      coordinates: [-1.21257, 52.79207],
+      rawPayload: { privateAddress: 'must-not-leak' },
+    },
+    centroid: {
+      latitude: 52.79207,
+      longitude: -1.21257,
+      privateAddress: 'must-not-leak',
+    },
+  };
+
+  const publicIncident = toPublicIncident(incident);
+  const publicVersion = toPublicVersion({
+    version: 1,
+    changedFields: ['status'],
+    reason: 'source-update',
+    createdAt: capturedAt,
+    snapshot: incident,
+  });
+
+  assert.deepEqual(publicIncident.geometry, {
+    type: 'Point',
+    coordinates: [-1.21257, 52.79207],
+  });
+  assert.deepEqual(publicIncident.centroid, {
+    latitude: 52.79207,
+    longitude: -1.21257,
+  });
+  assert.deepEqual(publicIncident.riskConstraints, {
+    maxScoreDelta: 12,
+    canTriggerMajorAlert: true,
+    canTriggerRouteAvoidance: false,
+  });
+  assert.equal('rawPayload' in publicIncident.geometry, false);
+  assert.equal('privateAddress' in publicIncident.centroid, false);
+  assert.equal('sourceApiKey' in publicIncident.riskConstraints, false);
+  assert.deepEqual(publicVersion.snapshot.geometry, publicIncident.geometry);
+});
+
+test('public projections reject malformed canonical metadata', () => {
+  const incident = {
+    ...normalizeIncidentDraft(incidentInput),
+    id: 'inc_123',
+    geometry: { type: 'Point', coordinates: ['-1.21257', '52.79207'] },
+  };
+
+  assert.throws(() => toPublicIncident(incident), /finite numbers/);
+  assert.throws(() => toPublicVersion({
+    version: 1,
+    changedFields: ['status'],
+    reason: 'source-update',
+    createdAt: capturedAt,
+    snapshot: incident,
+  }), /finite numbers/);
+});
+
+test('source observations preserve own __proto__ payload data while hashing deterministically', () => {
+  const rawPayload = JSON.parse('{"__proto__":{"severityLevel":3},"description":"Lower River Soar"}');
+  const observation = createSourceObservation({ ...observationInput, rawPayload }, { capturedAt });
+
+  assert.equal(Object.hasOwn(observation.rawPayload, '__proto__'), true);
+  assert.deepEqual(observation.rawPayload.__proto__, { severityLevel: 3 });
+  assert.equal(observation.payloadHash, createSourceObservation({ ...observationInput, rawPayload }, { capturedAt }).payloadHash);
+});
+
 test('geometry normalises provider strings and computes distance to an area', () => {
   const polygon = normalizeGeoJsonGeometry({
     type: 'Polygon',
@@ -269,6 +351,28 @@ test('geometry rejects invalid bounds, open polygons, unsupported types, and ove
   assert.throws(
     () => normalizeGeoJsonGeometry({ type: 'Point', coordinates: [Number.NaN, 52] }),
     /finite/,
+  );
+  assert.throws(
+    () => normalizeGeoJsonGeometry({ type: 'Point', coordinates: ['-1.21', 52.79] }),
+    /finite numbers/,
+  );
+  assert.throws(
+    () => normalizeGeoJsonGeometry({ type: 'Point', coordinates: [null, true] }),
+    /finite numbers/,
+  );
+  assert.throws(
+    () => distanceToGeometryMetres(
+      { latitude: '52.79', longitude: -1.21 },
+      { type: 'Point', coordinates: [-1.21, 52.79] },
+    ),
+    /finite numbers/,
+  );
+  assert.throws(
+    () => normalizeIncidentDraft({
+      ...incidentInput,
+      centroid: { latitude: null, longitude: '-1.21257' },
+    }),
+    /centroid latitude/,
   );
   assert.throws(
     () => normalizeGeoJsonGeometry({
