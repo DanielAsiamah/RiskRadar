@@ -1,0 +1,13 @@
+{
+  "items": {
+    "@id": "http://environment.data.gov.uk/flood-monitoring/id/floodAreas/034WAF428",
+    "county": "Derbyshire, Leicestershire, Nottinghamshire",
+    "description": "Lower River Soar in Leicestershire including tributaries",
+    "label": "Lower River Soar in Leicestershire",
+    "lat": 52.79207,
+    "long": -1.21257,
+    "notation": "034WAF428",
+    "polygon": "http://environment.data.gov.uk/flood-monitoring/id/floodAreas/034WAF428/polygon",
+    "riverOrSea": "River Soar"
+  }
+}
