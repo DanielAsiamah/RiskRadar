@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  normalizeLiveRiskToLiveRadarReading,
   normalizePostcodeAnalysisToLiveRadarReading,
   scanLiveRadarCoordinates,
 } from './client.ts';
@@ -68,6 +69,28 @@ test('normalizes postcode analysis into a compact Live Radar reading', () => {
   assert.equal(reading.riskLevel, 'high');
   assert.match(reading.mainReason, /violent/i);
   assert.equal(reading.dataMonth, '2026-06');
+});
+
+test('uses the server-calculated live layer without replacing its historical baseline', () => {
+  const reading = normalizeLiveRiskToLiveRadarReading({
+    postcode: 'SE10 8EP',
+    historical: { baselineScore: 34 },
+    context: { contextScore: 36, adjustments: [] },
+    live: {
+      liveScore: 58,
+      riskLevel: 'amber',
+      contributors: [{ category: 'flood', reason: 'flood is active within its reported affected area.' }],
+    },
+  }, {
+    accuracyMetres: 18,
+    checkedAt: '2026-08-22T11:00:00.000Z',
+    source: 'manual',
+  });
+
+  assert.equal(reading.postcode, 'SE10 8EP');
+  assert.equal(reading.score, 58);
+  assert.equal(reading.riskLevel, 'elevated');
+  assert.match(reading.mainReason, /flood/i);
 });
 
 test('returns a suppressed warning when postcode lookup cannot resolve a nearby postcode', async () => {

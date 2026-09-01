@@ -1,4 +1,5 @@
 import type { PostcodeResult } from '../types.ts';
+import type { LiveRiskResponse } from '../api/live-radar.ts';
 import type { LiveRadarReading, LiveRadarReadingSource } from './types.ts';
 
 export interface NormalizeLiveRadarReadingOptions {
@@ -33,8 +34,27 @@ function toRiskLevel(value: string): LiveRadarReading['riskLevel'] {
   const normalized = value.trim().toLowerCase();
   if (normalized === 'low') return 'low';
   if (normalized === 'moderate') return 'moderate';
-  if (normalized === 'elevated') return 'elevated';
+  if (normalized === 'elevated' || normalized === 'amber') return 'elevated';
   return 'high';
+}
+
+export function normalizeLiveRiskToLiveRadarReading(
+  result: LiveRiskResponse,
+  options: NormalizeLiveRadarReadingOptions,
+): LiveRadarReading {
+  const contributor = result.live.contributors[0];
+  return {
+    checkedAt: options.checkedAt,
+    postcode: result.postcode || 'Current area',
+    score: result.live.liveScore,
+    riskLevel: toRiskLevel(result.live.riskLevel),
+    mainReason: contributor?.reason
+      || `No named live incident is currently changing the ${result.historical.baselineScore}/100 historical area baseline.`,
+    dataMonth: null,
+    accuracyMetres: options.accuracyMetres,
+    accuracyState: options.accuracyMetres !== null && options.accuracyMetres <= 100 ? 'good' : 'poor',
+    source: options.source,
+  };
 }
 
 function pickMainReason(result: PostcodeResult) {
@@ -73,13 +93,13 @@ export async function fetchLiveRadarReadingForPostcode(
   postcode: string,
   source: LiveRadarReadingSource,
 ): Promise<LiveRadarReading> {
-  const { fetchPostcodeAnalysis } = await import('../api/live-radar.ts');
-  const result = await fetchPostcodeAnalysis(postcode);
-  return normalizePostcodeAnalysisToLiveRadarReading(result, {
-    accuracyMetres: null,
-    checkedAt: new Date().toISOString(),
-    source,
-  });
+  const options = { accuracyMetres: null, checkedAt: new Date().toISOString(), source };
+  const { fetchLiveRiskForPostcode, fetchPostcodeAnalysis } = await import('../api/live-radar.ts');
+  try {
+    return normalizeLiveRiskToLiveRadarReading(await fetchLiveRiskForPostcode(postcode), options);
+  } catch {
+    return normalizePostcodeAnalysisToLiveRadarReading(await fetchPostcodeAnalysis(postcode), options);
+  }
 }
 
 export async function scanLiveRadarCoordinates(
