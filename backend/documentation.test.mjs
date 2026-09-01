@@ -4,16 +4,17 @@ import test from 'node:test';
 import { apiCatalog } from './api-catalog.mjs';
 
 test('documents every public HTTP route', async () => {
-  const [serverSource, membershipSource, watchlistSource, dashboardSource, alertPreferencesSource, reportRoutesSource, installGuide] = await Promise.all([
+  const [serverSource, membershipSource, watchlistSource, dashboardSource, alertPreferencesSource, reportRoutesSource, liveIncidentRoutesSource, installGuide] = await Promise.all([
     readFile('backend/server.mjs', 'utf8'),
     readFile('backend/membership/routes.mjs', 'utf8'),
     readFile('backend/membership/watchlist-routes.mjs', 'utf8'),
     readFile('backend/membership/dashboard-routes.mjs', 'utf8'),
     readFile('backend/membership/alert-preferences.mjs', 'utf8'),
     readFile('backend/membership/report-routes.mjs', 'utf8'),
+    readFile('backend/live-incidents/routes.mjs', 'utf8'),
     readFile('INSTALL.md', 'utf8'),
   ]);
-  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}\n${alertPreferencesSource}\n${reportRoutesSource}`;
+  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}\n${alertPreferencesSource}\n${reportRoutesSource}\n${liveIncidentRoutesSource}`;
   const routes = [...combinedSource.matchAll(/url\.pathname === '([^']+)'/g)].map((match) => match[1]);
 
   if (combinedSource.includes("/^\\/api\\/watchlist\\/([^/]+)$/")) {
@@ -25,6 +26,9 @@ test('documents every public HTTP route', async () => {
   if (combinedSource.includes("/^\\/api\\/reports\\/([^/]+)\\/share$/")) {
     routes.push('/api/reports/:watchId/share');
   }
+  if (combinedSource.includes("url.pathname.startsWith('/api/live-incidents/')")) {
+    routes.push('/api/live-incidents/:id');
+  }
 
   assert.ok(routes.length > 20, 'Expected the server route extractor to find public routes.');
   for (const route of new Set(routes)) {
@@ -33,15 +37,16 @@ test('documents every public HTTP route', async () => {
 });
 
 test('catalogues every method and path implemented by the router', async () => {
-  const [serverSource, membershipSource, watchlistSource, dashboardSource, alertPreferencesSource, reportRoutesSource] = await Promise.all([
+  const [serverSource, membershipSource, watchlistSource, dashboardSource, alertPreferencesSource, reportRoutesSource, liveIncidentRoutesSource] = await Promise.all([
     readFile('backend/server.mjs', 'utf8'),
     readFile('backend/membership/routes.mjs', 'utf8'),
     readFile('backend/membership/watchlist-routes.mjs', 'utf8'),
     readFile('backend/membership/dashboard-routes.mjs', 'utf8'),
     readFile('backend/membership/alert-preferences.mjs', 'utf8'),
     readFile('backend/membership/report-routes.mjs', 'utf8'),
+    readFile('backend/live-incidents/routes.mjs', 'utf8'),
   ]);
-  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}\n${alertPreferencesSource}\n${reportRoutesSource}`;
+  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}\n${alertPreferencesSource}\n${reportRoutesSource}\n${liveIncidentRoutesSource}`;
   const implemented = [...combinedSource.matchAll(/request\.method === '([^']+)' && url\.pathname === '([^']+)'/g)]
     .map((match) => `${match[1]} ${match[2]}`)
     .concat(watchlistSource.includes("url.pathname === '/api/watchlist'")
@@ -58,6 +63,9 @@ test('catalogues every method and path implemented by the router', async () => {
       : [])
     .concat(reportRoutesSource.includes("/^\\/api\\/reports\\/([^/]+)\\/share$/")
       ? ['GET /api/reports/:watchId/share']
+      : [])
+    .concat(combinedSource.includes("url.pathname.startsWith('/api/live-incidents/')")
+      ? ['GET /api/live-incidents/:id']
       : [])
     .concat(combinedSource.includes("/^\\/api\\/watchlist\\/([^/]+)$/")
       ? ['PATCH /api/watchlist/:id', 'DELETE /api/watchlist/:id']

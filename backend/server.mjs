@@ -29,6 +29,11 @@ import { createStripeBilling } from './membership/stripe-billing.mjs';
 import { createMembershipRouteHandler } from './membership/routes.mjs';
 import { createWatchlistStore } from './membership/watchlist-store.mjs';
 import { createRouteGuardRouteHandler } from './route-guard.mjs';
+import { createEnvironmentAgencyAdapter } from './live-incidents/adapters/environment-agency.mjs';
+import { createLiveIncidentIngestionService } from './live-incidents/ingestion-service.mjs';
+import { createMemoryLiveIncidentStore } from './live-incidents/memory-store.mjs';
+import { createLiveIncidentRouteHandler } from './live-incidents/routes.mjs';
+import { LIVE_SOURCE_DEFINITIONS } from './live-incidents/sources.mjs';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -56,6 +61,8 @@ const STATE_DRIVER = String(process.env.STATE_DRIVER || 'json').trim().toLowerCa
 const SQLITE_STATE_FILE = process.env.SQLITE_STATE_FILE || path.join(DATA_DIR, 'riskradar-state.sqlite');
 const SQLITE_BOOTSTRAP_FROM_JSON = process.env.SQLITE_BOOTSTRAP_FROM_JSON !== 'false';
 const ADMIN_API_KEY = String(process.env.ADMIN_API_KEY || '').trim();
+const LIVE_INGESTION_SECRET = String(process.env.LIVE_INGESTION_SECRET || '').trim();
+const LIVE_INGESTION_AUTOSTART = process.env.LIVE_INGESTION_AUTOSTART !== 'false';
 const PERSISTENT_CACHE_ENABLED = process.env.PERSISTENT_CACHE_ENABLED !== 'false';
 const PERSISTENT_CACHE_FILE = process.env.PERSISTENT_CACHE_FILE || path.join(DATA_DIR, 'upstream-cache.json');
 const ANALYSIS_SNAPSHOTS_ENABLED = process.env.ANALYSIS_SNAPSHOTS_ENABLED !== 'false';
@@ -97,6 +104,20 @@ const membershipRoutes = createMembershipRouteHandler({
   fetchMonthlyCrimeSeries,
 });
 const routeGuardRoutes = createRouteGuardRouteHandler({ sendJson });
+const liveIncidentStore = createMemoryLiveIncidentStore({ sourceDefinitions: LIVE_SOURCE_DEFINITIONS });
+const liveIncidentIngestion = createLiveIncidentIngestionService({
+  store: liveIncidentStore,
+  adapters: [createEnvironmentAgencyAdapter()],
+});
+const liveIncidentRoutes = createLiveIncidentRouteHandler({
+  store: liveIncidentStore,
+  ingestionService: liveIncidentIngestion,
+  sourceDefinitions: LIVE_SOURCE_DEFINITIONS,
+  analyzeLocation,
+  analyzePoint,
+  ingestionSecret: LIVE_INGESTION_SECRET,
+});
+let liveIngestionTimer = null;
 const upstreamCache = new Map();
 const inflightFetches = new Map();
 const rateLimitBuckets = new Map();
@@ -4342,6 +4363,10 @@ const server = http.createServer(async (request, response) => {
     return;
   }
 
+  if (await liveIncidentRoutes.handle(request, response, url)) {
+    return;
+  }
+
   if (request.method === 'POST' && url.pathname === '/api/route-guard') {
     await routeGuardRoutes.handle(request, response, url);
     return;
@@ -5200,6 +5225,17 @@ loadSafetySessions();
 
 server.listen(PORT, HOST, () => {
   console.log(`RiskRadar API listening on http://${HOST}:${PORT}`);
+  if (LIVE_INGESTION_AUTOSTART) {
+    const pollLiveIncidents = () => liveIncidentIngestion.run({
+      sourceId: 'environment-agency-floods-england',
+      requestedBy: 'server-schedule',
+    }).then((result) => {
+      console.log(`RiskRadar live source poll: ${result.sourceId} ${result.status}`);
+    });
+    void pollLiveIncidents();
+    liveIngestionTimer = setInterval(pollLiveIncidents, 15 * 60 * 1000);
+    liveIngestionTimer.unref();
+  }
 });
 
 function flushStateForShutdown() {
@@ -5230,6 +5266,10 @@ function shutdown(signal) {
   }
 
   isShuttingDown = true;
+  if (liveIngestionTimer) {
+    clearInterval(liveIngestionTimer);
+    liveIngestionTimer = null;
+  }
   console.log(`RiskRadar API received ${signal}; draining requests.`);
 
   const forceTimer = setTimeout(() => {

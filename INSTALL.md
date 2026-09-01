@@ -60,6 +60,9 @@ Then open `http://localhost:3001`.
 - Native background scans must be able to reach the RiskRadar backend. Set `EXPO_PUBLIC_API_BASE_URL` to the deployed API URL, or to the computer's LAN URL while testing on a phone.
 - RiskRadar still runs without Supabase or Stripe configured. Public search, maps, and local intelligence remain available while membership features stay in a controlled fallback state.
 - Live Radar is informational area intelligence, not an emergency service or guaranteed-safety system.
+- The backend starts a free England-only Environment Agency flood poll every 15 minutes. Its live history is intentionally in memory for local development, so it clears whenever `npm run api` restarts. Set `LIVE_INGESTION_AUTOSTART=false` to turn off automatic polling.
+- `GET /api/live-incidents?lat=51.4062&lng=0.0186` returns the current public live layer, while `GET /api/live-incidents/:id` returns its allow-listed history. `GET /api/live-source-status` shows source coverage and freshness. `POST /api/live-risk` accepts a postcode, coordinate, or up to 12 route samples and combines named current incidents with the existing historical score.
+- `POST /api/internal/live-ingestion/run` is an operator endpoint. It is disabled unless `LIVE_INGESTION_SECRET` is at least 32 characters, and accepts that value only in `x-live-ingestion-secret`.
 
 Optional:
 
