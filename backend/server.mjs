@@ -32,6 +32,7 @@ import { createRouteGuardRouteHandler } from './route-guard.mjs';
 import { createEnvironmentAgencyAdapter } from './live-incidents/adapters/environment-agency.mjs';
 import { createLiveIncidentIngestionService } from './live-incidents/ingestion-service.mjs';
 import { createMemoryLiveIncidentStore } from './live-incidents/memory-store.mjs';
+import { calculateLiveRisk } from './live-incidents/risk-overlay.mjs';
 import { createLiveIncidentRouteHandler } from './live-incidents/routes.mjs';
 import { LIVE_SOURCE_DEFINITIONS } from './live-incidents/sources.mjs';
 
@@ -103,7 +104,6 @@ const membershipRoutes = createMembershipRouteHandler({
   analyzeLocation,
   fetchMonthlyCrimeSeries,
 });
-const routeGuardRoutes = createRouteGuardRouteHandler({ sendJson });
 const liveIncidentStore = createMemoryLiveIncidentStore({ sourceDefinitions: LIVE_SOURCE_DEFINITIONS });
 const liveIncidentIngestion = createLiveIncidentIngestionService({
   store: liveIncidentStore,
@@ -116,6 +116,11 @@ const liveIncidentRoutes = createLiveIncidentRouteHandler({
   analyzeLocation,
   analyzePoint,
   ingestionSecret: LIVE_INGESTION_SECRET,
+});
+const routeGuardRoutes = createRouteGuardRouteHandler({
+  provider: process.env.ROUTE_PROVIDER || 'free-osm',
+  sendJson,
+  sampleRisk: sampleRouteGuardRisk,
 });
 let liveIngestionTimer = null;
 const upstreamCache = new Map();
@@ -3878,6 +3883,46 @@ async function analyzePoint(payload = {}) {
   return {
     ...result,
     snapshotId,
+  };
+}
+
+async function sampleRouteGuardRisk(point, index) {
+  const latitude = Number(point?.latitude);
+  const longitude = Number(point?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+    throw new TypeError(`Route Guard sample ${index + 1} must include latitude and longitude.`);
+  }
+
+  const calculatedAt = new Date().toISOString();
+  const analysis = await analyzePoint({ latitude, longitude, monthCount: 3 });
+  const baselineScore = analysis?.crimeData?.crimeScore;
+  const timingContext = analysis?.crimeData?.timingContext ?? {};
+  const contextScore = timingContext.adjustedScore ?? baselineScore;
+  if (!Number.isFinite(baselineScore) || !Number.isFinite(contextScore)) {
+    throw new TypeError(`Route Guard sample ${index + 1} did not produce valid RiskRadar scores.`);
+  }
+
+  const incidents = await liveIncidentStore.listPublicIncidents({
+    point: { latitude, longitude },
+    radiusKm: 5,
+    limit: 50,
+    calculatedAt,
+  });
+  const live = calculateLiveRisk({
+    baselineScore,
+    contextScore,
+    contextAdjustments: timingContext.factors ?? [],
+    incidents,
+    point: { latitude, longitude },
+    calculatedAt,
+  });
+
+  return {
+    score: live.liveScore,
+    basis: live.liveDelta > 0
+      ? 'Historical RiskRadar baseline plus active live-source impact near this route sample.'
+      : 'Historical RiskRadar baseline and current time context near this route sample.',
+    contributors: live.contributors,
   };
 }
 

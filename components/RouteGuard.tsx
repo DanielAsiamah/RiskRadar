@@ -106,12 +106,12 @@ export default function RouteGuard({
                 <Text style={tw`text-lg font-black text-slate-950`}>Route Guard</Text>
                 <View style={tw`ml-2 rounded-full bg-indigo-600 px-2 py-1`}><Text style={tw`text-[9px] font-black tracking-widest text-white`}>PRO</Text></View>
               </View>
-              <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mt-1`}>ROUTE PLANNING PREVIEW</Text>
+          <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mt-1`}>LIVE ROUTE INTELLIGENCE</Text>
             </View>
           </View>
 
           <Text style={tw`text-3xl font-black tracking-tight text-slate-950 leading-9 mb-3`}>Scan the journey, not just the destination.</Text>
-          <Text style={tw`text-sm text-slate-500 leading-6 mb-7`}>Enter a start and destination to preview estimated area-risk samples along a planned journey. Live turn-by-turn routing is not enabled yet.</Text>
+          <Text style={tw`text-sm text-slate-500 leading-6 mb-7`}>Enter a start and destination to scan route sections against RiskRadar area intelligence. Google routing is not used in this version.</Text>
 
           {!premium ? (
             <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`border-indigo-100 mb-5`]}>
@@ -156,7 +156,7 @@ export default function RouteGuard({
 
           <View style={tw`rounded-3xl border border-amber-100 bg-amber-50 px-5 py-4`}>
             <Text style={tw`text-xs font-black text-amber-800 mb-1`}>Area intelligence, not guaranteed safety</Text>
-            <Text style={tw`text-xs text-amber-700 leading-5`}>Route shape, distance, timings, and sampled scores are generated planning estimates. This preview does not provide live navigation, incident avoidance, or emergency guidance.</Text>
+            <Text style={tw`text-xs text-amber-700 leading-5`}>Route Guard is area intelligence, not emergency guidance. Free public routing can be unavailable or approximate, and transit mode currently uses a walking-corridor estimate.</Text>
           </View>
         </View>
       </ScrollView>
@@ -185,11 +185,25 @@ function RouteResult({ result }: { result: RouteGuardScan }) {
           <Text style={tw`text-[10px] font-black tracking-widest text-slate-400 mb-1`}>ROUTE PREVIEW RESULT</Text>
           <Text style={tw`text-lg font-black text-slate-950`}>{result.start} to {result.destination}</Text>
           <View style={tw`flex-row items-center mt-2`}><Clock3 size={15} color={membershipColors.slate} /><Text style={tw`text-xs font-bold text-slate-500 ml-2`}>{result.distanceEstimate.kilometres} km - about {result.durationEstimate.minutes} min</Text></View>
+          {result.geocoded ? (
+            <Text style={tw`text-[11px] text-slate-400 leading-4 mt-2`}>
+              {result.geocoded.start.label} to {result.geocoded.destination.label}
+            </Text>
+          ) : null}
         </View>
         <View style={{ borderRadius: 18, backgroundColor: risk.soft, paddingHorizontal: 13, paddingVertical: 10, alignItems: 'center' }}>
           <Text style={{ color: risk.strong, fontSize: 22, fontWeight: '900' }}>{result.overallRiskScore}</Text>
           <Text style={{ color: risk.strong, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{risk.label}</Text>
         </View>
+      </View>
+
+      <View style={tw`rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 mb-5`}>
+        <Text style={tw`text-[10px] font-black tracking-widest text-slate-400 mb-1`}>ROUTE SOURCE</Text>
+        <Text style={tw`text-xs font-bold text-slate-700`}>
+          {result.provider === 'free-osm' ? 'Free OSM/OSRM route scan' : 'Generated fallback route scan'}
+        </Text>
+        {result.routeProvider ? <Text style={tw`text-[11px] text-slate-500 leading-4 mt-1`}>{result.routeProvider.modeDisclosure}</Text> : null}
+        {result.fallbackReason ? <Text selectable style={tw`text-[11px] text-amber-700 leading-4 mt-1`}>Fallback used: {result.fallbackReason}</Text> : null}
       </View>
 
       <View style={tw`flex-row items-center mb-5`}>
@@ -207,14 +221,14 @@ function RouteResult({ result }: { result: RouteGuardScan }) {
         return (
           <View key={hotzone.id} style={[tw`rounded-2xl px-4 py-3 mb-2 flex-row items-center`, { backgroundColor: color.soft }]}>
             <View style={{ width: 9, height: 9, borderRadius: 5, backgroundColor: color.strong, marginRight: 10 }} />
-            <View style={tw`flex-1`}><Text style={tw`text-xs font-black text-slate-900`}>Samples {hotzone.startPointIndex + 1}-{hotzone.endPointIndex + 1}</Text><Text style={tw`text-[11px] text-slate-500 mt-1`}>{hotzone.summary}</Text></View>
+            <View style={tw`flex-1`}><Text style={tw`text-xs font-black text-slate-900`}>Route samples {hotzone.startPointIndex + 1}-{hotzone.endPointIndex + 1}</Text><Text style={tw`text-[11px] text-slate-500 mt-1`}>{hotzone.summary}</Text></View>
             <Text style={{ color: color.strong, fontSize: 16, fontWeight: '900' }}>{hotzone.riskScore}</Text>
           </View>
         );
       }) : <Text style={tw`text-xs text-slate-500 mb-3`}>No elevated preview sections were found on this route.</Text>}
 
       <Text style={tw`text-[10px] text-slate-400 leading-4 mt-3`}>{result.disclaimer}</Text>
-      <Text style={tw`text-[10px] font-bold text-indigo-600 mt-2`}>Planning preview - live navigation requests: 0</Text>
+      <Text style={tw`text-[10px] font-bold text-indigo-600 mt-2`}>Google requests made: 0</Text>
     </View>
   );
 }

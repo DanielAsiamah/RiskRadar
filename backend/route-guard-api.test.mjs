@@ -98,3 +98,65 @@ test('route guard handler ignores other routes and rejects invalid JSON', async 
   assert.equal(invalidResponse.statusCode, 400);
   assert.equal(JSON.parse(invalidResponse.body).code, 'INVALID_ROUTE_GUARD_INPUT');
 });
+
+test('POST /api/route-guard can return a free OSM-backed route scan', async () => {
+  const handler = createRouteGuardRouteHandler({
+    provider: 'free-osm',
+    geocodeLocation: async (query) => ({
+      query,
+      label: `${query} resolved`,
+      latitude: query === validBody.start ? 51.47 : 51.5,
+      longitude: query === validBody.start ? -0.02 : -0.08,
+      confidence: 'high',
+      source: 'test-geocoder',
+    }),
+    fetchRoute: async ({ startPoint, destinationPoint, routingProfile }) => ({
+      provider: 'free-osm',
+      routingMode: routingProfile,
+      distanceMetres: 4000,
+      durationSeconds: 3600,
+      routePoints: [startPoint, { latitude: 51.485, longitude: -0.05 }, destinationPoint],
+      attribution: 'OpenStreetMap contributors; OSRM',
+    }),
+    sampleRisk: async (_point, index) => ({ score: [30, 78, 44][index], basis: 'test live risk' }),
+  });
+  const response = createResponse();
+
+  await handler.handle(createRequest(validBody), response, new URL('http://localhost/api/route-guard'));
+
+  const payload = JSON.parse(response.body);
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.provider, 'free-osm');
+  assert.equal(payload.googleRequestMade, false);
+  assert.equal(payload.googleCostEstimate.estimatedRequests, 0);
+  assert.equal(payload.sampledRiskScores[1].riskLevel, 'red');
+});
+
+test('free provider route failures fall back to mock without hiding entitlement errors', async () => {
+  const handler = createRouteGuardRouteHandler({
+    provider: 'free-osm',
+    geocodeLocation: async (query) => ({
+      query,
+      label: query,
+      latitude: query === validBody.start ? 51.47 : 51.5,
+      longitude: query === validBody.start ? -0.02 : -0.08,
+      confidence: 'high',
+      source: 'test-geocoder',
+    }),
+    fetchRoute: async () => {
+      throw new Error('OSRM offline');
+    },
+  });
+
+  const fallbackResponse = createResponse();
+  await handler.handle(createRequest(validBody), fallbackResponse, new URL('http://localhost/api/route-guard'));
+  const fallbackPayload = JSON.parse(fallbackResponse.body);
+  assert.equal(fallbackResponse.statusCode, 200);
+  assert.equal(fallbackPayload.provider, 'mock');
+  assert.match(fallbackPayload.fallbackReason, /OSRM offline/);
+
+  const freeResponse = createResponse();
+  await handler.handle(createRequest({ ...validBody, entitlement: 'free' }), freeResponse, new URL('http://localhost/api/route-guard'));
+  assert.equal(freeResponse.statusCode, 403);
+  assert.equal(JSON.parse(freeResponse.body).code, 'PREMIUM_REQUIRED');
+});

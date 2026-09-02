@@ -17,6 +17,7 @@ async function startServer() {
       RISKRADAR_DATA_DIR: root,
       RATE_LIMIT_ENABLED: 'false',
       STARTUP_GRACE_PERIOD_MS: '0',
+      LIVE_INGESTION_AUTOSTART: 'false',
     },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });

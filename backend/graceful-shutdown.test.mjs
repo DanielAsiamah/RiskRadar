@@ -17,6 +17,7 @@ test('SIGTERM drains the server and flushes state', { timeout: 20000 }, async ()
       RISKRADAR_DATA_DIR: dataDir,
       STARTUP_GRACE_PERIOD_MS: '0',
       SHUTDOWN_TIMEOUT_MS: '3000',
+      LIVE_INGESTION_AUTOSTART: 'false',
     },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });

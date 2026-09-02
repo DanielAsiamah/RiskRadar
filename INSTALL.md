@@ -375,7 +375,7 @@ steps and environment-variable contract.
   Deletes a watched postcode owned by the signed-in member.
 
 - `POST /api/route-guard`
-  Builds a deterministic mock route and scans sampled sections for elevated area risk. Route Guard is a PRO website feature with 100 route scans included per calendar month.
+  Builds a Route Guard scan from backend-only free routing sources, then samples route sections for elevated area and live risk. Route Guard is a PRO website feature with 100 route scans included per calendar month.
   - Body:
     ```json
     {
@@ -386,8 +386,11 @@ steps and environment-variable contract.
       "routeScansUsed": 4
     }
     ```
-  - Returns mock route points, distance and duration estimates, sampled risk scores, hotzone sections, overall risk level, monthly usage, a planning-only Google cost estimate, and the area-intelligence disclaimer.
-  - `ROUTE_PROVIDER` defaults to `mock`. This release makes no Google request and does not require `GOOGLE_MAPS_API_KEY`.
+  - Returns route points, distance and duration estimates, sampled risk scores, hotzone sections, overall risk level, monthly usage, a zero-Google request cost estimate, provider metadata, and the area-intelligence disclaimer.
+  - `ROUTE_PROVIDER=free-osm` uses backend-only Nominatim/OSRM requests and does not require `GOOGLE_MAPS_API_KEY`.
+  - `ROUTE_PROVIDER=mock` remains available for deterministic offline demos.
+  - `ROUTE_GUARD_FALLBACK_TO_MOCK=true` keeps the app usable if a free public route source is temporarily unavailable.
+  - Transit mode currently uses a walking-corridor estimate until a public transport routing provider is connected.
   - Keep future Google credentials on the backend only. Never add a Google key to an `EXPO_PUBLIC_*` variable or frontend file.
 
 - `GET /api/subscription-status`

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createMockRouteGuardScan, RouteGuardError } from './route-guard.mjs';
+import { createFreeRouteGuardScan, createMockRouteGuardScan, RouteGuardError } from './route-guard.mjs';
 
 const request = {
   start: 'SE10 8EP',
@@ -79,4 +79,154 @@ test('validates route locations, travel mode, and usage', () => {
       (error) => error instanceof RouteGuardError && error.statusCode === 400 && error.code === 'INVALID_ROUTE_GUARD_INPUT',
     );
   }
+});
+
+test('builds a free UK route scan from injected geocoding, routing, and risk samplers', async () => {
+  const calls = [];
+  const result = await createFreeRouteGuardScan(
+    { ...request, start: 'SE10 8EP', destination: 'London Bridge', routeScansUsed: 2 },
+    {
+      geocodeLocation: async (query) => {
+        calls.push(`geocode:${query}`);
+        return {
+          query,
+          label: query === 'SE10 8EP' ? 'SE10 8EP, Greenwich, London' : 'London Bridge Station',
+          latitude: query === 'SE10 8EP' ? 51.4748 : 51.5055,
+          longitude: query === 'SE10 8EP' ? -0.0158 : -0.0865,
+          confidence: 'high',
+          source: 'test-geocoder',
+        };
+      },
+      fetchRoute: async ({ startPoint, destinationPoint, travelMode }) => {
+        calls.push(`route:${travelMode}:${startPoint.latitude}:${destinationPoint.latitude}`);
+        return {
+          provider: 'free-osm',
+          routingMode: 'foot',
+          distanceMetres: 6200,
+          durationSeconds: 5100,
+          routePoints: [
+            { latitude: startPoint.latitude, longitude: startPoint.longitude },
+            { latitude: 51.486, longitude: -0.034 },
+            { latitude: 51.497, longitude: -0.061 },
+            { latitude: destinationPoint.latitude, longitude: destinationPoint.longitude },
+          ],
+          attribution: 'OpenStreetMap contributors; OSRM',
+        };
+      },
+      sampleRisk: async (point, index) => ({
+        score: [22, 64, 81, 35][index],
+        basis: `RiskRadar route sample ${index + 1}`,
+        contributors: index === 2 ? [{ incidentId: 'live-flood-1', category: 'flood' }] : [],
+      }),
+    },
+  );
+
+  assert.deepEqual(calls, [
+    'geocode:SE10 8EP',
+    'geocode:London Bridge',
+    'route:walking:51.4748:51.5055',
+  ]);
+  assert.equal(result.provider, 'free-osm');
+  assert.equal(result.googleRequestMade, false);
+  assert.equal(result.googleCostEstimate.estimatedRequests, 0);
+  assert.equal(result.googleCostEstimate.estimatedCostUsd, 0);
+  assert.equal(result.routeProvider.routingMode, 'foot');
+  assert.match(result.routeProvider.attribution, /OpenStreetMap/);
+  assert.equal(result.geocoded.start.label, 'SE10 8EP, Greenwich, London');
+  assert.equal(result.geocoded.destination.label, 'London Bridge Station');
+  assert.equal(result.routePoints.length, 4);
+  assert.equal(result.sampledRiskScores.length, 4);
+  assert.equal(result.sampledRiskScores[2].score, 81);
+  assert.deepEqual(result.sampledRiskScores[2].contributors, [{ incidentId: 'live-flood-1', category: 'flood' }]);
+  assert.ok(result.hotzoneSections.some((hotzone) => hotzone.riskLevel === 'red'));
+  assert.equal(result.usage.usedAfter, 3);
+  assert.match(result.disclaimer, /area intelligence/i);
+});
+
+test('uses a transparent walking corridor estimate for transit until live transit routing is connected', async () => {
+  const result = await createFreeRouteGuardScan(
+    { ...request, travelMode: 'transit' },
+    {
+      geocodeLocation: async (query) => ({
+        query,
+        label: query,
+        latitude: query === request.start ? 51.47 : 51.5,
+        longitude: query === request.start ? -0.02 : -0.08,
+        confidence: 'high',
+        source: 'test-geocoder',
+      }),
+      fetchRoute: async ({ startPoint, destinationPoint, routingProfile }) => ({
+        provider: 'free-osm',
+        routingMode: routingProfile,
+        distanceMetres: 5200,
+        durationSeconds: 4200,
+        routePoints: [startPoint, destinationPoint],
+        attribution: 'OpenStreetMap contributors; OSRM',
+      }),
+      sampleRisk: async () => ({ score: 30, basis: 'test risk' }),
+    },
+  );
+
+  assert.equal(result.travelMode, 'transit');
+  assert.equal(result.routeProvider.routingMode, 'foot');
+  assert.match(result.routeProvider.modeDisclosure, /Transit routing is estimated/i);
+});
+
+test('keeps the free route scan when an individual risk sample is unavailable', async () => {
+  const result = await createFreeRouteGuardScan(
+    request,
+    {
+      geocodeLocation: async (query) => ({
+        query,
+        label: query,
+        latitude: query === request.start ? 51.47 : 51.5,
+        longitude: query === request.start ? -0.02 : -0.08,
+        confidence: 'high',
+        source: 'test-geocoder',
+      }),
+      fetchRoute: async ({ startPoint, destinationPoint }) => ({
+        provider: 'free-osm',
+        routingMode: 'foot',
+        distanceMetres: 5200,
+        durationSeconds: 4200,
+        routePoints: [startPoint, { latitude: 51.48, longitude: -0.04 }, destinationPoint],
+        attribution: 'OpenStreetMap contributors; OSRM',
+      }),
+      sampleRisk: async (_point, index) => {
+        if (index === 1) throw new Error('public crime API busy');
+        return { score: 42, basis: 'test risk' };
+      },
+    },
+  );
+
+  assert.equal(result.provider, 'free-osm');
+  assert.equal(result.sampledRiskScores[1].score, 35);
+  assert.match(result.sampledRiskScores[1].basis, /temporarily unavailable/i);
+});
+
+test('does not trust unrealistically fast walking durations from a public route provider', async () => {
+  const result = await createFreeRouteGuardScan(
+    { ...request, travelMode: 'walking' },
+    {
+      geocodeLocation: async (query) => ({
+        query,
+        label: query,
+        latitude: query === request.start ? 51.47 : 51.5,
+        longitude: query === request.start ? -0.02 : -0.08,
+        confidence: 'high',
+        source: 'test-geocoder',
+      }),
+      fetchRoute: async ({ startPoint, destinationPoint }) => ({
+        provider: 'free-osm',
+        routingMode: 'foot',
+        distanceMetres: 7800,
+        durationSeconds: 1000,
+        routePoints: [startPoint, destinationPoint],
+        attribution: 'OpenStreetMap contributors; OSRM',
+      }),
+      sampleRisk: async () => ({ score: 35, basis: 'test risk' }),
+    },
+  );
+
+  assert.ok(result.durationEstimate.minutes >= 100);
 });

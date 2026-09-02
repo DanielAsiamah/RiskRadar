@@ -25,6 +25,7 @@ test('serves the web app and API from one process', { timeout: 20000 }, async ()
       EMBED_ALLOW_ORIGINS: 'https://example.com,https://*.example.org,invalid-value',
       RISKRADAR_DATA_DIR: dataDir,
       STARTUP_GRACE_PERIOD_MS: '0',
+      LIVE_INGESTION_AUTOSTART: 'false',
     },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });

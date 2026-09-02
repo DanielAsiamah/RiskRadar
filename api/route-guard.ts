@@ -20,9 +20,12 @@ export interface RouteGuardPoint {
 
 export interface RouteGuardRiskSample {
   pointIndex: number;
+  latitude?: number;
+  longitude?: number;
   score: number;
   riskLevel: RouteGuardRiskLevel;
   basis: string;
+  contributors?: Array<{ incidentId?: string; category?: string; [key: string]: unknown }>;
 }
 
 export interface RouteGuardHotzone {
@@ -35,11 +38,21 @@ export interface RouteGuardHotzone {
 }
 
 export interface RouteGuardScan {
-  provider: 'mock';
+  provider: 'mock' | 'free-osm';
   googleRequestMade: false;
   start: string;
   destination: string;
   travelMode: RouteGuardTravelMode;
+  geocoded?: {
+    start: { latitude: number; longitude: number; label: string; confidence: string; source: string };
+    destination: { latitude: number; longitude: number; label: string; confidence: string; source: string };
+  };
+  routeProvider?: {
+    source: string;
+    routingMode: string;
+    attribution: string;
+    modeDisclosure: string;
+  };
   routePoints: RouteGuardPoint[];
   distanceEstimate: { metres: number; kilometres: number };
   durationEstimate: { minutes: number };
@@ -61,6 +74,7 @@ export interface RouteGuardScan {
     estimatedCostUsd: number;
     note: string;
   };
+  fallbackReason?: string;
   disclaimer: string;
 }
 
