@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { MapContainer, TileLayer, Circle, CircleMarker, LayerGroup, Polygon, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet';
+import { MapContainer, TileLayer, Circle, CircleMarker, LayerGroup, Polygon, Polyline, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { CrimeMapCanvasProps, MapCoordinate } from './map-types';
 
@@ -34,6 +34,8 @@ export default function CrimeMapCanvas({
   selectedPoint,
   areaPoints,
   boundaryPoints,
+  routeLine,
+  routeRiskSamples = [],
   radiusMeters,
   dataKey,
   onMapPress,
@@ -57,6 +59,18 @@ export default function CrimeMapCanvas({
         <MapEvents onMapPress={onMapPress} />
         <Recenter center={center} />
         <LayerGroup key={dataKey}>
+          {routeLine && routeLine.points.length >= 2 ? (
+            <Polyline
+              positions={routeLine.points.map((point) => [point.latitude, point.longitude])}
+              pathOptions={{
+                color: riskColor(routeLine.riskLevel),
+                opacity: 0.88,
+                weight: 6,
+                lineCap: 'round',
+                lineJoin: 'round',
+              }}
+            />
+          ) : null}
           {markers.slice(0, 500).map((marker) => (
             <CircleMarker
               key={marker.id}
@@ -68,6 +82,21 @@ export default function CrimeMapCanvas({
               <MarkerDetails marker={marker} onOpenEvidence={onOpenEvidence} />
               </Tooltip>
               <Popup><MarkerDetails marker={marker} onOpenEvidence={onOpenEvidence} /></Popup>
+            </CircleMarker>
+          ))}
+          {routeRiskSamples.slice(0, 24).map((sample) => (
+            <CircleMarker
+              key={`route-risk-${sample.pointIndex}`}
+              center={[sample.latitude, sample.longitude]}
+              radius={7}
+              pathOptions={{ color: 'white', fillColor: riskColor(sample.riskLevel), fillOpacity: 0.95, weight: 2.5 }}
+            >
+              <Tooltip direction="top" offset={[0, -8]} opacity={1} sticky>
+                <div style={{ minWidth: 170 }}>
+                  <strong>Route risk {sample.score}/100</strong>
+                  <br />{sample.basis}
+                </div>
+              </Tooltip>
             </CircleMarker>
           ))}
         </LayerGroup>
@@ -91,6 +120,12 @@ export default function CrimeMapCanvas({
       </MapContainer>
     </div>
   );
+}
+
+function riskColor(value?: string) {
+  if (value === 'red') return '#e11d48';
+  if (value === 'amber') return '#d97706';
+  return '#059669';
 }
 
 function MarkerDetails({

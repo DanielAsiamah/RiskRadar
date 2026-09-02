@@ -27,12 +27,28 @@ export interface CrimeMapMarker extends MapCoordinate {
   }>;
 }
 
+export type RouteMapRiskLevel = 'low' | 'amber' | 'red';
+
+export interface RouteMapLine {
+  points: MapCoordinate[];
+  riskLevel: RouteMapRiskLevel;
+}
+
+export interface RouteMapRiskSample extends MapCoordinate {
+  pointIndex: number;
+  score: number;
+  riskLevel: RouteMapRiskLevel;
+  basis: string;
+}
+
 export interface CrimeMapCanvasProps {
   center: MapCoordinate;
   markers: CrimeMapMarker[];
   selectedPoint?: MapCoordinate | null;
   areaPoints: MapCoordinate[];
   boundaryPoints: MapCoordinate[];
+  routeLine?: RouteMapLine | null;
+  routeRiskSamples?: RouteMapRiskSample[];
   radiusMeters?: number;
   dataKey?: string;
   onMapPress: (coordinate: MapCoordinate) => void;

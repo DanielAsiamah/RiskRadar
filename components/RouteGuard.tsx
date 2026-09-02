@@ -22,7 +22,9 @@ import {
 import tw from 'twrnc';
 
 import { scanRouteGuard, type RouteGuardRiskLevel, type RouteGuardScan, type RouteGuardTravelMode } from '../api/route-guard';
+import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
+import type { MapCoordinate, RouteMapRiskSample } from './map-types';
 
 interface RouteGuardProps {
   premium: boolean;
@@ -178,6 +180,19 @@ function LocationInput({ label, value, onChangeText, placeholder }: { label: str
 
 function RouteResult({ result }: { result: RouteGuardScan }) {
   const risk = RISK_COLORS[result.overallRiskLevel];
+  const routePoints = result.routePoints.map(({ latitude, longitude }) => ({ latitude, longitude }));
+  const routeRiskSamples = result.sampledRiskScores
+    .filter((sample): sample is RouteMapRiskSample => Number.isFinite(sample.latitude) && Number.isFinite(sample.longitude))
+    .map((sample) => ({
+      pointIndex: sample.pointIndex,
+      latitude: sample.latitude,
+      longitude: sample.longitude,
+      score: sample.score,
+      riskLevel: sample.riskLevel,
+      basis: sample.basis,
+    }));
+  const mapCenter = centerForRoute(routePoints);
+
   return (
     <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`mb-5`]}>
       <View style={tw`flex-row items-start justify-between mb-5`}>
@@ -196,6 +211,23 @@ function RouteResult({ result }: { result: RouteGuardScan }) {
           <Text style={{ color: risk.strong, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{risk.label}</Text>
         </View>
       </View>
+
+      {routePoints.length >= 2 ? (
+        <View style={tw`overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 mb-5`}>
+          <CrimeMapCanvas
+            center={mapCenter}
+            markers={[]}
+            selectedPoint={routePoints[0]}
+            areaPoints={[]}
+            boundaryPoints={[]}
+            routeLine={{ points: routePoints, riskLevel: result.overallRiskLevel }}
+            routeRiskSamples={routeRiskSamples}
+            dataKey={`${result.provider}:${result.start}:${result.destination}:${result.overallRiskScore}`}
+            onMapPress={() => undefined}
+            onOpenEvidence={() => undefined}
+          />
+        </View>
+      ) : null}
 
       <View style={tw`rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 mb-5`}>
         <Text style={tw`text-[10px] font-black tracking-widest text-slate-400 mb-1`}>ROUTE SOURCE</Text>
@@ -230,5 +262,16 @@ function RouteResult({ result }: { result: RouteGuardScan }) {
       <Text style={tw`text-[10px] text-slate-400 leading-4 mt-3`}>{result.disclaimer}</Text>
       <Text style={tw`text-[10px] font-bold text-indigo-600 mt-2`}>Google requests made: 0</Text>
     </View>
+  );
+}
+
+function centerForRoute(points: MapCoordinate[]): MapCoordinate {
+  if (!points.length) return { latitude: 52.6, longitude: -1.5 };
+  return points.reduce(
+    (current, point) => ({
+      latitude: current.latitude + point.latitude / points.length,
+      longitude: current.longitude + point.longitude / points.length,
+    }),
+    { latitude: 0, longitude: 0 },
   );
 }

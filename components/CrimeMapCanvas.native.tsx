@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import MapView, { Circle, Marker, Polygon } from 'react-native-maps';
+import MapView, { Circle, Marker, Polygon, Polyline } from 'react-native-maps';
 import { CrimeMapCanvasProps } from './map-types';
 
 export default function CrimeMapCanvas({
@@ -8,6 +8,8 @@ export default function CrimeMapCanvas({
   selectedPoint,
   areaPoints,
   boundaryPoints,
+  routeLine,
+  routeRiskSamples = [],
   radiusMeters,
   dataKey,
   onMapPress,
@@ -29,6 +31,15 @@ export default function CrimeMapCanvas({
       showsMyLocationButton
       accessibilityLabel="Interactive UK crime map"
     >
+      {routeLine && routeLine.points.length >= 2 ? (
+        <Polyline
+          coordinates={routeLine.points}
+          strokeColor={riskColor(routeLine.riskLevel)}
+          strokeWidth={6}
+          lineCap="round"
+          lineJoin="round"
+        />
+      ) : null}
       {markers.slice(0, 250).map((marker) => (
         <Marker
           key={marker.id}
@@ -72,8 +83,23 @@ export default function CrimeMapCanvas({
       {areaPoints.map((point, index) => (
         <Marker key={`area-${index}`} coordinate={point} title={`Area point ${index + 1}`} pinColor="#4f46e5" />
       ))}
+      {routeRiskSamples.slice(0, 24).map((sample) => (
+        <Marker
+          key={`route-risk-${sample.pointIndex}`}
+          coordinate={sample}
+          title={`Route risk ${sample.score}/100`}
+          description={sample.basis}
+          pinColor={riskColor(sample.riskLevel)}
+        />
+      ))}
     </MapView>
   );
+}
+
+function riskColor(value?: string) {
+  if (value === 'red') return '#e11d48';
+  if (value === 'amber') return '#d97706';
+  return '#059669';
 }
 
 function formatCrimeMonth(value?: string) {
