@@ -339,6 +339,21 @@ test('geometry supports points and lines without mutating provider fixtures', ()
   assert.equal(distanceToGeometryMetres({ latitude: 52.79, longitude: -1.21 }, point), 0);
 });
 
+test('geometry preserves official multipolygon areas and measures the nearest component', () => {
+  const multipolygon = normalizeGeoJsonGeometry({
+    type: 'MultiPolygon',
+    coordinates: [
+      [[[-1.22, 52.78], [-1.2, 52.78], [-1.2, 52.8], [-1.22, 52.8], [-1.22, 52.78]]],
+      [[[-0.02, 51.47], [0, 51.47], [0, 51.49], [-0.02, 51.49], [-0.02, 51.47]]],
+    ],
+  });
+  assert.equal(multipolygon.type, 'MultiPolygon');
+  assert.equal(multipolygon.coordinates.length, 2);
+  assert.equal(distanceToGeometryMetres({ latitude: 51.48, longitude: -0.01 }, multipolygon), 0);
+  assert.ok(distanceToGeometryMetres({ latitude: 51.48, longitude: -0.04 }, multipolygon) > 1000);
+  assert.ok(centroidForGeometry(multipolygon).latitude > 51 && centroidForGeometry(multipolygon).latitude < 53);
+});
+
 test('geometry rejects invalid bounds, open polygons, unsupported types, and oversized input', () => {
   assert.throws(
     () => normalizeGeoJsonGeometry({ type: 'Point', coordinates: [181, 52] }),

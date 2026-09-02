@@ -44,18 +44,19 @@ function statusFor(level) {
 
 function parsePolygon(payload) {
   const geometry = payload?.features?.[0]?.geometry;
-  if (!geometry || geometry.type !== 'Polygon' || !Array.isArray(geometry.coordinates)) {
-    throw new TypeError('Environment Agency polygon is missing a Polygon geometry');
+  if (!geometry || !['Polygon', 'MultiPolygon'].includes(geometry.type) || !Array.isArray(geometry.coordinates)) {
+    throw new TypeError('Environment Agency polygon is missing a Polygon or MultiPolygon geometry');
   }
-  const coordinates = geometry.coordinates.map((ring) => ring.map((coordinate) => {
-    if (typeof coordinate === 'string') {
-      const values = coordinate.trim().split(/\s+/).map(Number);
+  const normalizeCoordinates = (value) => {
+    if (typeof value === 'string') {
+      const values = value.trim().split(/\s+/).map(Number);
       if (values.length !== 2 || values.some((value) => !Number.isFinite(value))) throw new TypeError('Environment Agency polygon coordinate is invalid');
       return values;
     }
-    return coordinate;
-  }));
-  return { type: 'Polygon', coordinates };
+    if (!Array.isArray(value)) return value;
+    return value.map(normalizeCoordinates);
+  };
+  return { type: geometry.type, coordinates: normalizeCoordinates(geometry.coordinates) };
 }
 
 async function mapWithConcurrency(items, mapper) {
@@ -161,38 +162,46 @@ export function createEnvironmentAgencyAdapter(options = {}) {
       }
       const warnings = floodResult.payload?.items;
       if (!Array.isArray(warnings)) throw new TypeError('Environment Agency flood list must contain items');
-      const prepared = await mapWithConcurrency(warnings, async (warning) => {
-        const { area, geometry } = await areaGeometryFor(warning);
-        const floodAreaId = cleanText(warning.floodAreaID, 80);
-        const severityLevel = Number(warning.severityLevel);
-        const sourcePublishedAt = isoOrNull(warning.timeRaised);
-        const sourceUpdatedAt = latestTimestamp(warning.timeMessageChanged, warning.timeSeverityChanged, warning.timeRaised);
-        if (!sourcePublishedAt || !sourceUpdatedAt) throw new TypeError('Environment Agency warning is missing source timestamps');
-        const status = statusFor(severityLevel);
-        const expiresAt = new Date(now().getTime() + (status === 'resolving' ? 24 * 60 * 60 * 1000 : 45 * 60 * 1000)).toISOString();
-        const title = cleanText(warning.description || area.label || floodAreaId, 160);
-        const summary = cleanText(warning.message, 600);
-        const sourceUrl = httpsUrl(warning['@id'] ?? `${FLOODS_URL}/${encodeURIComponent(floodAreaId)}`);
-        return {
-          observationInput: {
-            provider: 'environment-agency', providerTier: 1, externalId: floodAreaId, sourceUrl,
-            sourcePublishedAt, sourceUpdatedAt, rawPayload: { warning, area, geometry }, ingestionRunId: runId,
-            validationState: 'valid', validationErrors: [],
-          },
-          incidentDraft: {
-            provider: 'environment-agency', externalId: floodAreaId, category: 'flood', subcategory: warning.severity,
-            title: title || `Flood warning ${floodAreaId}`, summary, status, severity: severityFor(severityLevel), geometry,
-            centroid: { latitude: Number(area.lat), longitude: Number(area.long) }, locationLabel: cleanText(area.label || warning.description, 160) || floodAreaId,
-            locationPrecision: 'exact-area', affectedRadiusMetres: 1_000, sourceOccurredAt: sourcePublishedAt, expiresAt,
-          },
-        };
+      const preparedResults = await mapWithConcurrency(warnings, async (warning) => {
+        try {
+          const { area, geometry } = await areaGeometryFor(warning);
+          const floodAreaId = cleanText(warning.floodAreaID, 80);
+          const severityLevel = Number(warning.severityLevel);
+          const sourcePublishedAt = isoOrNull(warning.timeRaised);
+          const sourceUpdatedAt = latestTimestamp(warning.timeMessageChanged, warning.timeSeverityChanged, warning.timeRaised);
+          if (!sourcePublishedAt || !sourceUpdatedAt) throw new TypeError('Environment Agency warning is missing source timestamps');
+          const status = statusFor(severityLevel);
+          const expiresAt = new Date(now().getTime() + (status === 'resolving' ? 24 * 60 * 60 * 1000 : 45 * 60 * 1000)).toISOString();
+          const title = cleanText(warning.description || area.label || floodAreaId, 160);
+          const summary = cleanText(warning.message, 600);
+          const sourceUrl = httpsUrl(warning['@id'] ?? `${FLOODS_URL}/${encodeURIComponent(floodAreaId)}`);
+          return {
+            ok: true,
+            record: {
+              observationInput: {
+                provider: 'environment-agency', providerTier: 1, externalId: floodAreaId, sourceUrl,
+                sourcePublishedAt, sourceUpdatedAt, rawPayload: { warning, area, geometry }, ingestionRunId: runId,
+                validationState: 'valid', validationErrors: [],
+              },
+              incidentDraft: {
+                provider: 'environment-agency', externalId: floodAreaId, category: 'flood', subcategory: warning.severity,
+                title: title || `Flood warning ${floodAreaId}`, summary, status, severity: severityFor(severityLevel), geometry,
+                centroid: { latitude: Number(area.lat), longitude: Number(area.long) }, locationLabel: cleanText(area.label || warning.description, 160) || floodAreaId,
+                locationPrecision: 'exact-area', affectedRadiusMetres: 1_000, sourceOccurredAt: sourcePublishedAt, expiresAt,
+              },
+            },
+          };
+        } catch {
+          return { ok: false };
+        }
       });
+      const prepared = preparedResults.filter((result) => result.ok).map((result) => result.record);
       const sourceWatermark = prepared.map((record) => record.observationInput.sourceUpdatedAt).sort().at(-1) ?? null;
       return {
         status: 'success', fullSnapshot: true, records: prepared,
         cursor: { etag: floodResult.response.headers.get('etag'), lastModified: floodResult.response.headers.get('last-modified') },
         sourceWatermark, httpStatus: floodResult.response.status, latencyMs,
-        counts: { fetched: warnings.length, accepted: prepared.length, rejected: 0 },
+        counts: { fetched: warnings.length, accepted: prepared.length, rejected: warnings.length - prepared.length },
       };
     },
   });

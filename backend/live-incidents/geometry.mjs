@@ -104,6 +104,30 @@ export function normalizeGeoJsonGeometry(value, options = {}) {
     return Object.freeze({ type: 'Polygon', coordinates: Object.freeze(coordinates) });
   }
 
+  if (value.type === 'MultiPolygon') {
+    if (!Array.isArray(value.coordinates) || value.coordinates.length === 0) {
+      throw new TypeError('MultiPolygon coordinates must contain at least one polygon');
+    }
+    const coordinates = value.coordinates.map((polygon, polygonIndex) => {
+      if (!Array.isArray(polygon) || polygon.length === 0) {
+        throw new TypeError(`MultiPolygon ${polygonIndex} must contain at least one ring`);
+      }
+      return Object.freeze(polygon.map((ring, ringIndex) => {
+        if (!Array.isArray(ring) || ring.length < 4) {
+          throw new TypeError(`MultiPolygon ${polygonIndex} ring ${ringIndex} must contain at least four points`);
+        }
+        const normalizedRing = ring.map((coordinate, coordinateIndex) => Object.freeze(
+          normalizeCoordinate(coordinate, `MultiPolygon ${polygonIndex} ring ${ringIndex} coordinate ${coordinateIndex}`),
+        ));
+        if (!coordinatesEqual(normalizedRing[0], normalizedRing[normalizedRing.length - 1])) {
+          throw new TypeError(`MultiPolygon ${polygonIndex} ring ${ringIndex} must be closed`);
+        }
+        return Object.freeze(normalizedRing);
+      }));
+    });
+    return Object.freeze({ type: 'MultiPolygon', coordinates: Object.freeze(coordinates) });
+  }
+
   throw new TypeError(`Unsupported geometry type: ${String(value.type)}`);
 }
 
@@ -156,8 +180,14 @@ export function centroidForGeometry(geometry) {
       longitude: normalized.coordinates.reduce((sum, coordinate) => sum + coordinate[0], 0) / normalized.coordinates.length,
       latitude: normalized.coordinates.reduce((sum, coordinate) => sum + coordinate[1], 0) / normalized.coordinates.length,
     };
-  } else {
+  } else if (normalized.type === 'Polygon') {
     centroid = polygonRingCentroid(normalized.coordinates[0]);
+  } else {
+    const centroids = normalized.coordinates.map((polygon) => polygonRingCentroid(polygon[0]));
+    centroid = {
+      longitude: centroids.reduce((sum, item) => sum + item.longitude, 0) / centroids.length,
+      latitude: centroids.reduce((sum, item) => sum + item.latitude, 0) / centroids.length,
+    };
   }
   return Object.freeze({
     latitude: roundCoordinate(centroid.latitude),
@@ -236,6 +266,15 @@ export function distanceToGeometryMetres(pointValue, geometryValue) {
   }
   if (geometry.type === 'LineString') {
     return distanceToLineMetres(point, geometry.coordinates);
+  }
+
+  if (geometry.type === 'MultiPolygon') {
+    for (const polygon of geometry.coordinates) {
+      const insideOuterRing = pointInsideRing(point, polygon[0]);
+      const insideHole = polygon.slice(1).some((ring) => pointInsideRing(point, ring));
+      if (insideOuterRing && !insideHole) return 0;
+    }
+    return Math.min(...geometry.coordinates.flatMap((polygon) => polygon.map((ring) => distanceToLineMetres(point, ring))));
   }
 
   const insideOuterRing = pointInsideRing(point, geometry.coordinates[0]);

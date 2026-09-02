@@ -54,6 +54,39 @@ test('normalises one official England flood alert with its area polygon', async 
   assert.equal(record.observationInput.rawPayload.warning.floodAreaID, '034WAF428');
 });
 
+test('preserves an official flood area supplied as a GeoJSON MultiPolygon', async () => {
+  const floods = await fixture('environment-agency-floods.json');
+  const area = await fixture('environment-agency-area.json');
+  const polygon = await fixture('environment-agency-polygon.json');
+  const multipolygon = {
+    type: 'FeatureCollection',
+    features: [{
+      type: 'Feature',
+      properties: {},
+      geometry: {
+        type: 'MultiPolygon',
+        coordinates: [polygon.features[0].geometry.coordinates],
+      },
+    }],
+  };
+  const responses = new Map([
+    ['/flood-monitoring/id/floods', floods],
+    ['/flood-monitoring/id/floodAreas/034WAF428', area],
+    ['/flood-monitoring/id/floodAreas/034WAF428/polygon', multipolygon],
+  ]);
+  const adapter = createEnvironmentAgencyAdapter({
+    fetchImpl: async (input) => responseFor(responses.get(new URL(input).pathname)),
+    now,
+    sleep: async () => {},
+    random: () => 0,
+  });
+
+  const result = await adapter.fetchChanges({ cursor: null, runId: 'run-ea-multipolygon' });
+  assert.equal(result.records[0].incidentDraft.geometry.type, 'MultiPolygon');
+  assert.equal(result.records[0].incidentDraft.geometry.coordinates.length, 1);
+  assert.deepEqual(result.records[0].incidentDraft.geometry.coordinates[0][0][0], [-1.22, 52.78]);
+});
+
 test('uses validators from its cursor and treats 304 as a non-reconciling success', async () => {
   let request;
   const adapter = createEnvironmentAgencyAdapter({
@@ -96,4 +129,33 @@ test('maps severity 1 to 5, severity 2 to 4, and severity 4 to resolving', async
   });
   const result = await adapter.fetchChanges({ cursor: null, runId: 'run-ea-levels' });
   assert.deepEqual(result.records.map((record) => [record.incidentDraft.severity, record.incidentDraft.status]), [[5, 'active'], [4, 'active'], [1, 'resolving']]);
+});
+
+test('keeps usable official alerts when one area lookup fails', async () => {
+  const floods = await fixture('environment-agency-floods.json');
+  const area = await fixture('environment-agency-area.json');
+  const polygon = await fixture('environment-agency-polygon.json');
+  const warnings = [
+    { ...floods.items[0], floodAreaID: 'broken', floodArea: { '@id': 'https://environment.data.gov.uk/flood-monitoring/id/floodAreas/broken' } },
+    { ...floods.items[0], floodAreaID: 'working', floodArea: { '@id': 'https://environment.data.gov.uk/flood-monitoring/id/floodAreas/working' } },
+  ];
+  const adapter = createEnvironmentAgencyAdapter({
+    fetchImpl: async (input) => {
+      const pathname = new URL(input).pathname;
+      if (pathname === '/flood-monitoring/id/floods') return responseFor({ items: warnings });
+      if (pathname === '/flood-monitoring/id/floodAreas/broken') return new Response('upstream error', { status: 503 });
+      if (pathname === '/flood-monitoring/id/floodAreas/working') return responseFor({ items: { ...area.items, polygon: 'https://environment.data.gov.uk/flood-monitoring/id/floodAreas/working/polygon' } });
+      if (pathname === '/flood-monitoring/id/floodAreas/working/polygon') return responseFor(polygon);
+      throw new Error(`Unexpected URL ${pathname}`);
+    },
+    now,
+    sleep: async () => {},
+    random: () => 0,
+  });
+
+  const result = await adapter.fetchChanges({ cursor: null, runId: 'run-ea-partial' });
+  assert.equal(result.status, 'success');
+  assert.equal(result.records.length, 1);
+  assert.equal(result.records[0].incidentDraft.externalId, 'working');
+  assert.deepEqual(result.counts, { fetched: 2, accepted: 1, rejected: 1 });
 });
