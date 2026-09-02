@@ -43,6 +43,17 @@ test('finds the next elevated route sample ahead of the user', () => {
   assert.match(progress.message, /Approaching elevated route section/i);
 });
 
+test('includes the route sample basis in an upcoming hotzone warning', () => {
+  const progress = summarizeRouteProgress({
+    currentLocation: { latitude: 51.478, longitude: -0.0148 },
+    routePoints,
+    routeRiskSamples: samples,
+    alertRadiusMetres: 2500,
+  });
+
+  assert.match(progress.message, /Elevated theft pressure/i);
+});
+
 test('marks the journey as off route when the closest sample is too far away', () => {
   const progress = summarizeRouteProgress({
     currentLocation: { latitude: 51.6, longitude: -0.3 },

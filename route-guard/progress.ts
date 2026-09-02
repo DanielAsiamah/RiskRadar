@@ -69,12 +69,13 @@ export function summarizeRouteProgress(input: RouteGuardProgressInput): RouteGua
     .sort((first, second) => first.pointIndex - second.pointIndex || first.distanceMetres - second.distanceMetres)[0];
 
   if (upcomingHotzone) {
+    const basis = formatBasis(upcomingHotzone.basis);
     return {
       status: 'on-route',
       distanceToRouteMetres,
       nearestSample,
       upcomingHotzone,
-      message: `Approaching elevated route section in about ${formatDistance(upcomingHotzone.distanceMetres)}: ${upcomingHotzone.score}/100 ${upcomingHotzone.riskLevel.toUpperCase()}.`,
+      message: `Approaching elevated route section in about ${formatDistance(upcomingHotzone.distanceMetres)}: ${upcomingHotzone.score}/100 ${upcomingHotzone.riskLevel.toUpperCase()}${basis}.`,
     };
   }
 
@@ -128,4 +129,10 @@ function formatDistance(metres: number) {
   if (!Number.isFinite(metres)) return 'an unknown distance';
   if (metres >= 1_000) return `${(metres / 1_000).toFixed(1)} km`;
   return `${Math.max(1, Math.round(metres))} m`;
+}
+
+function formatBasis(basis: string) {
+  const cleaned = basis.trim();
+  if (!cleaned) return '';
+  return ` - ${cleaned}`;
 }
