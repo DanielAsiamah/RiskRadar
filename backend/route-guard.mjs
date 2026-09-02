@@ -41,11 +41,13 @@ function routeRiskLevel(score) {
 }
 
 function validateInput(input) {
-  const start = String(input?.start || '').trim();
+  const rawStart = String(input?.start || '').trim();
   const destination = String(input?.destination || '').trim();
   const travelMode = String(input?.travelMode || '').trim().toLowerCase();
   const entitlement = String(input?.entitlement || '').trim().toLowerCase();
   const routeScansUsed = Number(input?.routeScansUsed);
+  const startCoordinates = input?.startCoordinates == null ? null : normalizeInputCoordinates(input.startCoordinates, 'startCoordinates');
+  const start = rawStart || (startCoordinates ? 'Current location' : '');
 
   if (!start || !destination) {
     throw new RouteGuardError('Start and destination are required.');
@@ -67,7 +69,23 @@ function validateInput(input) {
     );
   }
 
-  return { start, destination, travelMode, entitlement, routeScansUsed };
+  return { start, destination, travelMode, entitlement, routeScansUsed, startCoordinates };
+}
+
+function normalizeInputCoordinates(value, field) {
+  const latitude = Number(value?.latitude);
+  const longitude = Number(value?.longitude);
+  const accuracyMetres = value?.accuracyMetres == null ? undefined : Number(value.accuracyMetres);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
+    || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180
+    || accuracyMetres !== undefined && (!Number.isFinite(accuracyMetres) || accuracyMetres < 0 || accuracyMetres > 5000)) {
+    throw new RouteGuardError(`${field} must include valid latitude and longitude.`);
+  }
+  return {
+    latitude: round(latitude),
+    longitude: round(longitude),
+    ...(accuracyMetres === undefined ? {} : { accuracyMetres: Math.round(accuracyMetres) }),
+  };
 }
 
 function buildRoutePoints(seed, start, destination) {
@@ -353,7 +371,18 @@ export async function createFreeRouteGuardScan(input, {
   const validated = validateInput(input);
   let startLocation;
   let destinationLocation;
-  if (geocodeLocation === geocodeUkLocation) {
+  if (validated.startCoordinates) {
+    startLocation = {
+      query: validated.start,
+      label: 'Current location',
+      latitude: validated.startCoordinates.latitude,
+      longitude: validated.startCoordinates.longitude,
+      accuracyMetres: validated.startCoordinates.accuracyMetres,
+      confidence: validated.startCoordinates.accuracyMetres == null || validated.startCoordinates.accuracyMetres <= 100 ? 'high' : 'medium',
+      source: 'device-location',
+    };
+    destinationLocation = await geocodeLocation(validated.destination);
+  } else if (geocodeLocation === geocodeUkLocation) {
     startLocation = await geocodeLocation(validated.start);
     await wait(1100);
     destinationLocation = await geocodeLocation(validated.destination);
@@ -413,7 +442,13 @@ export async function createFreeRouteGuardScan(input, {
     destination: validated.destination,
     travelMode: validated.travelMode,
     geocoded: {
-      start: { ...startPoint, label: String(startLocation.label || validated.start), confidence: startLocation.confidence || 'medium', source: startLocation.source || 'unknown' },
+      start: {
+        ...startPoint,
+        label: String(startLocation.label || validated.start),
+        confidence: startLocation.confidence || 'medium',
+        source: startLocation.source || 'unknown',
+        ...(startLocation.accuracyMetres == null ? {} : { accuracyMetres: startLocation.accuracyMetres }),
+      },
       destination: { ...destinationPoint, label: String(destinationLocation.label || validated.destination), confidence: destinationLocation.confidence || 'medium', source: destinationLocation.source || 'unknown' },
     },
     routeProvider: routeProviderMetadata(route, validated.travelMode, routingProfile),

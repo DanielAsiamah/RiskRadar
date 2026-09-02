@@ -132,6 +132,60 @@ test('POST /api/route-guard can return a free OSM-backed route scan', async () =
   assert.equal(payload.sampledRiskScores[1].riskLevel, 'red');
 });
 
+test('POST /api/route-guard accepts current-location coordinates for the route start', async () => {
+  const geocodedQueries = [];
+  const handler = createRouteGuardRouteHandler({
+    provider: 'free-osm',
+    geocodeLocation: async (query) => {
+      geocodedQueries.push(query);
+      return {
+        query,
+        label: 'London Bridge resolved',
+        latitude: 51.5,
+        longitude: -0.08,
+        confidence: 'high',
+        source: 'test-geocoder',
+      };
+    },
+    fetchRoute: async ({ startPoint, destinationPoint }) => ({
+      provider: 'free-osm',
+      routingMode: 'foot',
+      distanceMetres: 900,
+      durationSeconds: 720,
+      routePoints: [startPoint, destinationPoint],
+      attribution: 'OpenStreetMap contributors; OSRM',
+    }),
+    sampleRisk: async () => ({ score: 31, basis: 'test route risk' }),
+  });
+  const response = createResponse();
+
+  await handler.handle(
+    createRequest({ ...validBody, start: '', startCoordinates: { latitude: 51.4762, longitude: -0.0005 } }),
+    response,
+    new URL('http://localhost/api/route-guard'),
+  );
+
+  const payload = JSON.parse(response.body);
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(geocodedQueries, [validBody.destination]);
+  assert.equal(payload.start, 'Current location');
+  assert.equal(payload.geocoded.start.source, 'device-location');
+});
+
+test('POST /api/route-guard rejects invalid current-location coordinates', async () => {
+  const handler = createRouteGuardRouteHandler({ provider: 'free-osm' });
+  const response = createResponse();
+
+  await handler.handle(
+    createRequest({ ...validBody, start: '', startCoordinates: { latitude: 999, longitude: -0.0005 } }),
+    response,
+    new URL('http://localhost/api/route-guard'),
+  );
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(JSON.parse(response.body).code, 'INVALID_ROUTE_GUARD_INPUT');
+});
+
 test('free provider route failures fall back to mock without hiding entitlement errors', async () => {
   const handler = createRouteGuardRouteHandler({
     provider: 'free-osm',

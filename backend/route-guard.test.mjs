@@ -143,6 +143,47 @@ test('builds a free UK route scan from injected geocoding, routing, and risk sam
   assert.match(result.disclaimer, /area intelligence/i);
 });
 
+test('uses supplied start coordinates without geocoding the current location', async () => {
+  const geocodedQueries = [];
+  const result = await createFreeRouteGuardScan(
+    {
+      ...request,
+      start: '',
+      startCoordinates: { latitude: 51.4762, longitude: -0.0005, accuracyMetres: 18 },
+      destination: 'Greenwich Station',
+    },
+    {
+      geocodeLocation: async (query) => {
+        geocodedQueries.push(query);
+        return {
+          query,
+          label: 'Greenwich Station, London',
+          latitude: 51.4781,
+          longitude: -0.0149,
+          confidence: 'high',
+          source: 'test-geocoder',
+        };
+      },
+      fetchRoute: async ({ startPoint, destinationPoint }) => ({
+        provider: 'free-osm',
+        routingMode: 'foot',
+        distanceMetres: 1200,
+        durationSeconds: 900,
+        routePoints: [startPoint, destinationPoint],
+        attribution: 'OpenStreetMap contributors; OSRM',
+      }),
+      sampleRisk: async () => ({ score: 34, basis: 'test risk' }),
+    },
+  );
+
+  assert.deepEqual(geocodedQueries, ['Greenwich Station']);
+  assert.equal(result.start, 'Current location');
+  assert.equal(result.geocoded.start.label, 'Current location');
+  assert.equal(result.geocoded.start.source, 'device-location');
+  assert.equal(result.geocoded.start.accuracyMetres, 18);
+  assert.equal(result.routePoints[0].latitude, 51.4762);
+});
+
 test('uses a transparent walking corridor estimate for transit until live transit routing is connected', async () => {
   const result = await createFreeRouteGuardScan(
     { ...request, travelMode: 'transit' },

@@ -5,6 +5,7 @@ export type RouteGuardRiskLevel = 'low' | 'amber' | 'red';
 
 export interface RouteGuardScanInput {
   start: string;
+  startCoordinates?: { latitude: number; longitude: number; accuracyMetres?: number };
   destination: string;
   travelMode: RouteGuardTravelMode;
   entitlement: 'pro' | 'free';
@@ -44,7 +45,7 @@ export interface RouteGuardScan {
   destination: string;
   travelMode: RouteGuardTravelMode;
   geocoded?: {
-    start: { latitude: number; longitude: number; label: string; confidence: string; source: string };
+    start: { latitude: number; longitude: number; label: string; confidence: string; source: string; accuracyMetres?: number };
     destination: { latitude: number; longitude: number; label: string; confidence: string; source: string };
   };
   routeProvider?: {

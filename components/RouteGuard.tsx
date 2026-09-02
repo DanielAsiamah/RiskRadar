@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   ActivityIndicator,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -12,6 +13,7 @@ import {
   Bus,
   Car,
   Clock3,
+  Crosshair,
   Footprints,
   LockKeyhole,
   MapPin,
@@ -21,7 +23,7 @@ import {
 } from 'lucide-react-native';
 import tw from 'twrnc';
 
-import { scanRouteGuard, type RouteGuardRiskLevel, type RouteGuardScan, type RouteGuardTravelMode } from '../api/route-guard';
+import { scanRouteGuard, type RouteGuardRiskLevel, type RouteGuardScan, type RouteGuardScanInput, type RouteGuardTravelMode } from '../api/route-guard';
 import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
 import type { MapCoordinate, RouteMapRiskSample } from './map-types';
@@ -56,13 +58,53 @@ export default function RouteGuard({
   onUpgrade,
 }: RouteGuardProps) {
   const [start, setStart] = useState('');
+  const [startCoordinates, setStartCoordinates] = useState<RouteGuardScanInput['startCoordinates'] | null>(null);
   const [destination, setDestination] = useState('');
   const [travelMode, setTravelMode] = useState<RouteGuardTravelMode>('walking');
   const [result, setResult] = useState<RouteGuardScan | null>(null);
   const [loading, setLoading] = useState(false);
+  const [locating, setLocating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canScan = premium && usageReady && routeScansUsed < 100 && start.trim().length > 0 && destination.trim().length > 0 && !loading;
+  const hasStart = start.trim().length > 0 || !!startCoordinates;
+  const canScan = premium && usageReady && routeScansUsed < 100 && hasStart && destination.trim().length > 0 && !loading && !locating;
+
+  const handleStartChange = (value: string) => {
+    setStart(value);
+    setStartCoordinates(null);
+  };
+
+  const useCurrentLocation = async () => {
+    const geolocation = (globalThis.navigator as { geolocation?: Geolocation } | undefined)?.geolocation;
+    if (!geolocation) {
+      setError(Platform.OS === 'web'
+        ? 'This browser does not expose location services to RiskRadar.'
+        : 'Current-location routing is available on web in this preview.');
+      return;
+    }
+
+    setLocating(true);
+    setError(null);
+    try {
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          maximumAge: 30_000,
+          timeout: 12_000,
+        });
+      });
+      setStart('Current location');
+      setStartCoordinates({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracyMetres: position.coords.accuracy,
+      });
+    } catch {
+      setError('RiskRadar could not access your current location. Check browser location permission and try again.');
+    } finally {
+      setLocating(false);
+    }
+  };
 
   const handleScan = async () => {
     if (!premium) {
@@ -75,7 +117,8 @@ export default function RouteGuard({
       setLoading(true);
       setError(null);
       const scan = await scanRouteGuard({
-        start: start.trim(),
+        start: startCoordinates ? 'Current location' : start.trim(),
+        startCoordinates: startCoordinates ?? undefined,
         destination: destination.trim(),
         travelMode,
         entitlement: 'pro',
@@ -128,7 +171,22 @@ export default function RouteGuard({
           ) : (
             <>
               <View style={[membershipStyles.card, tw`bg-slate-50 mb-5`]}>
-                <LocationInput label="START" value={start} onChangeText={setStart} placeholder="Postcode or place" />
+                <LocationInput label="START" value={start} onChangeText={handleStartChange} placeholder="Postcode or place" />
+                <Pressable
+                  onPress={() => void useCurrentLocation()}
+                  disabled={locating || loading}
+                  accessibilityRole="button"
+                  style={({ pressed }) => [
+                    tw`mb-4 rounded-2xl border border-indigo-100 bg-white px-4 py-3 flex-row items-center justify-center`,
+                    pressed && tw`opacity-75`,
+                    (locating || loading) && tw`opacity-60`,
+                  ]}
+                >
+                  {locating ? <ActivityIndicator color={membershipColors.indigo} /> : <Crosshair size={17} color={membershipColors.indigo} />}
+                  <Text style={tw`text-xs font-black text-indigo-700 ml-2`}>
+                    {locating ? 'Finding current location...' : startCoordinates ? 'Current location selected' : 'Use current location'}
+                  </Text>
+                </Pressable>
                 <LocationInput label="DESTINATION" value={destination} onChangeText={setDestination} placeholder="Where are you going?" />
 
                 <Text style={tw`text-[10px] font-black tracking-widest text-slate-400 mb-3`}>TRAVEL MODE</Text>
