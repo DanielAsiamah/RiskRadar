@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -24,6 +24,7 @@ import {
 import tw from 'twrnc';
 
 import { scanRouteGuard, type RouteGuardRiskLevel, type RouteGuardScan, type RouteGuardScanInput, type RouteGuardTravelMode } from '../api/route-guard';
+import { summarizeRouteProgress, type RouteGuardProgressSummary } from '../route-guard/progress';
 import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
 import type { MapCoordinate, RouteMapRiskSample } from './map-types';
@@ -64,7 +65,12 @@ export default function RouteGuard({
   const [result, setResult] = useState<RouteGuardScan | null>(null);
   const [loading, setLoading] = useState(false);
   const [locating, setLocating] = useState(false);
+  const [tracking, setTracking] = useState(false);
+  const [journeyLocation, setJourneyLocation] = useState<MapCoordinate | null>(null);
+  const [journeyAccuracy, setJourneyAccuracy] = useState<number | null>(null);
+  const [trackingError, setTrackingError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const locationWatchId = useRef<number | null>(null);
 
   const hasStart = start.trim().length > 0 || !!startCoordinates;
   const canScan = premium && usageReady && routeScansUsed < 100 && hasStart && destination.trim().length > 0 && !loading && !locating;
@@ -72,6 +78,8 @@ export default function RouteGuard({
   const handleStartChange = (value: string) => {
     setStart(value);
     setStartCoordinates(null);
+    setJourneyLocation(null);
+    setTrackingError(null);
   };
 
   const useCurrentLocation = async () => {
@@ -99,12 +107,68 @@ export default function RouteGuard({
         longitude: position.coords.longitude,
         accuracyMetres: position.coords.accuracy,
       });
+      setJourneyLocation({
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+      });
+      setJourneyAccuracy(position.coords.accuracy);
     } catch {
       setError('RiskRadar could not access your current location. Check browser location permission and try again.');
     } finally {
       setLocating(false);
     }
   };
+
+  const clearLocationWatcher = () => {
+    const geolocation = (globalThis.navigator as { geolocation?: Geolocation } | undefined)?.geolocation;
+    if (geolocation && locationWatchId.current !== null) {
+      geolocation.clearWatch(locationWatchId.current);
+    }
+    locationWatchId.current = null;
+  };
+
+  const startJourneyTracking = () => {
+    const geolocation = (globalThis.navigator as { geolocation?: Geolocation } | undefined)?.geolocation;
+    if (!geolocation) {
+      setTrackingError(Platform.OS === 'web'
+        ? 'This browser does not expose live location services to RiskRadar.'
+        : 'Live journey tracking is available on web in this preview.');
+      return;
+    }
+
+    clearLocationWatcher();
+    setTracking(true);
+    setTrackingError(null);
+    locationWatchId.current = geolocation.watchPosition(
+      (position) => {
+        setJourneyLocation({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+        setJourneyAccuracy(position.coords.accuracy);
+        setTrackingError(null);
+      },
+      () => {
+        setTracking(false);
+        setTrackingError('RiskRadar could not keep reading your live location. Check browser location permission and try again.');
+        clearLocationWatcher();
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 10_000,
+        timeout: 15_000,
+      },
+    );
+  };
+
+  const stopJourneyTracking = () => {
+    clearLocationWatcher();
+    setTracking(false);
+  };
+
+  useEffect(() => () => {
+    clearLocationWatcher();
+  }, []);
 
   const handleScan = async () => {
     if (!premium) {
@@ -125,6 +189,13 @@ export default function RouteGuard({
         routeScansUsed,
       });
       setResult(scan);
+      if (startCoordinates) {
+        setJourneyLocation({
+          latitude: startCoordinates.latitude,
+          longitude: startCoordinates.longitude,
+        });
+        setJourneyAccuracy(startCoordinates.accuracyMetres ?? null);
+      }
       await onUsageChange(scan.usage.usedAfter);
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : 'Route Guard could not scan this route.');
@@ -151,7 +222,7 @@ export default function RouteGuard({
                 <Text style={tw`text-lg font-black text-slate-950`}>Route Guard</Text>
                 <View style={tw`ml-2 rounded-full bg-indigo-600 px-2 py-1`}><Text style={tw`text-[9px] font-black tracking-widest text-white`}>PRO</Text></View>
               </View>
-          <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mt-1`}>LIVE ROUTE INTELLIGENCE</Text>
+              <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mt-1`}>LIVE ROUTE INTELLIGENCE</Text>
             </View>
           </View>
 
@@ -210,7 +281,17 @@ export default function RouteGuard({
                 <Text style={tw`text-[11px] text-slate-400 text-center mt-3`}>{Math.max(0, 100 - routeScansUsed)} of 100 scans remaining this month</Text>
               </View>
 
-              {result ? <RouteResult result={result} /> : null}
+              {result ? (
+                <RouteResult
+                  result={result}
+                  currentLocation={journeyLocation}
+                  currentAccuracy={journeyAccuracy}
+                  tracking={tracking}
+                  trackingError={trackingError}
+                  onStartTracking={startJourneyTracking}
+                  onStopTracking={stopJourneyTracking}
+                />
+              ) : null}
             </>
           )}
 
@@ -236,7 +317,23 @@ function LocationInput({ label, value, onChangeText, placeholder }: { label: str
   );
 }
 
-function RouteResult({ result }: { result: RouteGuardScan }) {
+function RouteResult({
+  result,
+  currentLocation,
+  currentAccuracy,
+  tracking,
+  trackingError,
+  onStartTracking,
+  onStopTracking,
+}: {
+  result: RouteGuardScan;
+  currentLocation: MapCoordinate | null;
+  currentAccuracy: number | null;
+  tracking: boolean;
+  trackingError: string | null;
+  onStartTracking(): void;
+  onStopTracking(): void;
+}) {
   const risk = RISK_COLORS[result.overallRiskLevel];
   const routePoints = result.routePoints.map(({ latitude, longitude }) => ({ latitude, longitude }));
   const routeRiskSamples = result.sampledRiskScores
@@ -250,6 +347,14 @@ function RouteResult({ result }: { result: RouteGuardScan }) {
       basis: sample.basis,
     }));
   const mapCenter = centerForRoute(routePoints);
+  const progress = currentLocation ? summarizeRouteProgress({
+    currentLocation,
+    routePoints,
+    routeRiskSamples,
+    alertRadiusMetres: 500,
+  }) : null;
+  const liveRiskLevel = progress?.upcomingHotzone?.riskLevel ?? progress?.nearestSample?.riskLevel ?? result.overallRiskLevel;
+  const liveRisk = RISK_COLORS[liveRiskLevel];
 
   return (
     <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`mb-5`]}>
@@ -275,17 +380,27 @@ function RouteResult({ result }: { result: RouteGuardScan }) {
           <CrimeMapCanvas
             center={mapCenter}
             markers={[]}
-            selectedPoint={routePoints[0]}
+            selectedPoint={currentLocation ?? routePoints[0]}
             areaPoints={[]}
             boundaryPoints={[]}
             routeLine={{ points: routePoints, riskLevel: result.overallRiskLevel }}
             routeRiskSamples={routeRiskSamples}
-            dataKey={`${result.provider}:${result.start}:${result.destination}:${result.overallRiskScore}`}
+            dataKey={`${result.provider}:${result.start}:${result.destination}:${result.overallRiskScore}:${currentLocation?.latitude ?? 'no-live'}`}
             onMapPress={() => undefined}
             onOpenEvidence={() => undefined}
           />
         </View>
       ) : null}
+
+      <LiveProgressCard
+        progress={progress}
+        currentAccuracy={currentAccuracy}
+        tracking={tracking}
+        trackingError={trackingError}
+        color={liveRisk}
+        onStartTracking={onStartTracking}
+        onStopTracking={onStopTracking}
+      />
 
       <View style={tw`rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 mb-5`}>
         <Text style={tw`text-[10px] font-black tracking-widest text-slate-400 mb-1`}>ROUTE SOURCE</Text>
@@ -319,6 +434,71 @@ function RouteResult({ result }: { result: RouteGuardScan }) {
 
       <Text style={tw`text-[10px] text-slate-400 leading-4 mt-3`}>{result.disclaimer}</Text>
       <Text style={tw`text-[10px] font-bold text-indigo-600 mt-2`}>Google requests made: 0</Text>
+    </View>
+  );
+}
+
+function LiveProgressCard({
+  progress,
+  currentAccuracy,
+  tracking,
+  trackingError,
+  color,
+  onStartTracking,
+  onStopTracking,
+}: {
+  progress: RouteGuardProgressSummary | null;
+  currentAccuracy: number | null;
+  tracking: boolean;
+  trackingError: string | null;
+  color: { strong: string; soft: string; label: string };
+  onStartTracking(): void;
+  onStopTracking(): void;
+}) {
+  const statusCopy = progress?.status === 'off-route'
+    ? 'OFF SCANNED ROUTE'
+    : tracking
+      ? 'LIVE POSITION ACTIVE'
+      : 'LIVE POSITION READY';
+  const nearestScore = progress?.upcomingHotzone?.score ?? progress?.nearestSample?.score;
+
+  return (
+    <View style={[tw`rounded-3xl border px-4 py-4 mb-5`, { backgroundColor: color.soft, borderColor: `${color.strong}33` }]}>
+      <View style={tw`flex-row items-start justify-between`}>
+        <View style={tw`flex-1 pr-3`}>
+          <Text style={{ color: color.strong, fontSize: 10, fontWeight: '900', letterSpacing: 1.2 }}>{statusCopy}</Text>
+          <Text style={tw`text-sm font-black text-slate-950 mt-1`}>Live route awareness</Text>
+          <Text style={tw`text-xs text-slate-600 leading-5 mt-2`}>
+            {progress?.message ?? 'Start live position after scanning to let RiskRadar compare your movement with the route risk samples.'}
+          </Text>
+          {currentAccuracy ? (
+            <Text style={tw`text-[10px] text-slate-400 mt-2`}>Location accuracy: about {Math.round(currentAccuracy)} m</Text>
+          ) : null}
+        </View>
+        {nearestScore ? (
+          <View style={{ minWidth: 58, borderRadius: 18, backgroundColor: 'white', paddingHorizontal: 10, paddingVertical: 9, alignItems: 'center' }}>
+            <Text style={{ color: color.strong, fontSize: 20, fontWeight: '900' }}>{nearestScore}</Text>
+            <Text style={{ color: color.strong, fontSize: 8, fontWeight: '900', letterSpacing: 1 }}>/100</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {trackingError ? <Text selectable style={tw`text-xs font-bold text-rose-600 mt-3`}>{trackingError}</Text> : null}
+
+      <Pressable
+        onPress={tracking ? onStopTracking : onStartTracking}
+        accessibilityRole="button"
+        style={({ pressed }) => [
+          tw`mt-4 rounded-2xl px-4 py-3 flex-row items-center justify-center`,
+          { backgroundColor: tracking ? '#0f172a' : color.strong },
+          pressed && tw`opacity-80`,
+        ]}
+      >
+        <Crosshair size={17} color="white" />
+        <Text style={tw`text-white font-black ml-2`}>
+          {tracking ? 'Stop live position' : 'Start live position'}
+        </Text>
+      </Pressable>
     </View>
   );
 }
