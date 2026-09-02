@@ -54,6 +54,19 @@ test('includes the route sample basis in an upcoming hotzone warning', () => {
   assert.match(progress.message, /Elevated theft pressure/i);
 });
 
+test('includes the safe context label in an upcoming hotzone warning', () => {
+  const progress = summarizeRouteProgress({
+    currentLocation: { latitude: 51.478, longitude: -0.0148 },
+    routePoints,
+    routeRiskSamples: samples.map((sample) => sample.pointIndex === 2
+      ? { ...sample, contextLabel: 'On or near Blackheath Hill' }
+      : sample),
+    alertRadiusMetres: 2500,
+  });
+
+  assert.match(progress.message, /near On or near Blackheath Hill/i);
+});
+
 test('marks the journey as off route when the closest sample is too far away', () => {
   const progress = summarizeRouteProgress({
     currentLocation: { latitude: 51.6, longitude: -0.3 },

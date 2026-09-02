@@ -179,12 +179,20 @@ function normalizeRiskSample(value, index) {
   if (!Number.isFinite(score)) {
     throw new RouteGuardError(`Risk sample ${index + 1} did not include a valid score.`, 502, 'ROUTE_RISK_BAD_RESPONSE');
   }
+  const contextLabel = sanitizeContextLabel(value?.contextLabel);
   return {
     score,
     riskLevel: routeRiskLevel(score),
     basis: String(value?.basis || 'RiskRadar route sample').trim(),
+    ...(contextLabel ? { contextLabel } : {}),
     contributors: Array.isArray(value?.contributors) ? value.contributors : [],
   };
+}
+
+function sanitizeContextLabel(value) {
+  const label = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!label) return '';
+  return label.slice(0, 96);
 }
 
 function routingProfileFor(travelMode) {
@@ -425,6 +433,7 @@ export async function createFreeRouteGuardScan(input, {
       score: risk.score,
       riskLevel: risk.riskLevel,
       basis: risk.basis,
+      ...(risk.contextLabel ? { contextLabel: risk.contextLabel } : {}),
       contributors: risk.contributors,
     };
   }));

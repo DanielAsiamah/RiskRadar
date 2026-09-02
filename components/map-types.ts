@@ -39,6 +39,7 @@ export interface RouteMapRiskSample extends MapCoordinate {
   score: number;
   riskLevel: RouteMapRiskLevel;
   basis: string;
+  contextLabel?: string;
 }
 
 export interface CrimeMapCanvasProps {

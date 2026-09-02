@@ -10,6 +10,7 @@ export interface RouteProgressSample extends RouteProgressPoint {
   score: number;
   riskLevel: RouteProgressRiskLevel;
   basis: string;
+  contextLabel?: string;
 }
 
 export interface RouteGuardProgressInput {
@@ -70,12 +71,13 @@ export function summarizeRouteProgress(input: RouteGuardProgressInput): RouteGua
 
   if (upcomingHotzone) {
     const basis = formatBasis(upcomingHotzone.basis);
+    const context = formatContextLabel(upcomingHotzone.contextLabel);
     return {
       status: 'on-route',
       distanceToRouteMetres,
       nearestSample,
       upcomingHotzone,
-      message: `Approaching elevated route section in about ${formatDistance(upcomingHotzone.distanceMetres)}: ${upcomingHotzone.score}/100 ${upcomingHotzone.riskLevel.toUpperCase()}${basis}.`,
+      message: `Approaching elevated route section${context} in about ${formatDistance(upcomingHotzone.distanceMetres)}: ${upcomingHotzone.score}/100 ${upcomingHotzone.riskLevel.toUpperCase()}${basis}.`,
     };
   }
 
@@ -135,4 +137,10 @@ function formatBasis(basis: string) {
   const cleaned = basis.trim();
   if (!cleaned) return '';
   return ` - ${cleaned}`;
+}
+
+function formatContextLabel(contextLabel?: string) {
+  const cleaned = String(contextLabel || '').trim();
+  if (!cleaned) return '';
+  return ` near ${cleaned.replace(/^near\s+/i, '')}`;
 }

@@ -26,6 +26,7 @@ export interface RouteGuardRiskSample {
   score: number;
   riskLevel: RouteGuardRiskLevel;
   basis: string;
+  contextLabel?: string;
   contributors?: Array<{ incidentId?: string; category?: string; [key: string]: unknown }>;
 }
 

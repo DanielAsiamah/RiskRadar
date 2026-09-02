@@ -345,6 +345,7 @@ function RouteResult({
       score: sample.score,
       riskLevel: sample.riskLevel,
       basis: sample.basis,
+      contextLabel: sample.contextLabel,
     }));
   const mapCenter = centerForRoute(routePoints);
   const progress = currentLocation ? summarizeRouteProgress({

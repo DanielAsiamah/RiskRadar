@@ -116,6 +116,7 @@ test('builds a free UK route scan from injected geocoding, routing, and risk sam
       sampleRisk: async (point, index) => ({
         score: [22, 64, 81, 35][index],
         basis: `RiskRadar route sample ${index + 1}`,
+        contextLabel: index === 2 ? 'near Tooley Street' : undefined,
         contributors: index === 2 ? [{ incidentId: 'live-flood-1', category: 'flood' }] : [],
       }),
     },
@@ -137,6 +138,7 @@ test('builds a free UK route scan from injected geocoding, routing, and risk sam
   assert.equal(result.routePoints.length, 4);
   assert.equal(result.sampledRiskScores.length, 4);
   assert.equal(result.sampledRiskScores[2].score, 81);
+  assert.equal(result.sampledRiskScores[2].contextLabel, 'near Tooley Street');
   assert.deepEqual(result.sampledRiskScores[2].contributors, [{ incidentId: 'live-flood-1', category: 'flood' }]);
   assert.ok(result.hotzoneSections.some((hotzone) => hotzone.riskLevel === 'red'));
   assert.equal(result.usage.usedAfter, 3);

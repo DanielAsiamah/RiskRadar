@@ -3922,8 +3922,23 @@ async function sampleRouteGuardRisk(point, index) {
     basis: live.liveDelta > 0
       ? 'Historical RiskRadar baseline plus active live-source impact near this route sample.'
       : 'Historical RiskRadar baseline and current time context near this route sample.',
+    contextLabel: buildRouteGuardSampleContextLabel(analysis),
     contributors: live.contributors,
   };
+}
+
+function buildRouteGuardSampleContextLabel(analysis) {
+  const hotspot = Array.isArray(analysis?.hotspotData?.clusters) ? analysis.hotspotData.clusters[0] : null;
+  const hotspotLabel = String(hotspot?.locationLabel || '').trim();
+  if (hotspotLabel && !/approximate mapped location/i.test(hotspotLabel)) {
+    return hotspotLabel;
+  }
+
+  const postcode = String(analysis?.pointData?.postcode || analysis?.postcodeData?.postcode || analysis?.postcode || '').trim();
+  if (postcode) return postcode.toUpperCase();
+
+  const district = String(analysis?.pointData?.admin_district || analysis?.postcodeData?.admin_district || '').trim();
+  return district || 'this route section';
 }
 
 function buildMonthlyPointFromCrimes(monthKey, crimes, dataAvailable = true) {
