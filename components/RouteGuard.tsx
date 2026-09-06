@@ -23,7 +23,15 @@ import {
 } from 'lucide-react-native';
 import tw from 'twrnc';
 
-import { scanRouteGuard, type RouteGuardRiskLevel, type RouteGuardScan, type RouteGuardScanInput, type RouteGuardTravelMode } from '../api/route-guard';
+import {
+  getRouteGuardStatus,
+  scanRouteGuard,
+  type RouteGuardRiskLevel,
+  type RouteGuardScan,
+  type RouteGuardScanInput,
+  type RouteGuardStatus,
+  type RouteGuardTravelMode,
+} from '../api/route-guard';
 import { summarizeRouteProgress, type RouteGuardProgressSummary } from '../route-guard/progress';
 import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
@@ -70,6 +78,9 @@ export default function RouteGuard({
   const [journeyAccuracy, setJourneyAccuracy] = useState<number | null>(null);
   const [trackingError, setTrackingError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [routeStatus, setRouteStatus] = useState<RouteGuardStatus | null>(null);
+  const [routeStatusError, setRouteStatusError] = useState<string | null>(null);
+  const [routeStatusLoading, setRouteStatusLoading] = useState(true);
   const locationWatchId = useRef<number | null>(null);
 
   const hasStart = start.trim().length > 0 || !!startCoordinates;
@@ -170,6 +181,32 @@ export default function RouteGuard({
     clearLocationWatcher();
   }, []);
 
+  useEffect(() => {
+    let active = true;
+
+    const loadRouteStatus = async () => {
+      setRouteStatusLoading(true);
+      try {
+        const status = await getRouteGuardStatus();
+        if (!active) return;
+        setRouteStatus(status);
+        setRouteStatusError(null);
+      } catch (statusError) {
+        if (!active) return;
+        setRouteStatus(null);
+        setRouteStatusError(statusError instanceof Error ? statusError.message : 'Route Guard readiness could not be checked.');
+      } finally {
+        if (active) setRouteStatusLoading(false);
+      }
+    };
+
+    void loadRouteStatus();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const handleScan = async () => {
     if (!premium) {
       onUpgrade();
@@ -228,6 +265,13 @@ export default function RouteGuard({
 
           <Text style={tw`text-3xl font-black tracking-tight text-slate-950 leading-9 mb-3`}>Scan the journey, not just the destination.</Text>
           <Text style={tw`text-sm text-slate-500 leading-6 mb-7`}>Enter a start and destination to scan route sections against RiskRadar area intelligence. Google routing is not used in this version.</Text>
+
+          <RouteGuardStatusCard
+            status={routeStatus}
+            loading={routeStatusLoading}
+            error={routeStatusError}
+            scansRemaining={Math.max(0, 100 - routeScansUsed)}
+          />
 
           {!premium ? (
             <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`border-indigo-100 mb-5`]}>
@@ -301,6 +345,73 @@ export default function RouteGuard({
           </View>
         </View>
       </ScrollView>
+    </View>
+  );
+}
+
+function RouteGuardStatusCard({
+  status,
+  loading,
+  error,
+  scansRemaining,
+}: {
+  status: RouteGuardStatus | null;
+  loading: boolean;
+  error: string | null;
+  scansRemaining: number;
+}) {
+  const providerLabel = status?.provider === 'free-osm'
+    ? 'Free UK routing online'
+    : status?.provider === 'mock'
+      ? 'Mock routing ready'
+      : status?.provider === 'unavailable'
+        ? 'Routing status unavailable'
+        : 'Checking route engine';
+  const providerColor = status?.ready ? membershipColors.indigo : '#d97706';
+
+  return (
+    <View style={[membershipStyles.card, tw`bg-white border-indigo-100 mb-5`]}>
+      <View style={tw`flex-row items-start justify-between`}>
+        <View style={tw`flex-1 pr-3`}>
+          <Text style={tw`text-[10px] font-black tracking-widest text-slate-400 mb-1`}>ROUTE GUARD STATUS</Text>
+          <Text style={{ color: providerColor, fontSize: 15, fontWeight: '900' }}>
+            {loading ? 'Checking route engine...' : providerLabel}
+          </Text>
+          <Text style={tw`text-xs text-slate-500 leading-5 mt-2`}>
+            {error
+              ? 'Status check failed, but you can still try a route scan while the local API is running.'
+              : status?.google.required
+                ? 'Google routing is configured for later paid routing.'
+                : 'No Google billing or frontend map key is required for this preview.'}
+          </Text>
+        </View>
+        <View style={tw`rounded-2xl bg-indigo-50 px-3 py-2 items-center min-w-16`}>
+          {loading ? (
+            <ActivityIndicator color={membershipColors.indigo} />
+          ) : (
+            <>
+              <Text style={tw`text-lg font-black text-indigo-600`}>{scansRemaining}</Text>
+              <Text style={tw`text-[8px] font-black tracking-widest text-indigo-500`}>LEFT</Text>
+            </>
+          )}
+        </View>
+      </View>
+      {error ? <Text selectable style={tw`text-[11px] font-bold text-amber-700 mt-3`}>{error}</Text> : null}
+      {status ? (
+        <View style={tw`flex-row flex-wrap gap-2 mt-4`}>
+          <StatusPill label={`${status.usage.includedMonthlyScans} scans/month`} />
+          <StatusPill label={`Provider: ${status.provider}`} />
+          <StatusPill label={status.supabase.requiredForRouteScan ? 'Supabase required' : 'Works without Supabase'} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function StatusPill({ label }: { label: string }) {
+  return (
+    <View style={tw`rounded-full border border-slate-200 bg-slate-50 px-3 py-2`}>
+      <Text style={tw`text-[10px] font-black text-slate-600`}>{label}</Text>
     </View>
   );
 }

@@ -80,6 +80,27 @@ export interface RouteGuardScan {
   disclaimer: string;
 }
 
+export interface RouteGuardStatus {
+  ready: boolean;
+  provider: 'mock' | 'free-osm' | 'unavailable';
+  usage: {
+    entitlement: 'pro';
+    includedMonthlyScans: 100;
+    period: 'calendar-month';
+  };
+  google: {
+    required: boolean;
+    configured: boolean;
+    requestMadeByStatus: false;
+    note: string;
+  };
+  supabase: {
+    requiredForRouteScan: boolean;
+    note: string;
+  };
+  disclaimer: string;
+}
+
 export function scanRouteGuard(input: RouteGuardScanInput) {
   return apiRequest<RouteGuardScan>(
     '/api/route-guard',
@@ -91,4 +112,8 @@ export function scanRouteGuard(input: RouteGuardScanInput) {
     15_000,
     'optional',
   );
+}
+
+export function getRouteGuardStatus() {
+  return apiRequest<RouteGuardStatus>('/api/route-guard/status', {}, 8_000, 'optional');
 }
