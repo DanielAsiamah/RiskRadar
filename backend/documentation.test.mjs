@@ -37,7 +37,7 @@ test('documents every public HTTP route', async () => {
 });
 
 test('catalogues every method and path implemented by the router', async () => {
-  const [serverSource, membershipSource, watchlistSource, dashboardSource, alertPreferencesSource, reportRoutesSource, liveIncidentRoutesSource] = await Promise.all([
+  const [serverSource, membershipSource, watchlistSource, dashboardSource, alertPreferencesSource, reportRoutesSource, liveIncidentRoutesSource, routeGuardSource] = await Promise.all([
     readFile('backend/server.mjs', 'utf8'),
     readFile('backend/membership/routes.mjs', 'utf8'),
     readFile('backend/membership/watchlist-routes.mjs', 'utf8'),
@@ -45,8 +45,9 @@ test('catalogues every method and path implemented by the router', async () => {
     readFile('backend/membership/alert-preferences.mjs', 'utf8'),
     readFile('backend/membership/report-routes.mjs', 'utf8'),
     readFile('backend/live-incidents/routes.mjs', 'utf8'),
+    readFile('backend/route-guard.mjs', 'utf8'),
   ]);
-  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}\n${alertPreferencesSource}\n${reportRoutesSource}\n${liveIncidentRoutesSource}`;
+  const combinedSource = `${serverSource}\n${membershipSource}\n${watchlistSource}\n${dashboardSource}\n${alertPreferencesSource}\n${reportRoutesSource}\n${liveIncidentRoutesSource}\n${routeGuardSource}`;
   const implemented = [...combinedSource.matchAll(/request\.method === '([^']+)' && url\.pathname === '([^']+)'/g)]
     .map((match) => `${match[1]} ${match[2]}`)
     .concat(watchlistSource.includes("url.pathname === '/api/watchlist'")
@@ -66,6 +67,9 @@ test('catalogues every method and path implemented by the router', async () => {
       : [])
     .concat(combinedSource.includes("url.pathname.startsWith('/api/live-incidents/')")
       ? ['GET /api/live-incidents/:id']
+      : [])
+    .concat(routeGuardSource.includes("url.pathname !== '/api/route-guard'")
+      ? ['POST /api/route-guard']
       : [])
     .concat(combinedSource.includes("/^\\/api\\/watchlist\\/([^/]+)$/")
       ? ['PATCH /api/watchlist/:id', 'DELETE /api/watchlist/:id']

@@ -99,6 +99,26 @@ test('route guard handler ignores other routes and rejects invalid JSON', async 
   assert.equal(JSON.parse(invalidResponse.body).code, 'INVALID_ROUTE_GUARD_INPUT');
 });
 
+test('GET /api/route-guard/status returns provider readiness without requiring Google', async () => {
+  const handler = createRouteGuardRouteHandler({ provider: 'free-osm' });
+  const response = createResponse();
+
+  const handled = await handler.handle(
+    createRequest(null, 'GET'),
+    response,
+    new URL('http://localhost/api/route-guard/status'),
+  );
+
+  const payload = JSON.parse(response.body);
+  assert.equal(handled, true);
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.provider, 'free-osm');
+  assert.equal(payload.ready, true);
+  assert.equal(payload.google.required, false);
+  assert.equal(payload.google.configured, false);
+  assert.equal(payload.usage.includedMonthlyScans, 100);
+});
+
 test('POST /api/route-guard can return a free OSM-backed route scan', async () => {
   const handler = createRouteGuardRouteHandler({
     provider: 'free-osm',

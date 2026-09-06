@@ -496,6 +496,39 @@ export async function createFreeRouteGuardScan(input, {
   };
 }
 
+export function createRouteGuardStatus({ provider = process.env.ROUTE_PROVIDER || 'mock' } = {}) {
+  const selectedProvider = String(provider || 'mock').trim().toLowerCase();
+  const normalizedProvider = ['free-osm', 'osm', 'free'].includes(selectedProvider)
+    ? 'free-osm'
+    : selectedProvider === 'mock'
+      ? 'mock'
+      : 'unavailable';
+  const googleConfigured = Boolean(String(process.env.GOOGLE_MAPS_API_KEY || '').trim());
+
+  return {
+    ready: normalizedProvider === 'mock' || normalizedProvider === 'free-osm',
+    provider: normalizedProvider,
+    usage: {
+      entitlement: 'pro',
+      includedMonthlyScans: PRO_MONTHLY_ROUTE_SCANS,
+      period: 'calendar-month',
+    },
+    google: {
+      required: false,
+      configured: googleConfigured,
+      requestMadeByStatus: false,
+      note: normalizedProvider === 'free-osm'
+        ? 'Route Guard is using free backend routing sources. Google billing is not required for this release.'
+        : 'Route Guard can run in deterministic mock mode without Google billing.',
+    },
+    supabase: {
+      requiredForRouteScan: false,
+      note: 'Route scans can run locally without Supabase; Supabase is used later for authenticated subscription state.',
+    },
+    disclaimer: FREE_ROUTE_DISCLAIMER,
+  };
+}
+
 async function readJsonBody(request, maxBytes = 32 * 1024) {
   let body = '';
   for await (const chunk of request) {
@@ -527,6 +560,11 @@ export function createRouteGuardRouteHandler({
 } = {}) {
   return {
     async handle(request, response, url) {
+      if (request.method === 'GET' && url.pathname === '/api/route-guard/status') {
+        sendJson(request, response, 200, createRouteGuardStatus({ provider }));
+        return true;
+      }
+
       if (request.method !== 'POST' || url.pathname !== '/api/route-guard') return false;
 
       try {

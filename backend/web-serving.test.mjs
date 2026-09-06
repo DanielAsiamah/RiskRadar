@@ -48,11 +48,12 @@ test('serves the web app and API from one process', { timeout: 20000 }, async ()
     });
 
     const baseUrl = `http://127.0.0.1:${port}`;
-    const [rootResponse, routeResponse, assetResponse, healthResponse, missingResponse] = await Promise.all([
+    const [rootResponse, routeResponse, assetResponse, healthResponse, routeGuardStatusResponse, missingResponse] = await Promise.all([
       fetch(`${baseUrl}/`),
       fetch(`${baseUrl}/embed`),
       fetch(`${baseUrl}/app.js`, { method: 'HEAD' }),
       fetch(`${baseUrl}/health`),
+      fetch(`${baseUrl}/api/route-guard/status`),
       fetch(`${baseUrl}/missing.js`),
     ]);
 
@@ -66,6 +67,11 @@ test('serves the web app and API from one process', { timeout: 20000 }, async ()
     assert.equal(assetResponse.status, 200);
     assert.match(assetResponse.headers.get('cache-control') || '', /immutable/);
     assert.equal(healthResponse.status, 200);
+    assert.equal(routeGuardStatusResponse.status, 200);
+    assert.match(routeGuardStatusResponse.headers.get('content-type') || '', /application\/json/);
+    const routeGuardStatus = await routeGuardStatusResponse.json();
+    assert.equal(routeGuardStatus.ready, true);
+    assert.equal(routeGuardStatus.google.required, false);
     assert.equal(missingResponse.status, 404);
   } finally {
     if (child.exitCode === null) {

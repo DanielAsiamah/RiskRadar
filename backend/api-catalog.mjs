@@ -29,6 +29,7 @@ export const apiCatalog = Object.freeze({
     endpoint('POST', '/api/watchlist', 'Create a watched postcode for the current member.', '{ label, postcode }', 'member'),
     endpoint('PATCH', '/api/watchlist/:id', 'Rename a watched postcode owned by the current member.', '{ label }', 'member'),
     endpoint('DELETE', '/api/watchlist/:id', 'Delete a watched postcode owned by the current member.', 'None', 'member'),
+    endpoint('GET', '/api/route-guard/status', 'Return Route Guard provider readiness, monthly allowance, and Google/Supabase dependency notes.'),
     endpoint('POST', '/api/route-guard', 'Build a Route Guard scan from free backend routing or deterministic fallback, then sample route sections for elevated area and live risk.', '{ start, destination, travelMode, entitlement, routeScansUsed }', 'member'),
     endpoint('GET', '/api/live-incidents', 'Return current public incidents near a coordinate from named live sources.', 'Query: lat, lng, radiusKm?, limit?'),
     endpoint('GET', '/api/live-incidents/:id', 'Return one public live incident with allow-listed history.', 'Route: id'),

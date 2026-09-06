@@ -34,10 +34,24 @@ cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
 npm run api
 ```
 
+On macOS, use the repo path you cloned, for example:
+
+```bash
+cd /Users/danielblackman/RiskRadar
+npm run api
+```
+
 Terminal 2:
 
 ```powershell
 cd C:\Users\china\.gemini\antigravity\scratch\riskradar-expo
+npm run start
+```
+
+On macOS:
+
+```bash
+cd /Users/danielblackman/RiskRadar
 npm run start
 ```
 
@@ -50,6 +64,25 @@ npm run api
 ```
 
 Then open `http://localhost:3001`.
+
+Quick backend checks after `npm run api`:
+
+```bash
+curl http://127.0.0.1:3001/ready
+curl http://127.0.0.1:3001/api/route-guard/status
+```
+
+`/api/route-guard/status` should report `ready: true`, the active provider, 100 included Route Guard scans per month, and `google.required: false`. Route Guard currently defaults to free backend routing (`ROUTE_PROVIDER=free-osm` in the server) and does not need `GOOGLE_MAPS_API_KEY`.
+
+Example Route Guard scan without Google billing:
+
+```bash
+curl -X POST http://127.0.0.1:3001/api/route-guard \
+  -H "Content-Type: application/json" \
+  --data '{"start":"SE10 8EP","destination":"London Bridge","travelMode":"walking","entitlement":"pro","routeScansUsed":0}'
+```
+
+The response should include `provider: "free-osm"` or a safe mock fallback, `googleRequestMade: false`, route points, sampled risk scores, and anonymised context labels such as Police.uk-style "On or near..." areas when available.
 
 ### Live Radar local notes
 
