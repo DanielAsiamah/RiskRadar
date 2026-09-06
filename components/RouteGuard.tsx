@@ -32,6 +32,7 @@ import {
   type RouteGuardStatus,
   type RouteGuardTravelMode,
 } from '../api/route-guard';
+import { formatRouteGuardAlert } from '../route-guard/presentation';
 import { summarizeRouteProgress, type RouteGuardProgressSummary } from '../route-guard/progress';
 import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
@@ -572,25 +573,27 @@ function LiveProgressCard({
     : tracking
       ? 'LIVE POSITION ACTIVE'
       : 'LIVE POSITION READY';
-  const nearestScore = progress?.upcomingHotzone?.score ?? progress?.nearestSample?.score;
+  const alert = formatRouteGuardAlert(progress);
 
   return (
     <View style={[tw`rounded-3xl border px-4 py-4 mb-5`, { backgroundColor: color.soft, borderColor: `${color.strong}33` }]}>
       <View style={tw`flex-row items-start justify-between`}>
         <View style={tw`flex-1 pr-3`}>
           <Text style={{ color: color.strong, fontSize: 10, fontWeight: '900', letterSpacing: 1.2 }}>{statusCopy}</Text>
-          <Text style={tw`text-sm font-black text-slate-950 mt-1`}>Live route awareness</Text>
+          <Text style={tw`text-sm font-black text-slate-950 mt-1`}>{alert.title}</Text>
           <Text style={tw`text-xs text-slate-600 leading-5 mt-2`}>
-            {progress?.message ?? 'Start live position after scanning to let RiskRadar compare your movement with the route risk samples.'}
+            {alert.detail}
           </Text>
+          <Text style={{ color: color.strong, fontSize: 11, fontWeight: '900', marginTop: 8 }}>{alert.action}</Text>
           {currentAccuracy ? (
             <Text style={tw`text-[10px] text-slate-400 mt-2`}>Location accuracy: about {Math.round(currentAccuracy)} m</Text>
           ) : null}
         </View>
-        {nearestScore ? (
+        {alert.scoreLabel ? (
           <View style={{ minWidth: 58, borderRadius: 18, backgroundColor: 'white', paddingHorizontal: 10, paddingVertical: 9, alignItems: 'center' }}>
-            <Text style={{ color: color.strong, fontSize: 20, fontWeight: '900' }}>{nearestScore}</Text>
-            <Text style={{ color: color.strong, fontSize: 8, fontWeight: '900', letterSpacing: 1 }}>/100</Text>
+            <Text style={{ color: color.strong, fontSize: 16, fontWeight: '900' }}>{alert.scoreLabel.split(' ')[0]}</Text>
+            <Text style={{ color: color.strong, fontSize: 8, fontWeight: '900', letterSpacing: 1 }}>{alert.scoreLabel.split(' ').slice(1).join(' ')}</Text>
+            {alert.distanceLabel ? <Text style={tw`text-[8px] font-black text-slate-400 mt-1`}>{alert.distanceLabel}</Text> : null}
           </View>
         ) : null}
       </View>
