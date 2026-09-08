@@ -19,6 +19,23 @@ export interface LiveRiskResponse {
   };
 }
 
+export interface LiveSourceStatusResponse {
+  generatedAt: string;
+  network: {
+    status: string;
+    durability: string;
+    persistent: boolean;
+    disclosure: string;
+  };
+  sources: Array<{
+    sourceId?: string;
+    id?: string;
+    state: string;
+    [key: string]: unknown;
+  }>;
+  disclaimer: string;
+}
+
 export async function getNearbyPostcodesForCoordinates(lat: number, lng: number) {
   const response = await apiRequest<LocationSuggestionsResponse>(
     `/api/location-suggestions?lat=${encodeURIComponent(lat)}&lng=${encodeURIComponent(lng)}`,
@@ -51,4 +68,8 @@ export function fetchLiveRiskForPostcode(postcode: string) {
     },
     40_000,
   );
+}
+
+export function fetchLiveSourceStatus() {
+  return apiRequest<LiveSourceStatusResponse>('/api/live-source-status', {}, 8_000);
 }

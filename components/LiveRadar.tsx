@@ -1,15 +1,16 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { ArrowLeft, Bell, LocateFixed, LockKeyhole, MapPin, Radar, ShieldAlert, ShieldCheck } from 'lucide-react-native';
 import tw from 'twrnc';
 
+import { fetchLiveSourceStatus, type LiveSourceStatusResponse } from '../api/live-radar';
 import type {
   LiveRadarAlertEvent,
   LiveRadarPermissionSnapshot,
   LiveRadarReading,
 } from '../live-radar/types.ts';
 import { getLiveRadarAccess, hasRequiredLiveRadarPermissions } from '../live-radar/access.ts';
-import { findCurrentLiveRadarAlert, formatLiveRadarDataMonth } from '../live-radar/presentation.ts';
+import { findCurrentLiveRadarAlert, formatLiveRadarDataMonth, formatLiveSourceNetworkSummary } from '../live-radar/presentation.ts';
 import { membershipColors, membershipStyles } from './membershipStyles';
 
 export interface LiveRadarProps {
@@ -83,9 +84,35 @@ export default function LiveRadar({
   const dataMonth = formatLiveRadarDataMonth(currentReading?.dataMonth ?? null);
   const hasRequiredPermissions = hasRequiredLiveRadarPermissions(access, permissions);
   const canActivate = access.canStart && (isWeb || hasRequiredPermissions);
+  const [liveSourceStatus, setLiveSourceStatus] = useState<LiveSourceStatusResponse | null>(null);
+  const [liveSourceWarning, setLiveSourceWarning] = useState<string | null>(null);
   const monitoringCopy = isWeb
     ? 'Keep this page open to monitor your current area.'
     : 'Live Radar can watch for higher-risk area changes on this device.';
+  const liveNetworkSummary = formatLiveSourceNetworkSummary(liveSourceStatus);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadLiveSourceStatus = async () => {
+      try {
+        const nextStatus = await fetchLiveSourceStatus();
+        if (!active) return;
+        setLiveSourceStatus(nextStatus);
+        setLiveSourceWarning(null);
+      } catch (statusError) {
+        if (!active) return;
+        setLiveSourceStatus(null);
+        setLiveSourceWarning(statusError instanceof Error ? statusError.message : 'Live network status could not be checked.');
+      }
+    };
+
+    void loadLiveSourceStatus();
+
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <View style={membershipStyles.screen}>
@@ -136,6 +163,31 @@ export default function LiveRadar({
           <Text style={tw`text-base text-slate-500 leading-6 mb-6`}>
             {monitoringCopy}
           </Text>
+
+          <View style={[membershipStyles.card, tw`mb-5`, liveNetworkSummary.tone === 'healthy' ? tw`border-emerald-100 bg-emerald-50` : tw`border-amber-100 bg-amber-50`]}>
+            <View style={tw`flex-row items-start justify-between`}>
+              <View style={tw`flex-1 pr-3`}>
+                <Text style={tw`text-[10px] font-black tracking-widest ${liveNetworkSummary.tone === 'healthy' ? 'text-emerald-700' : 'text-amber-700'} mb-1`}>
+                  LIVE SAFETY NETWORK
+                </Text>
+                <Text style={tw`text-base font-black text-slate-950`}>{liveNetworkSummary.title}</Text>
+                <Text style={tw`text-xs text-slate-600 leading-5 mt-2`}>{liveNetworkSummary.detail}</Text>
+                {liveSourceWarning ? (
+                  <Text selectable style={tw`text-[11px] font-bold text-amber-700 mt-2`}>{liveSourceWarning}</Text>
+                ) : (
+                  <Text style={tw`text-[10px] text-slate-500 leading-4 mt-2`}>{liveNetworkSummary.disclosure}</Text>
+                )}
+              </View>
+              <View style={tw`rounded-2xl bg-white px-3 py-2 items-center min-w-18`}>
+                <Text style={tw`text-base font-black ${liveNetworkSummary.tone === 'healthy' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  {liveNetworkSummary.metric.split(' ')[0]}
+                </Text>
+                <Text style={tw`text-[8px] font-black tracking-widest ${liveNetworkSummary.tone === 'healthy' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                  ACTIVE
+                </Text>
+              </View>
+            </View>
+          </View>
 
           {access.showUpgradeGate ? (
             <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`border-indigo-100 mb-5`]}>
