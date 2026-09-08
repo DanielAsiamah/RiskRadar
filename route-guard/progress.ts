@@ -47,9 +47,9 @@ export function summarizeRouteProgress(input: RouteGuardProgressInput): RouteGua
     };
   }
 
-  const distanceToRouteMetres = Math.min(
-    ...[...routePoints, ...routeRiskSamples].map((point) => distanceMetres(input.currentLocation, point)),
-  );
+  const geometry = routePoints.length ? routePoints : routeRiskSamples;
+  const position = projectOntoRoute(input.currentLocation, geometry);
+  const distanceToRouteMetres = position.distanceMetres;
   const nearestSample = findNearestSample(input.currentLocation, routeRiskSamples);
 
   if (distanceToRouteMetres > offRouteThresholdMetres) {
@@ -61,13 +61,14 @@ export function summarizeRouteProgress(input: RouteGuardProgressInput): RouteGua
     };
   }
 
-  const currentIndex = nearestSample?.pointIndex ?? nearestRoutePointIndex(input.currentLocation, routePoints);
   const upcomingHotzone = routeRiskSamples
-    .filter((sample) => sample.pointIndex >= currentIndex)
     .filter((sample) => sample.riskLevel === 'amber' || sample.riskLevel === 'red')
-    .map((sample) => ({ ...sample, distanceMetres: distanceMetres(input.currentLocation, sample) }))
-    .filter((sample) => sample.distanceMetres <= alertRadiusMetres)
-    .sort((first, second) => first.pointIndex - second.pointIndex || first.distanceMetres - second.distanceMetres)[0];
+    .map((sample) => ({
+      ...sample,
+      distanceMetres: projectOntoRoute(sample, geometry).alongMetres - position.alongMetres,
+    }))
+    .filter((sample) => sample.distanceMetres >= 0 && sample.distanceMetres <= alertRadiusMetres)
+    .sort((first, second) => first.distanceMetres - second.distanceMetres)[0];
 
   if (upcomingHotzone) {
     const basis = formatBasis(upcomingHotzone.basis);
@@ -109,10 +110,30 @@ function findNearestSample(currentLocation: RouteProgressPoint, samples: RoutePr
     .sort((first, second) => first.distanceMetres - second.distanceMetres)[0];
 }
 
-function nearestRoutePointIndex(currentLocation: RouteProgressPoint, points: RouteProgressPoint[]) {
-  return points
-    .map((point, index) => ({ index, distanceMetres: distanceMetres(currentLocation, point) }))
-    .sort((first, second) => first.distanceMetres - second.distanceMetres)[0]?.index ?? 0;
+function projectOntoRoute(location: RouteProgressPoint, points: RouteProgressPoint[]) {
+  let best = { distanceMetres: distanceMetres(location, points[0]), alongMetres: 0 };
+  let accumulated = 0;
+  // Project onto each segment in a local metre grid; sample indexes are not geometry indexes.
+  const longitudeScale = Math.cos(toRadians(location.latitude));
+  const toLocal = (point: RouteProgressPoint) => ({
+    x: toRadians(point.longitude - location.longitude) * EARTH_RADIUS_METRES * longitudeScale,
+    y: toRadians(point.latitude - location.latitude) * EARTH_RADIUS_METRES,
+  });
+  for (let index = 1; index < points.length; index += 1) {
+    const start = toLocal(points[index - 1]);
+    const end = toLocal(points[index]);
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const lengthSquared = dx * dx + dy * dy;
+    const fraction = lengthSquared ? Math.max(0, Math.min(1, -(start.x * dx + start.y * dy) / lengthSquared)) : 0;
+    const distance = Math.hypot(start.x + fraction * dx, start.y + fraction * dy);
+    const length = distanceMetres(points[index - 1], points[index]);
+    if (distance < best.distanceMetres) {
+      best = { distanceMetres: distance, alongMetres: accumulated + fraction * length };
+    }
+    accumulated += length;
+  }
+  return best;
 }
 
 function isUsablePoint(point: RouteProgressPoint) {

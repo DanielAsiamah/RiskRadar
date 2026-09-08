@@ -3,6 +3,41 @@ import test from 'node:test';
 
 import { summarizeRouteProgress } from './progress.ts';
 
+test('tracks a position between widely spaced route vertices', () => {
+  const progress = summarizeRouteProgress({
+    currentLocation: { latitude: 51.5, longitude: -0.05 },
+    routePoints: [{ latitude: 51.5, longitude: -0.1 }, { latitude: 51.5, longitude: 0 }],
+    routeRiskSamples: [],
+  });
+  assert.equal(progress.status, 'on-route');
+  assert.ok(progress.distanceToRouteMetres < 1);
+});
+
+test('does not warn about a risk sample already passed on the route', () => {
+  const progress = summarizeRouteProgress({
+    currentLocation: { latitude: 51.5, longitude: -0.049 },
+    routePoints: [{ latitude: 51.5, longitude: -0.1 }, { latitude: 51.5, longitude: 0 }],
+    routeRiskSamples: [{ latitude: 51.5, longitude: -0.05, pointIndex: 0, score: 80, riskLevel: 'red', basis: 'Incident' }],
+  });
+  assert.equal(progress.status, 'on-route');
+  assert.equal(progress.upcomingHotzone, undefined);
+});
+
+test('uses distance along a bend instead of warning across the bend', () => {
+  const progress = summarizeRouteProgress({
+    currentLocation: { latitude: 51.5, longitude: -0.1 },
+    routePoints: [
+      { latitude: 51.5, longitude: -0.1 },
+      { latitude: 51.51, longitude: -0.1 },
+      { latitude: 51.51, longitude: -0.099 },
+      { latitude: 51.5, longitude: -0.099 },
+    ],
+    routeRiskSamples: [{ latitude: 51.5, longitude: -0.099, pointIndex: 0, score: 80, riskLevel: 'red', basis: 'Incident' }],
+    alertRadiusMetres: 500,
+  });
+  assert.equal(progress.upcomingHotzone, undefined);
+});
+
 const routePoints = [
   { latitude: 51.4762, longitude: -0.0005 },
   { latitude: 51.4781, longitude: -0.0149 },
