@@ -84,6 +84,18 @@ curl -X POST http://127.0.0.1:3001/api/route-guard \
 
 The response should include `provider: "free-osm"` or a safe mock fallback, `googleRequestMade: false`, route points, sampled risk scores, and anonymised context labels such as Police.uk-style "On or near..." areas when available.
 
+### Test Route Guard approach alerts
+
+1. Open Route Guard with PRO access, enter a start and destination, and scan a route.
+2. Select **Enable browser alerts** to request optional browser notification permission.
+3. Select **Start live position** and allow location access. Use HTTPS on a phone; localhost is suitable for testing on the computer itself.
+4. Keep the page open. An amber or red sample within 500 metres ahead along the route triggers an on-screen journey alert with its road/context, score, distance, and explanation. Supported browsers also receive a notification when permission is granted.
+5. To reproduce a warning without travelling, use browser developer tools to override geolocation to a position just before an elevated sample on the scanned route.
+
+Approach alerts require a GPS reading no older than 30 seconds with accuracy of 100 metres or better. Each sample/severity alerts once per scanned route; escalation from amber to red can alert again. Pausing tracking, leaving the route, or receiving mock routing suppresses approach alerts. Scanning a new route stops tracking until you restart it.
+
+Browser banners may be unavailable even after permission is granted, so the latest alert remains visible in the page. This foreground website feature does not promise alerts with the page closed or the phone locked. Risk samples currently represent the last route scan; they are not continuously refreshed during the journey.
+
 ### Live Radar local notes
 
 - `Scan My Current Location Now` works with foreground location permission.

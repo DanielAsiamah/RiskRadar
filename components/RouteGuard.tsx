@@ -33,6 +33,7 @@ import {
   type RouteGuardTravelMode,
 } from '../api/route-guard';
 import { formatRouteGuardAlert } from '../route-guard/presentation';
+import { deliverRouteNotification, evaluateRouteApproachAlert, type RouteApproachAlert } from '../route-guard/alerts';
 import { summarizeRouteProgress, type RouteGuardProgressSummary } from '../route-guard/progress';
 import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
@@ -77,6 +78,7 @@ export default function RouteGuard({
   const [tracking, setTracking] = useState(false);
   const [journeyLocation, setJourneyLocation] = useState<MapCoordinate | null>(null);
   const [journeyAccuracy, setJourneyAccuracy] = useState<number | null>(null);
+  const [journeyTimestamp, setJourneyTimestamp] = useState<number | null>(null);
   const [trackingError, setTrackingError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [routeStatus, setRouteStatus] = useState<RouteGuardStatus | null>(null);
@@ -124,6 +126,7 @@ export default function RouteGuard({
         longitude: position.coords.longitude,
       });
       setJourneyAccuracy(position.coords.accuracy);
+      setJourneyTimestamp(position.timestamp);
     } catch {
       setError('RiskRadar could not access your current location. Check browser location permission and try again.');
     } finally {
@@ -149,6 +152,7 @@ export default function RouteGuard({
     }
 
     clearLocationWatcher();
+    setJourneyTimestamp(null);
     setTracking(true);
     setTrackingError(null);
     locationWatchId.current = geolocation.watchPosition(
@@ -158,6 +162,7 @@ export default function RouteGuard({
           longitude: position.coords.longitude,
         });
         setJourneyAccuracy(position.coords.accuracy);
+        setJourneyTimestamp(position.timestamp);
         setTrackingError(null);
       },
       () => {
@@ -214,6 +219,9 @@ export default function RouteGuard({
       return;
     }
     if (!canScan) return;
+
+    stopJourneyTracking();
+    setJourneyTimestamp(null);
 
     try {
       setLoading(true);
@@ -331,6 +339,7 @@ export default function RouteGuard({
                   result={result}
                   currentLocation={journeyLocation}
                   currentAccuracy={journeyAccuracy}
+                  currentTimestamp={journeyTimestamp}
                   tracking={tracking}
                   trackingError={trackingError}
                   onStartTracking={startJourneyTracking}
@@ -433,6 +442,7 @@ function RouteResult({
   result,
   currentLocation,
   currentAccuracy,
+  currentTimestamp,
   tracking,
   trackingError,
   onStartTracking,
@@ -441,6 +451,7 @@ function RouteResult({
   result: RouteGuardScan;
   currentLocation: MapCoordinate | null;
   currentAccuracy: number | null;
+  currentTimestamp: number | null;
   tracking: boolean;
   trackingError: string | null;
   onStartTracking(): void;
@@ -515,6 +526,14 @@ function RouteResult({
         onStopTracking={onStopTracking}
       />
 
+      <RouteJourneyAlerts
+        result={result}
+        progress={progress}
+        tracking={tracking}
+        accuracyMetres={currentAccuracy}
+        locationTimestamp={currentTimestamp}
+      />
+
       <View style={tw`rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 mb-5`}>
         <Text style={tw`text-[10px] font-black tracking-widest text-slate-400 mb-1`}>ROUTE SOURCE</Text>
         <Text style={tw`text-xs font-bold text-slate-700`}>
@@ -547,6 +566,77 @@ function RouteResult({
 
       <Text style={tw`text-[10px] text-slate-400 leading-4 mt-3`}>{result.disclaimer}</Text>
       <Text style={tw`text-[10px] font-bold text-indigo-600 mt-2`}>Google requests made: 0</Text>
+    </View>
+  );
+}
+
+function RouteJourneyAlerts({ result, progress, tracking, accuracyMetres, locationTimestamp }: {
+  result: RouteGuardScan;
+  progress: RouteGuardProgressSummary | null;
+  tracking: boolean;
+  accuracyMetres: number | null;
+  locationTimestamp: number | null;
+}) {
+  const alertedKeys = useRef(new Set<string>());
+  const [latest, setLatest] = useState<RouteApproachAlert | null>(null);
+  const [notificationStatus, setNotificationStatus] = useState('On-screen alerts are ready. Keep this page open while travelling.');
+
+  useEffect(() => {
+    alertedKeys.current.clear();
+    setLatest(null);
+  }, [result]);
+
+  useEffect(() => {
+    const alert = evaluateRouteApproachAlert({
+      progress, tracking, provider: result.provider, accuracyMetres, locationTimestamp,
+      now: Date.now(), alertedKeys: alertedKeys.current,
+    });
+    if (!alert) return;
+    alertedKeys.current.add(alert.key);
+    setLatest(alert);
+    const delivered = deliverRouteNotification(alert, Platform.OS === 'web' ? globalThis.Notification : undefined);
+    setNotificationStatus(delivered
+      ? 'Browser alert sent. Keep this page open for further journey alerts.'
+      : 'Alert shown here. Browser banners are unavailable or not enabled; keep this page visible.');
+  }, [result, progress, tracking, accuracyMetres, locationTimestamp]);
+
+  const enableNotifications = async () => {
+    if (Platform.OS !== 'web' || !globalThis.Notification) {
+      setNotificationStatus('This browser does not support these banners. Journey alerts still appear on this page.');
+      return;
+    }
+    try {
+      const permission = await globalThis.Notification.requestPermission();
+      setNotificationStatus(permission === 'granted'
+        ? 'Browser banners enabled for new route alerts. Keep this page open while travelling.'
+        : 'Browser banners are not enabled. Journey alerts still appear on this page.');
+    } catch {
+      setNotificationStatus('Browser banners could not be enabled. Journey alerts still appear on this page.');
+    }
+  };
+
+  return (
+    <View style={tw`rounded-2xl border border-slate-200 px-4 py-4 mb-5`}>
+      <Text style={tw`text-xs font-black text-slate-900`}>Journey alerts</Text>
+      <Text style={tw`text-xs text-slate-500 leading-5 mt-2`}>{notificationStatus}</Text>
+      {tracking && (accuracyMetres === null || accuracyMetres > 100 || locationTimestamp === null) ? (
+        <Text style={tw`text-xs text-amber-700 mt-2`}>Waiting for a precise GPS reading before sending approach alerts.</Text>
+      ) : null}
+      {result.provider === 'mock' ? (
+        <Text style={tw`text-xs text-amber-700 mt-2`}>Approach alerts are unavailable for a generated route.</Text>
+      ) : null}
+      <Pressable onPress={enableNotifications} accessibilityRole="button" style={tw`self-start bg-indigo-50 rounded-xl px-4 py-3 mt-3`}>
+        <Text style={tw`text-xs font-black text-indigo-700`}>Enable browser alerts</Text>
+      </Pressable>
+      <View accessibilityLiveRegion="assertive" accessibilityRole="alert">
+        {latest ? (
+          <View style={[tw`rounded-xl px-3 py-3 mt-3`, { backgroundColor: RISK_COLORS[latest.level].soft }]}>
+            <Text style={tw`text-[10px] font-bold text-slate-500 mb-1`}>LATEST JOURNEY ALERT</Text>
+            <Text style={{ color: RISK_COLORS[latest.level].strong, fontWeight: '900' }}>{latest.title}</Text>
+            <Text style={tw`text-xs text-slate-700 leading-5 mt-1`}>{latest.body}</Text>
+          </View>
+        ) : null}
+      </View>
     </View>
   );
 }
