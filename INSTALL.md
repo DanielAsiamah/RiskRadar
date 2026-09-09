@@ -94,7 +94,9 @@ The response should include `provider: "free-osm"` or a safe mock fallback, `goo
 
 Approach alerts require a GPS reading no older than 30 seconds with accuracy of 100 metres or better. Each sample/severity alerts once per scanned route; escalation from amber to red can alert again. Pausing tracking, leaving the route, or receiving mock routing suppresses approach alerts. Scanning a new route stops tracking until you restart it.
 
-Browser banners may be unavailable even after permission is granted, so the latest alert remains visible in the page. This foreground website feature does not promise alerts with the page closed or the phone locked. Risk samples currently represent the last route scan; they are not continuously refreshed during the journey.
+Browser banners may be unavailable even after permission is granted, so the latest alert remains visible in the page. This foreground website feature does not promise alerts with the page closed or the phone locked.
+
+During live position tracking, real routes refresh their risk samples immediately and one minute after each completed request using `POST /api/live-risk`. Refreshes do not request another route or consume the route-scan allowance. The map, scores, and hotzones update together, and the page shows the last successful check time. Failed refreshes retain the last reading, pause new approach alerts, and retry automatically. Stopping tracking or replacing a route cancels its pending refresh. Public source coverage and publication delays still apply; this is not a feed of all crimes as they happen.
 
 ### Live Radar local notes
 

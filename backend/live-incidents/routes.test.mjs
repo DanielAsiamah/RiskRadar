@@ -22,6 +22,32 @@ const pointAnalysis = {
   crimeData: { crimeScore: 34, timingContext: { adjustedScore: 36, totalAdjustment: 2, factors: [{ id: 'night', label: 'Late-night pressure', points: 2 }] } },
 };
 
+test('route refresh queries every sample and deduplicates overlapping incident results', async () => {
+  const queried = [];
+  const deps = dependencies();
+  const incident = {
+    id: 'destination-flood', category: 'flood', severity: 5, confidence: 1,
+    affectedRadiusMetres: 500, publicationState: 'published', verificationLevel: 'Official',
+    status: 'active', lastObservedAt: '2026-08-27T18:00:00.000Z',
+    geometry: { type: 'Point', coordinates: [-1, 53] },
+  };
+  deps.store.listPublicIncidents = async ({ point }) => {
+    queried.push(point.latitude);
+    return point.latitude === 53 ? [incident, incident] : [];
+  };
+  const routes = createLiveIncidentRouteHandler(deps);
+  const response = createResponse();
+  await routes.handle(createRequest({ method: 'POST', body: { routeSamples: [
+    { id: 'start', latitude: 51, longitude: -1 },
+    { id: 'end', latitude: 53, longitude: -1 },
+  ] } }), response, new URL('http://localhost/api/live-risk'));
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(queried, [51, 53]);
+  const payload = JSON.parse(response.body);
+  assert.ok(payload.live.samples[1].liveScore > 36);
+  assert.equal(payload.live.samples[1].contributors.length, 1);
+});
+
 function dependencies(overrides = {}) {
   return {
     store: {

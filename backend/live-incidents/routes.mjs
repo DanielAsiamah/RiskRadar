@@ -165,7 +165,8 @@ export function createLiveIncidentRouteHandler({
               const analysis = await analyzePoint({ latitude, longitude });
               return { id: String(sample.id ?? `sample-${index + 1}`), latitude, longitude, ...contextFor(analysis) };
             }));
-            const incidents = await incidentsNear(samples[0].latitude, samples[0].longitude, calculatedAt);
+            const nearbyGroups = await Promise.all(samples.map((sample) => incidentsNear(sample.latitude, sample.longitude, calculatedAt)));
+            const incidents = [...new Map(nearbyGroups.flat().map((incident) => [incident.id, incident])).values()];
             const live = calculateRouteLiveRisk({ samples, incidents, calculatedAt });
             sendJson(response, 200, { mode: 'route', samples, live, disclaimer: DISCLAIMER });
             return true;

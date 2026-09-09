@@ -54,7 +54,7 @@
     "test": "npm run typecheck && npm run test:live-radar && npm run test:route-guard && npm run test:backend && npm run test:build-guard && npm run test:git-guard",
     "test:live-radar": "node --no-warnings --experimental-strip-types --test live-radar/*.test.ts",
     "test:route-guard": "node --no-warnings --experimental-strip-types --test route-guard/*.test.ts",
-    "test:backend": "node --check backend/server.mjs && node --test backend/*.test.mjs backend/membership/*.test.mjs auth/*.test.mjs membership/*.test.mjs",
+    "test:backend": "node --check backend/server.mjs && node --test backend/*.test.mjs backend/live-incidents/*.test.mjs backend/live-incidents/adapters/*.test.mjs backend/membership/*.test.mjs auth/*.test.mjs membership/*.test.mjs",
     "test:membership": "node --test backend/membership/*.test.mjs auth/*.test.mjs membership/*.test.mjs",
     "test:build-guard": "node --test scripts/public-env-guard.test.mjs scripts/verify-web-bundle-secrets.test.mjs scripts/deployment-config.test.mjs",
     "membership:check": "node --env-file-if-exists=.env backend/membership/production-readiness.mjs",

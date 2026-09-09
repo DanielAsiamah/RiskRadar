@@ -1,4 +1,5 @@
 import { apiRequest } from './client';
+import type { RouteLiveRefresh } from '../route-guard/refresh';
 
 export type RouteGuardTravelMode = 'walking' | 'driving' | 'transit';
 export type RouteGuardRiskLevel = 'low' | 'amber' | 'red';
@@ -116,4 +117,13 @@ export function scanRouteGuard(input: RouteGuardScanInput) {
 
 export function getRouteGuardStatus() {
   return apiRequest<RouteGuardStatus>('/api/route-guard/status', {}, 8_000, 'optional');
+}
+
+export function refreshRouteGuardRisk(samples: RouteGuardRiskSample[], signal: AbortSignal) {
+  return apiRequest<RouteLiveRefresh>('/api/live-risk', {
+    method: 'POST', signal, headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ routeSamples: samples.map((sample) => ({
+      id: String(sample.pointIndex), latitude: sample.latitude, longitude: sample.longitude,
+    })) }),
+  }, 40_000);
 }

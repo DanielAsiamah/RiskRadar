@@ -25,6 +25,7 @@ import tw from 'twrnc';
 
 import {
   getRouteGuardStatus,
+  refreshRouteGuardRisk,
   scanRouteGuard,
   type RouteGuardRiskLevel,
   type RouteGuardScan,
@@ -34,6 +35,7 @@ import {
 } from '../api/route-guard';
 import { formatRouteGuardAlert } from '../route-guard/presentation';
 import { deliverRouteNotification, evaluateRouteApproachAlert, type RouteApproachAlert } from '../route-guard/alerts';
+import { applyRouteLiveRefresh, startRouteRiskPolling } from '../route-guard/refresh';
 import { summarizeRouteProgress, type RouteGuardProgressSummary } from '../route-guard/progress';
 import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
@@ -439,7 +441,7 @@ function LocationInput({ label, value, onChangeText, placeholder }: { label: str
 }
 
 function RouteResult({
-  result,
+  result: scannedResult,
   currentLocation,
   currentAccuracy,
   currentTimestamp,
@@ -457,6 +459,31 @@ function RouteResult({
   onStartTracking(): void;
   onStopTracking(): void;
 }) {
+  const [liveResult, setLiveResult] = useState<RouteGuardScan | null>(null);
+  const [liveUpdatedAt, setLiveUpdatedAt] = useState<string | null>(null);
+  const [liveRefreshError, setLiveRefreshError] = useState<string | null>(null);
+  const result = liveResult ?? scannedResult;
+
+  useEffect(() => {
+    setLiveResult(null);
+    setLiveUpdatedAt(null);
+    setLiveRefreshError(null);
+  }, [scannedResult]);
+
+  useEffect(() => {
+    if (!tracking || scannedResult.provider !== 'free-osm') return;
+    return startRouteRiskPolling({
+      request: (signal) => refreshRouteGuardRisk(scannedResult.sampledRiskScores, signal),
+      onValue: (response) => {
+        const updated = applyRouteLiveRefresh(scannedResult.sampledRiskScores, response);
+        setLiveResult({ ...scannedResult, ...updated });
+        setLiveUpdatedAt(response.live.calculatedAt);
+        setLiveRefreshError(null);
+      },
+      onError: () => setLiveRefreshError('Live refresh unavailable. Showing the last route reading; new approach alerts are paused until the connection recovers.'),
+    });
+  }, [scannedResult, tracking]);
+
   const risk = RISK_COLORS[result.overallRiskLevel];
   const routePoints = result.routePoints.map(({ latitude, longitude }) => ({ latitude, longitude }));
   const routeRiskSamples = result.sampledRiskScores
@@ -527,12 +554,26 @@ function RouteResult({
       />
 
       <RouteJourneyAlerts
-        result={result}
+        result={scannedResult}
         progress={progress}
-        tracking={tracking}
+        tracking={tracking && !liveRefreshError}
         accuracyMetres={currentAccuracy}
         locationTimestamp={currentTimestamp}
       />
+
+      <View style={tw`rounded-2xl bg-slate-50 px-4 py-3 mb-5`}>
+        <Text style={tw`text-xs font-black text-slate-700`}>
+          {result.provider === 'mock' ? 'Live refresh unavailable for generated routes'
+            : liveRefreshError ? 'Live incident refresh retrying'
+              : tracking ? 'Live incident refresh active' : 'Live incident refresh paused'}
+        </Text>
+        <Text style={tw`text-xs text-slate-500 mt-1`}>
+          {liveUpdatedAt ? `Last checked: ${new Date(liveUpdatedAt).toLocaleTimeString()}. ` : ''}
+          {result.provider === 'mock' ? 'Scan a real route to receive live incident updates.'
+            : tracking ? 'Checks again one minute after each update. Public source coverage and reporting delays apply.' : 'Start live position to refresh route risks.'}
+        </Text>
+        {liveRefreshError ? <Text style={tw`text-xs text-amber-700 mt-2`}>{liveRefreshError}</Text> : null}
+      </View>
 
       <View style={tw`rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3 mb-5`}>
         <Text style={tw`text-[10px] font-black tracking-widest text-slate-400 mb-1`}>ROUTE SOURCE</Text>
