@@ -102,6 +102,8 @@ Route Guard also supports foreground iOS and Android location through Expo. Sele
 
 The map initially fits the scanned route. During tracking it follows your position and preserves your chosen zoom on subsequent GPS updates. Dragging the map or selecting **Explore map** pauses following without stopping tracking or alerts. Select **Follow my position** to centre on your position again.
 
+Background Route Guard integration is in progress. `route-guard/background.ts` provides the tested processor for a persisted route session, fresh GPS fixes, periodic risk refresh, and notification deduplication. It is not yet registered as an Expo background task. Its native adapter must serialize task invocations and session writes, persist the session, and stop the OS subscription on expiry or cancellation before this becomes a user-facing background feature.
+
 ### Live Radar local notes
 
 - `Scan My Current Location Now` works with foreground location permission.
