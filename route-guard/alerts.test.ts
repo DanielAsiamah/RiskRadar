@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { evaluateRouteApproachAlert, deliverRouteNotification } from './alerts.ts';
+import { evaluateRouteApproachAlert, deliverRouteNotification, deliverNativeRouteNotification } from './alerts.ts';
 import type { RouteGuardProgressSummary } from './progress.ts';
 import { summarizeRouteProgress } from './progress.ts';
 
@@ -15,6 +15,22 @@ const input = {
   progress, tracking: true, provider: 'free-osm', accuracyMetres: 15,
   locationTimestamp: 100_000, now: 110_000, alertedKeys: new Set<string>(),
 };
+
+test('native delivery requires permission and catches device notification failure', async () => {
+  const alert = evaluateRouteApproachAlert(input)!;
+  let sent = 0;
+  assert.equal(await deliverNativeRouteNotification(alert, {
+    permission: async () => false, show: async () => { sent += 1; },
+  }), false);
+  assert.equal(sent, 0);
+  assert.equal(await deliverNativeRouteNotification(alert, {
+    permission: async () => true, show: async (message) => { assert.equal(message.title, 'Approaching High Street'); sent += 1; },
+  }), true);
+  assert.equal(sent, 1);
+  assert.equal(await deliverNativeRouteNotification(alert, {
+    permission: async () => true, show: async () => { throw new Error('Unavailable'); },
+  }), false);
+});
 
 test('creates a road-specific approach alert with score and route distance', () => {
   const alert = evaluateRouteApproachAlert(input);

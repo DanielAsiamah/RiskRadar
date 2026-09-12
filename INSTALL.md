@@ -98,6 +98,8 @@ Browser banners may be unavailable even after permission is granted, so the late
 
 During live position tracking, real routes refresh their risk samples immediately and one minute after each completed request using `POST /api/live-risk`. Refreshes do not request another route or consume the route-scan allowance. The map, scores, and hotzones update together, and the page shows the last successful check time. Failed refreshes retain the last reading, pause new approach alerts, and retry automatically. Stopping tracking or replacing a route cancels its pending refresh. Public source coverage and publication delays still apply; this is not a feed of all crimes as they happen.
 
+Route Guard also supports foreground iOS and Android location through Expo. Select **Use current location**, allow foreground location permission, scan a route, then start live position. **Enable device alerts** requests local-notification permission; denied permission still allows on-screen alerts. Keep Route Guard visible: its route watcher does not provide locked-screen/background route tracking. Native background Live Radar below is a separate feature. Pending permission requests and late location callbacks are discarded when a route watcher is stopped or the screen closes.
+
 ### Live Radar local notes
 
 - `Scan My Current Location Now` works with foreground location permission.

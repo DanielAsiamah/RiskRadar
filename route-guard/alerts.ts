@@ -49,3 +49,16 @@ export function deliverRouteNotification(alert: RouteApproachAlert, notification
     return false;
   }
 }
+
+export async function deliverNativeRouteNotification(alert: RouteApproachAlert, device: {
+  permission(): Promise<boolean>;
+  show(message: RouteApproachAlert): Promise<void>;
+}): Promise<boolean> {
+  try {
+    if (!await device.permission()) return false;
+    await device.show(alert);
+    return true;
+  } catch {
+    return false;
+  }
+}

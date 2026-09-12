@@ -34,8 +34,10 @@ import {
   type RouteGuardTravelMode,
 } from '../api/route-guard';
 import { formatRouteGuardAlert } from '../route-guard/presentation';
-import { deliverRouteNotification, evaluateRouteApproachAlert, type RouteApproachAlert } from '../route-guard/alerts';
+import { evaluateRouteApproachAlert, type RouteApproachAlert } from '../route-guard/alerts';
 import { applyRouteLiveRefresh, startRouteRiskPolling } from '../route-guard/refresh';
+import { readJourneyLocation, watchJourneyLocation } from '../route-guard/location-device';
+import { requestRouteNotificationPermission, sendRouteApproachNotification } from '../route-guard/notification-device';
 import { summarizeRouteProgress, type RouteGuardProgressSummary } from '../route-guard/progress';
 import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
@@ -86,7 +88,7 @@ export default function RouteGuard({
   const [routeStatus, setRouteStatus] = useState<RouteGuardStatus | null>(null);
   const [routeStatusError, setRouteStatusError] = useState<string | null>(null);
   const [routeStatusLoading, setRouteStatusLoading] = useState(true);
-  const locationWatchId = useRef<number | null>(null);
+  const stopLocationWatch = useRef<(() => void) | null>(null);
 
   const hasStart = start.trim().length > 0 || !!startCoordinates;
   const canScan = premium && usageReady && routeScansUsed < 100 && hasStart && destination.trim().length > 0 && !loading && !locating;
@@ -99,83 +101,53 @@ export default function RouteGuard({
   };
 
   const useCurrentLocation = async () => {
-    const geolocation = (globalThis.navigator as { geolocation?: Geolocation } | undefined)?.geolocation;
-    if (!geolocation) {
-      setError(Platform.OS === 'web'
-        ? 'This browser does not expose location services to RiskRadar.'
-        : 'Current-location routing is available on web in this preview.');
-      return;
-    }
-
     setLocating(true);
     setError(null);
     try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          maximumAge: 30_000,
-          timeout: 12_000,
-        });
-      });
+      const position = await readJourneyLocation();
       setStart('Current location');
       setStartCoordinates({
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracyMetres: position.coords.accuracy,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracyMetres: position.accuracyMetres ?? undefined,
       });
       setJourneyLocation({
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
+        latitude: position.latitude,
+        longitude: position.longitude,
       });
-      setJourneyAccuracy(position.coords.accuracy);
+      setJourneyAccuracy(position.accuracyMetres);
       setJourneyTimestamp(position.timestamp);
-    } catch {
-      setError('RiskRadar could not access your current location. Check browser location permission and try again.');
+    } catch (locationError) {
+      setError(locationError instanceof Error ? locationError.message : 'RiskRadar could not access your current location.');
     } finally {
       setLocating(false);
     }
   };
 
   const clearLocationWatcher = () => {
-    const geolocation = (globalThis.navigator as { geolocation?: Geolocation } | undefined)?.geolocation;
-    if (geolocation && locationWatchId.current !== null) {
-      geolocation.clearWatch(locationWatchId.current);
-    }
-    locationWatchId.current = null;
+    stopLocationWatch.current?.();
+    stopLocationWatch.current = null;
   };
 
   const startJourneyTracking = () => {
-    const geolocation = (globalThis.navigator as { geolocation?: Geolocation } | undefined)?.geolocation;
-    if (!geolocation) {
-      setTrackingError(Platform.OS === 'web'
-        ? 'This browser does not expose live location services to RiskRadar.'
-        : 'Live journey tracking is available on web in this preview.');
-      return;
-    }
-
     clearLocationWatcher();
     setJourneyTimestamp(null);
     setTracking(true);
     setTrackingError(null);
-    locationWatchId.current = geolocation.watchPosition(
+    stopLocationWatch.current = watchJourneyLocation(
       (position) => {
         setJourneyLocation({
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
+          latitude: position.latitude,
+          longitude: position.longitude,
         });
-        setJourneyAccuracy(position.coords.accuracy);
+        setJourneyAccuracy(position.accuracyMetres);
         setJourneyTimestamp(position.timestamp);
         setTrackingError(null);
       },
-      () => {
+      (locationError) => {
         setTracking(false);
-        setTrackingError('RiskRadar could not keep reading your live location. Check browser location permission and try again.');
+        setTrackingError(locationError.message);
         clearLocationWatcher();
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 10_000,
-        timeout: 15_000,
       },
     );
   };
@@ -620,7 +592,7 @@ function RouteJourneyAlerts({ result, progress, tracking, accuracyMetres, locati
 }) {
   const alertedKeys = useRef(new Set<string>());
   const [latest, setLatest] = useState<RouteApproachAlert | null>(null);
-  const [notificationStatus, setNotificationStatus] = useState('On-screen alerts are ready. Keep this page open while travelling.');
+  const [notificationStatus, setNotificationStatus] = useState('On-screen alerts are ready. Keep Route Guard open while travelling.');
 
   useEffect(() => {
     alertedKeys.current.clear();
@@ -635,25 +607,20 @@ function RouteJourneyAlerts({ result, progress, tracking, accuracyMetres, locati
     if (!alert) return;
     alertedKeys.current.add(alert.key);
     setLatest(alert);
-    const delivered = deliverRouteNotification(alert, Platform.OS === 'web' ? globalThis.Notification : undefined);
-    setNotificationStatus(delivered
-      ? 'Browser alert sent. Keep this page open for further journey alerts.'
-      : 'Alert shown here. Browser banners are unavailable or not enabled; keep this page visible.');
+    let active = true;
+    void sendRouteApproachNotification(alert).then((delivered) => {
+      if (active) setNotificationStatus(delivered
+        ? 'Notification sent. Keep Route Guard open for further journey alerts.'
+        : 'Alert shown here. Notifications are unavailable or not enabled; keep Route Guard visible.');
+    });
+    return () => { active = false; };
   }, [result, progress, tracking, accuracyMetres, locationTimestamp]);
 
   const enableNotifications = async () => {
-    if (Platform.OS !== 'web' || !globalThis.Notification) {
-      setNotificationStatus('This browser does not support these banners. Journey alerts still appear on this page.');
-      return;
-    }
-    try {
-      const permission = await globalThis.Notification.requestPermission();
-      setNotificationStatus(permission === 'granted'
-        ? 'Browser banners enabled for new route alerts. Keep this page open while travelling.'
-        : 'Browser banners are not enabled. Journey alerts still appear on this page.');
-    } catch {
-      setNotificationStatus('Browser banners could not be enabled. Journey alerts still appear on this page.');
-    }
+    const granted = await requestRouteNotificationPermission();
+    setNotificationStatus(granted
+      ? 'Notifications enabled for new route alerts. Keep Route Guard open while travelling.'
+      : 'Notifications are not enabled. Journey alerts still appear here.');
   };
 
   return (
@@ -667,7 +634,7 @@ function RouteJourneyAlerts({ result, progress, tracking, accuracyMetres, locati
         <Text style={tw`text-xs text-amber-700 mt-2`}>Approach alerts are unavailable for a generated route.</Text>
       ) : null}
       <Pressable onPress={enableNotifications} accessibilityRole="button" style={tw`self-start bg-indigo-50 rounded-xl px-4 py-3 mt-3`}>
-        <Text style={tw`text-xs font-black text-indigo-700`}>Enable browser alerts</Text>
+        <Text style={tw`text-xs font-black text-indigo-700`}>{Platform.OS === 'web' ? 'Enable browser alerts' : 'Enable device alerts'}</Text>
       </Pressable>
       <View accessibilityLiveRegion="assertive" accessibilityRole="alert">
         {latest ? (
