@@ -434,7 +434,12 @@ function RouteResult({
   const [liveResult, setLiveResult] = useState<RouteGuardScan | null>(null);
   const [liveUpdatedAt, setLiveUpdatedAt] = useState<string | null>(null);
   const [liveRefreshError, setLiveRefreshError] = useState<string | null>(null);
+  const [followPosition, setFollowPosition] = useState(true);
   const result = liveResult ?? scannedResult;
+
+  useEffect(() => {
+    if (tracking) setFollowPosition(true);
+  }, [tracking]);
 
   useEffect(() => {
     setLiveResult(null);
@@ -504,14 +509,23 @@ function RouteResult({
             center={mapCenter}
             markers={[]}
             selectedPoint={currentLocation ?? routePoints[0]}
+            selectedPointLabel={currentLocation ? 'Your current location' : 'Route start'}
+            followPoint={tracking && followPosition ? currentLocation : null}
+            onFollowInterrupted={() => setFollowPosition(false)}
             areaPoints={[]}
             boundaryPoints={[]}
             routeLine={{ points: routePoints, riskLevel: result.overallRiskLevel }}
             routeRiskSamples={routeRiskSamples}
-            dataKey={`${result.provider}:${result.start}:${result.destination}:${result.overallRiskScore}:${currentLocation?.latitude ?? 'no-live'}`}
+            dataKey={`${result.provider}:${result.start}:${result.destination}`}
             onMapPress={() => undefined}
             onOpenEvidence={() => undefined}
           />
+          {tracking ? (
+            <Pressable onPress={() => setFollowPosition((value) => !value)} accessibilityRole="button" style={tw`bg-white px-4 py-3 flex-row items-center justify-center`}>
+              <Crosshair size={17} color={membershipColors.indigo} />
+              <Text style={tw`text-xs font-black text-indigo-700 ml-2`}>{followPosition ? 'Explore map' : 'Follow my position'}</Text>
+            </Pressable>
+          ) : null}
         </View>
       ) : null}
 

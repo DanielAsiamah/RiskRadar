@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import MapView, { Circle, Marker, Polygon, Polyline } from 'react-native-maps';
 import { CrimeMapCanvasProps } from './map-types';
 
@@ -6,6 +6,9 @@ export default function CrimeMapCanvas({
   center,
   markers,
   selectedPoint,
+  selectedPointLabel = 'Selected point',
+  followPoint,
+  onFollowInterrupted,
   areaPoints,
   boundaryPoints,
   routeLine,
@@ -16,10 +19,29 @@ export default function CrimeMapCanvas({
   onOpenEvidence,
 }: CrimeMapCanvasProps) {
   const mapRef = useRef<MapView>(null);
+  const [mapReady, setMapReady] = useState(false);
+  const following = useRef(false);
+  const routeKey = routeLine?.points.map((point) => `${point.latitude},${point.longitude}`).join(';') ?? '';
 
   useEffect(() => {
-    mapRef.current?.animateToRegion({ ...center, latitudeDelta: 0.025, longitudeDelta: 0.025 }, 450);
-  }, [center.latitude, center.longitude]);
+    if (!mapReady) return;
+    if (routeKey) {
+      const coordinates = routeKey.split(';').map((pair) => {
+        const [latitude, longitude] = pair.split(',').map(Number);
+        return { latitude, longitude };
+      });
+      mapRef.current?.fitToCoordinates(coordinates, { edgePadding: { top: 30, right: 30, bottom: 30, left: 30 }, animated: false });
+    } else mapRef.current?.animateToRegion({ ...center, latitudeDelta: 0.025, longitudeDelta: 0.025 }, 450);
+  }, [center.latitude, center.longitude, routeKey, mapReady]);
+
+  useEffect(() => {
+    if (!mapReady) return;
+    if (followPoint) {
+      if (!following.current) mapRef.current?.animateToRegion({ ...followPoint, latitudeDelta: 0.008, longitudeDelta: 0.008 }, 450);
+      else mapRef.current?.animateCamera({ center: followPoint }, { duration: 450 });
+    }
+    following.current = !!followPoint;
+  }, [followPoint?.latitude, followPoint?.longitude, mapReady]);
 
   return (
     <MapView
@@ -27,6 +49,8 @@ export default function CrimeMapCanvas({
       style={{ width: '100%', height: 390 }}
       initialRegion={{ ...center, latitudeDelta: 0.025, longitudeDelta: 0.025 }}
       onPress={(event) => onMapPress(event.nativeEvent.coordinate)}
+      onMapReady={() => setMapReady(true)}
+      onPanDrag={onFollowInterrupted}
       showsUserLocation
       showsMyLocationButton
       accessibilityLabel="Interactive UK crime map"
@@ -64,7 +88,7 @@ export default function CrimeMapCanvas({
           }) : undefined}
         />
       ))}
-      {selectedPoint && <Marker coordinate={selectedPoint} title="Selected point" pinColor="#4f46e5" />}
+      {selectedPoint && <Marker coordinate={selectedPoint} title={selectedPointLabel} pinColor="#4f46e5" />}
       {selectedPoint && radiusMeters && (
         <Circle
           center={selectedPoint}

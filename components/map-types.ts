@@ -46,6 +46,9 @@ export interface CrimeMapCanvasProps {
   center: MapCoordinate;
   markers: CrimeMapMarker[];
   selectedPoint?: MapCoordinate | null;
+  selectedPointLabel?: string;
+  followPoint?: MapCoordinate | null;
+  onFollowInterrupted?: () => void;
   areaPoints: MapCoordinate[];
   boundaryPoints: MapCoordinate[];
   routeLine?: RouteMapLine | null;

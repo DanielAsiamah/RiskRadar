@@ -100,6 +100,8 @@ During live position tracking, real routes refresh their risk samples immediatel
 
 Route Guard also supports foreground iOS and Android location through Expo. Select **Use current location**, allow foreground location permission, scan a route, then start live position. **Enable device alerts** requests local-notification permission; denied permission still allows on-screen alerts. Keep Route Guard visible: its route watcher does not provide locked-screen/background route tracking. Native background Live Radar below is a separate feature. Pending permission requests and late location callbacks are discarded when a route watcher is stopped or the screen closes.
 
+The map initially fits the scanned route. During tracking it follows your position and preserves your chosen zoom on subsequent GPS updates. Dragging the map or selecting **Explore map** pauses following without stopping tracking or alerts. Select **Follow my position** to centre on your position again.
+
 ### Live Radar local notes
 
 - `Scan My Current Location Now` works with foreground location permission.

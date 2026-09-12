@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Circle, CircleMarker, LayerGroup, Polygon, Polyline, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import { CrimeMapCanvasProps, MapCoordinate } from './map-types';
@@ -8,23 +8,34 @@ const UK_BOUNDS: [[number, number], [number, number]] = [
   [61.2, 2.2],
 ];
 
-function MapEvents({ onMapPress }: { onMapPress: (coordinate: MapCoordinate) => void }) {
+function MapEvents({ onMapPress, onFollowInterrupted }: { onMapPress: (coordinate: MapCoordinate) => void; onFollowInterrupted?: () => void }) {
   useMapEvents({
     click: ({ latlng }) => onMapPress({ latitude: latlng.lat, longitude: latlng.lng }),
+    dragstart: () => onFollowInterrupted?.(),
   });
   return null;
 }
 
-function Recenter({ center }: { center: MapCoordinate }) {
+function Recenter({ center, routeKey, followPoint }: { center: MapCoordinate; routeKey: string; followPoint?: MapCoordinate | null }) {
   const map = useMap();
+  const following = useRef(false);
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       map.invalidateSize({ pan: false });
-      map.setView([center.latitude, center.longitude], 14, { animate: false });
+      if (routeKey) {
+        const points = routeKey.split(';').map((pair) => pair.split(',').map(Number) as [number, number]);
+        map.fitBounds(points, { padding: [24, 24], maxZoom: 16, animate: false });
+      } else map.setView([center.latitude, center.longitude], 14, { animate: false });
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [center.latitude, center.longitude, map]);
+  }, [center.latitude, center.longitude, routeKey, map]);
+  useEffect(() => {
+    if (followPoint) {
+      map.setView([followPoint.latitude, followPoint.longitude], following.current ? map.getZoom() : Math.max(15, map.getZoom()), { animate: true });
+    }
+    following.current = !!followPoint;
+  }, [followPoint?.latitude, followPoint?.longitude, map]);
   return null;
 }
 
@@ -32,6 +43,9 @@ export default function CrimeMapCanvas({
   center,
   markers,
   selectedPoint,
+  selectedPointLabel = 'Selected search location',
+  followPoint,
+  onFollowInterrupted,
   areaPoints,
   boundaryPoints,
   routeLine,
@@ -41,6 +55,7 @@ export default function CrimeMapCanvas({
   onMapPress,
   onOpenEvidence,
 }: CrimeMapCanvasProps) {
+  const routeKey = routeLine?.points.map((point) => `${point.latitude},${point.longitude}`).join(';') ?? '';
   return (
     <div style={{ width: '100%', height: 390 }}>
       <MapContainer
@@ -56,8 +71,8 @@ export default function CrimeMapCanvas({
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           noWrap
         />
-        <MapEvents onMapPress={onMapPress} />
-        <Recenter center={center} />
+        <MapEvents onMapPress={onMapPress} onFollowInterrupted={onFollowInterrupted} />
+        <Recenter center={center} routeKey={routeKey} followPoint={followPoint} />
         <LayerGroup key={dataKey}>
           {routeLine && routeLine.points.length >= 2 ? (
             <Polyline
@@ -102,7 +117,7 @@ export default function CrimeMapCanvas({
         </LayerGroup>
         {selectedPoint && (
           <CircleMarker center={[selectedPoint.latitude, selectedPoint.longitude]} radius={8} pathOptions={{ color: '#4f46e5', fillColor: '#4f46e5', fillOpacity: 1 }}>
-            <Tooltip direction="top" opacity={1}>Selected search location</Tooltip>
+            <Tooltip direction="top" opacity={1}>{selectedPointLabel}</Tooltip>
           </CircleMarker>
         )}
         {selectedPoint && radiusMeters && (
