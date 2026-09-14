@@ -38,6 +38,8 @@ import { evaluateRouteApproachAlert, type RouteApproachAlert } from '../route-gu
 import { applyRouteLiveRefresh, startRouteRiskPolling } from '../route-guard/refresh';
 import { readJourneyLocation, watchJourneyLocation } from '../route-guard/location-device';
 import { requestRouteNotificationPermission, sendRouteApproachNotification } from '../route-guard/notification-device';
+import { readBackgroundRoute, startBackgroundRoute, stopBackgroundRoute } from '../route-guard/background-device';
+import type { RouteBackgroundState } from '../route-guard/background';
 import { summarizeRouteProgress, type RouteGuardProgressSummary } from '../route-guard/progress';
 import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
@@ -89,9 +91,48 @@ export default function RouteGuard({
   const [routeStatusError, setRouteStatusError] = useState<string | null>(null);
   const [routeStatusLoading, setRouteStatusLoading] = useState(true);
   const stopLocationWatch = useRef<(() => void) | null>(null);
+  const [backgroundState, setBackgroundState] = useState<RouteBackgroundState | null>(null);
+  const [backgroundBusy, setBackgroundBusy] = useState(false);
+  const pendingBackgroundStart = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    let routeVersion = '';
+    const read = async () => {
+      try {
+        const snapshot = await readBackgroundRoute();
+        if (!active) return;
+        if (snapshot?.enabled && snapshot.expiresAt <= Date.now()) {
+          await stopBackgroundRoute();
+          if (active) setBackgroundState(null);
+        } else {
+          setBackgroundState(snapshot);
+          if (snapshot?.enabled) {
+            const version = `${snapshot.sessionId}:${snapshot.lastRefreshAt}`;
+            if (version !== routeVersion) { setResult(snapshot.route); routeVersion = version; }
+            if (snapshot.lastLocation) {
+              setJourneyLocation(snapshot.lastLocation);
+              setJourneyAccuracy(snapshot.lastLocation.accuracyMetres);
+              setJourneyTimestamp(snapshot.lastLocation.timestamp);
+            }
+          }
+        }
+      } catch { if (active) setTrackingError('Could not read background route status.'); }
+      finally { if (active) timer = setTimeout(() => { void read(); }, 3000); }
+    };
+    void read();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+      if (pendingBackgroundStart.current) void stopBackgroundRoute().catch(() => undefined);
+    };
+  }, []);
 
   const hasStart = start.trim().length > 0 || !!startCoordinates;
-  const canScan = premium && usageReady && routeScansUsed < 100 && hasStart && destination.trim().length > 0 && !loading && !locating;
+  const canScan = premium && usageReady && routeScansUsed < 100 && hasStart && destination.trim().length > 0 && !loading && !locating && !backgroundBusy;
 
   const handleStartChange = (value: string) => {
     setStart(value);
@@ -129,7 +170,10 @@ export default function RouteGuard({
     stopLocationWatch.current = null;
   };
 
-  const startJourneyTracking = () => {
+  const startJourneyTracking = async () => {
+    try { await stopBackgroundRoute(); setBackgroundState(null); }
+    catch { setTrackingError('Could not stop background monitoring. Try stopping it again.'); return; }
+    if (!mounted.current) return;
     clearLocationWatcher();
     setJourneyTimestamp(null);
     setTracking(true);
@@ -152,13 +196,31 @@ export default function RouteGuard({
     );
   };
 
-  const stopJourneyTracking = () => {
+  const stopJourneyTracking = async () => {
     clearLocationWatcher();
     setTracking(false);
+    await stopBackgroundRoute();
+    setBackgroundState(null);
   };
 
-  useEffect(() => () => {
-    clearLocationWatcher();
+  const startBackground = async () => {
+    if (!result || !premium) return;
+    setBackgroundBusy(true);
+    pendingBackgroundStart.current = true;
+    setTrackingError(null);
+    try {
+      await stopJourneyTracking();
+      if (!mounted.current) return;
+      const snapshot = await startBackgroundRoute(result);
+      setBackgroundState(snapshot);
+    } catch (problem) {
+      setTrackingError(problem instanceof Error ? problem.message : 'Background monitoring could not start.');
+    } finally { pendingBackgroundStart.current = false; setBackgroundBusy(false); }
+  };
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; clearLocationWatcher(); };
   }, []);
 
   useEffect(() => {
@@ -194,11 +256,10 @@ export default function RouteGuard({
     }
     if (!canScan) return;
 
-    stopJourneyTracking();
-    setJourneyTimestamp(null);
-
     try {
       setLoading(true);
+      await stopJourneyTracking();
+      setJourneyTimestamp(null);
       setError(null);
       const scan = await scanRouteGuard({
         start: startCoordinates ? 'Current location' : start.trim(),
@@ -256,6 +317,11 @@ export default function RouteGuard({
             scansRemaining={Math.max(0, 100 - routeScansUsed)}
           />
 
+          {!premium && backgroundState?.enabled ? (
+            <Pressable accessibilityRole="button" onPress={() => { void stopJourneyTracking().catch(() => setTrackingError('Could not stop background monitoring. Please retry.')); }} style={tw`bg-slate-900 rounded-xl px-4 py-3 mb-4`}>
+              <Text style={tw`text-white font-bold text-center`}>Stop active background route</Text>
+            </Pressable>
+          ) : null}
           {!premium ? (
             <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`border-indigo-100 mb-5`]}>
               <View style={tw`w-12 h-12 rounded-2xl bg-indigo-50 items-center justify-center mb-4`}><LockKeyhole size={23} color={membershipColors.indigo} /></View>
@@ -315,10 +381,29 @@ export default function RouteGuard({
                   currentAccuracy={journeyAccuracy}
                   currentTimestamp={journeyTimestamp}
                   tracking={tracking}
+                  backgroundTracking={!!backgroundState?.enabled}
                   trackingError={trackingError}
                   onStartTracking={startJourneyTracking}
-                  onStopTracking={stopJourneyTracking}
+                  onStopTracking={() => { void stopJourneyTracking().catch(() => setTrackingError('Could not stop background monitoring. Please retry.')); }}
                 />
+              ) : null}
+              {Platform.OS !== 'web' && result ? (
+                <View style={[membershipStyles.card, tw`mb-5`]}>
+                  <Text style={tw`text-sm font-black text-slate-950`}>Background route monitoring</Text>
+                  <Text style={tw`text-xs text-slate-500 leading-5 mt-2`}>
+                    {backgroundState?.enabled
+                      ? `Active until ${new Date(backgroundState.expiresAt).toLocaleTimeString()}. Location updates depend on your device and permissions.`
+                      : 'Monitor this route while the app is in the background, for up to four hours. Requires background location and an installed or development build.'}
+                  </Text>
+                  {backgroundState?.warning ? <Text style={tw`text-xs text-amber-700 mt-2`}>{backgroundState.warning}</Text> : null}
+                  {backgroundState?.lastAlert ? <Text style={tw`text-xs font-bold text-slate-700 mt-2`}>Latest: {backgroundState.lastAlert.title}. {backgroundState.lastAlert.body}</Text> : null}
+                  <Pressable accessibilityRole="button" disabled={backgroundBusy} onPress={() => {
+                    if (backgroundState?.enabled) void stopJourneyTracking().catch(() => setTrackingError('Could not stop background monitoring. Please retry.'));
+                    else void startBackground();
+                  }} style={tw`bg-indigo-600 rounded-xl px-4 py-3 mt-3`}>
+                    <Text style={tw`text-white text-center font-bold`}>{backgroundBusy ? 'Starting background monitoring...' : backgroundState?.enabled ? 'Stop background route' : 'Start background route'}</Text>
+                  </Pressable>
+                </View>
               ) : null}
             </>
           )}
@@ -417,7 +502,8 @@ function RouteResult({
   currentLocation,
   currentAccuracy,
   currentTimestamp,
-  tracking,
+  tracking: foregroundTracking,
+  backgroundTracking,
   trackingError,
   onStartTracking,
   onStopTracking,
@@ -427,10 +513,12 @@ function RouteResult({
   currentAccuracy: number | null;
   currentTimestamp: number | null;
   tracking: boolean;
+  backgroundTracking: boolean;
   trackingError: string | null;
   onStartTracking(): void;
   onStopTracking(): void;
 }) {
+  const tracking = foregroundTracking || backgroundTracking;
   const [liveResult, setLiveResult] = useState<RouteGuardScan | null>(null);
   const [liveUpdatedAt, setLiveUpdatedAt] = useState<string | null>(null);
   const [liveRefreshError, setLiveRefreshError] = useState<string | null>(null);
@@ -448,7 +536,7 @@ function RouteResult({
   }, [scannedResult]);
 
   useEffect(() => {
-    if (!tracking || scannedResult.provider !== 'free-osm') return;
+    if (!tracking || backgroundTracking || scannedResult.provider !== 'free-osm') return;
     return startRouteRiskPolling({
       request: (signal) => refreshRouteGuardRisk(scannedResult.sampledRiskScores, signal),
       onValue: (response) => {
@@ -459,7 +547,7 @@ function RouteResult({
       },
       onError: () => setLiveRefreshError('Live refresh unavailable. Showing the last route reading; new approach alerts are paused until the connection recovers.'),
     });
-  }, [scannedResult, tracking]);
+  }, [scannedResult, tracking, backgroundTracking]);
 
   const risk = RISK_COLORS[result.overallRiskLevel];
   const routePoints = result.routePoints.map(({ latitude, longitude }) => ({ latitude, longitude }));
@@ -542,7 +630,7 @@ function RouteResult({
       <RouteJourneyAlerts
         result={scannedResult}
         progress={progress}
-        tracking={tracking && !liveRefreshError}
+        tracking={foregroundTracking && !liveRefreshError}
         accuracyMetres={currentAccuracy}
         locationTimestamp={currentTimestamp}
       />

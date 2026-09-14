@@ -11,8 +11,8 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Allow RiskRadar to use your location to suggest nearby postcodes while you are on the go.",
-          "locationAlwaysAndWhenInUsePermission": "Allow RiskRadar to monitor your current area for higher-risk changes while Live Radar is active.",
+          "locationWhenInUsePermission": "Allow RiskRadar to show nearby postcodes and track your position along a route.",
+          "locationAlwaysAndWhenInUsePermission": "Allow RiskRadar to monitor your route or current area for approaching risks when you enable background monitoring.",
           "isIosBackgroundLocationEnabled": true,
           "isAndroidBackgroundLocationEnabled": true,
           "isAndroidForegroundServiceEnabled": true
