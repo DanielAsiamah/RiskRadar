@@ -1,0 +1,73 @@
+[
+  {
+    "id": "TIMS-20260922-001",
+    "url": "/Road/all/Disruption/TIMS-20260922-001",
+    "point": "{\"type\":\"Point\",\"coordinates\":[-0.1276,51.5072]}",
+    "severity": "Serious",
+    "ordinal": 2,
+    "category": "Traffic Incident",
+    "subCategory": "Collision",
+    "comments": "A serious collision is affecting the A4 eastbound. One lane is closed.",
+    "currentUpdate": "Emergency services are at the scene. Expect delays.",
+    "currentUpdateDateTime": "2026-09-22T09:42:00Z",
+    "corridorIds": ["A4"],
+    "startDateTime": "2026-09-22T09:30:00Z",
+    "lastModifiedTime": "2026-09-22T09:42:00Z",
+    "levelOfInterest": "High",
+    "location": "A4 near Hyde Park Corner (Westminster)",
+    "status": "Active",
+    "isProvisional": false,
+    "hasClosures": true,
+    "streets": [
+      {
+        "name": "Knightsbridge",
+        "closure": "Partial Closure",
+        "directions": "Eastbound"
+      }
+    ]
+  },
+  {
+    "id": "TIMS-20260922-PLANNED",
+    "url": "/Road/all/Disruption/TIMS-20260922-PLANNED",
+    "point": "{\"type\":\"Point\",\"coordinates\":[-0.0877,51.5079]}",
+    "severity": "Moderate",
+    "category": "Works",
+    "subCategory": "Utility Works",
+    "comments": "Planned utility works.",
+    "startDateTime": "2026-09-25T22:00:00Z",
+    "endDateTime": "2026-09-26T05:00:00Z",
+    "lastModifiedTime": "2026-09-21T12:00:00Z",
+    "location": "London Bridge",
+    "status": "Scheduled",
+    "hasClosures": false
+  },
+  {
+    "id": "TIMS-20260922-CLEARED",
+    "url": "/Road/all/Disruption/TIMS-20260922-CLEARED",
+    "point": "{\"type\":\"Point\",\"coordinates\":[-0.1000,51.5000]}",
+    "severity": "Moderate",
+    "category": "Traffic Incident",
+    "subCategory": "Broken Down Vehicle",
+    "comments": "The incident has cleared.",
+    "startDateTime": "2026-09-22T08:00:00Z",
+    "endDateTime": "2026-09-22T09:00:00Z",
+    "lastModifiedTime": "2026-09-22T09:01:00Z",
+    "location": "Waterloo Road",
+    "status": "Recently Cleared",
+    "hasClosures": false
+  },
+  {
+    "id": "TIMS-20260922-BROKEN",
+    "url": "/Road/all/Disruption/TIMS-20260922-BROKEN",
+    "point": "not-json",
+    "severity": "Moderate",
+    "category": "Traffic Incident",
+    "subCategory": "Obstruction",
+    "comments": "Malformed location supplied by the fixture.",
+    "startDateTime": "2026-09-22T09:00:00Z",
+    "lastModifiedTime": "2026-09-22T09:10:00Z",
+    "location": "Unknown road",
+    "status": "Active",
+    "hasClosures": false
+  }
+]

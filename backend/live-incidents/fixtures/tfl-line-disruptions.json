@@ -1,0 +1,45 @@
+[
+  {
+    "category": "RealTime",
+    "type": "lineInfo",
+    "categoryDescription": "RealTime",
+    "description": "Severe delays between Whitechapel and Paddington while emergency services deal with an incident.",
+    "summary": "Severe delays on the Elizabeth line",
+    "additionalInfo": "Use alternative routes where possible.",
+    "created": "2026-09-22T09:35:00Z",
+    "lastUpdate": "2026-09-22T09:48:00Z",
+    "affectedRoutes": [
+      {
+        "name": "Elizabeth line",
+        "routeSectionNaptanEntrySequence": []
+      }
+    ],
+    "affectedStops": [
+      {
+        "naptanId": "910GWCHAPXR",
+        "commonName": "Whitechapel Rail Station",
+        "lat": 51.519587,
+        "lon": -0.059406
+      },
+      {
+        "naptanId": "910GPADTON",
+        "commonName": "London Paddington Rail Station",
+        "lat": 51.516031,
+        "lon": -0.17609
+      }
+    ],
+    "closureText": "Severe Delays"
+  },
+  {
+    "category": "Information",
+    "type": "lineInfo",
+    "categoryDescription": "Information",
+    "description": "Customer information without a mapped affected stop.",
+    "summary": "General information",
+    "created": "2026-09-22T09:35:00Z",
+    "lastUpdate": "2026-09-22T09:48:00Z",
+    "affectedRoutes": [],
+    "affectedStops": [],
+    "closureText": "Information"
+  }
+]
