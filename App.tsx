@@ -203,6 +203,7 @@ export default function App() {
   const [liveRadarPermissions, setLiveRadarPermissions] = useState<LiveRadarPermissionSnapshot>(createDefaultLiveRadarStore().permissions);
   const [liveRadarBusy, setLiveRadarBusy] = useState(false);
   const [liveRadarWarning, setLiveRadarWarning] = useState<string | null>(null);
+  const [liveRadarCoordinate, setLiveRadarCoordinate] = useState<{ latitude: number; longitude: number } | null>(null);
   const [liveRadarOnboardingVisible, setLiveRadarOnboardingVisible] = useState(false);
   const searchRequestId = useRef(0);
   const liveRadarStoreRef = useRef<LiveRadarStore>(createDefaultLiveRadarStore());
@@ -1143,6 +1144,7 @@ export default function App() {
       return;
     }
     const location = locationResult.location;
+    setLiveRadarCoordinate({ latitude: location.latitude, longitude: location.longitude });
 
     const scanResult = await scanLiveRadarCoordinates({
       latitude: location.latitude,
@@ -1590,6 +1592,7 @@ export default function App() {
             permissions={liveRadarPermissions}
             onboardingVisible={liveRadarOnboardingVisible}
             busy={liveRadarBusy}
+            currentCoordinate={liveRadarCoordinate}
             currentReading={liveRadarStore.currentReading}
             history={liveRadarStore.history}
             warning={liveRadarWarning}

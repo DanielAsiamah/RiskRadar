@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
-import { ArrowLeft, Bell, LocateFixed, LockKeyhole, MapPin, Radar, ShieldAlert, ShieldCheck } from 'lucide-react-native';
+import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { ArrowLeft, Bell, ExternalLink, LocateFixed, LockKeyhole, MapPin, Radar, ShieldAlert, ShieldCheck } from 'lucide-react-native';
 import tw from 'twrnc';
 
-import { fetchLiveSourceStatus, type LiveSourceStatusResponse } from '../api/live-radar';
+import { fetchLiveIncidentsNear, fetchLiveSourceStatus, type LiveSourceStatusResponse } from '../api/live-radar';
+import { buildLiveIncidentMapModel } from '../live-incidents/presentation';
+import type { LiveIncidentMapModel } from '../live-incidents/types';
 import type {
   LiveRadarAlertEvent,
   LiveRadarPermissionSnapshot,
@@ -11,6 +13,8 @@ import type {
 } from '../live-radar/types.ts';
 import { getLiveRadarAccess, hasRequiredLiveRadarPermissions } from '../live-radar/access.ts';
 import { findCurrentLiveRadarAlert, formatLiveRadarDataMonth, formatLiveSourceNetworkSummary } from '../live-radar/presentation.ts';
+import type { MapCoordinate } from './map-types';
+import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
 
 export interface LiveRadarProps {
@@ -20,6 +24,7 @@ export interface LiveRadarProps {
   permissions: LiveRadarPermissionSnapshot;
   onboardingVisible: boolean;
   busy: boolean;
+  currentCoordinate: MapCoordinate | null;
   currentReading: LiveRadarReading | null;
   history: LiveRadarAlertEvent[];
   warning: string | null;
@@ -61,6 +66,7 @@ export default function LiveRadar({
   permissions,
   onboardingVisible,
   busy,
+  currentCoordinate,
   currentReading,
   history,
   warning,
@@ -86,6 +92,9 @@ export default function LiveRadar({
   const canActivate = access.canStart && (isWeb || hasRequiredPermissions);
   const [liveSourceStatus, setLiveSourceStatus] = useState<LiveSourceStatusResponse | null>(null);
   const [liveSourceWarning, setLiveSourceWarning] = useState<string | null>(null);
+  const [incidentMap, setIncidentMap] = useState<LiveIncidentMapModel | null>(null);
+  const [incidentMapLoading, setIncidentMapLoading] = useState(false);
+  const [incidentMapWarning, setIncidentMapWarning] = useState<string | null>(null);
   const monitoringCopy = isWeb
     ? 'Keep this page open to monitor your current area.'
     : 'Live Radar can watch for higher-risk area changes on this device.';
@@ -113,6 +122,43 @@ export default function LiveRadar({
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!currentCoordinate) {
+      setIncidentMap(null);
+      setIncidentMapWarning(null);
+      setIncidentMapLoading(false);
+      return;
+    }
+
+    let active = true;
+    let controller: AbortController | null = null;
+
+    const loadIncidents = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      setIncidentMapLoading(true);
+      try {
+        const response = await fetchLiveIncidentsNear(currentCoordinate, { signal: controller.signal });
+        if (!active) return;
+        setIncidentMap(buildLiveIncidentMapModel(response));
+        setIncidentMapWarning(null);
+      } catch (incidentError) {
+        if (!active || controller.signal.aborted) return;
+        setIncidentMapWarning(incidentError instanceof Error ? incidentError.message : 'Live incidents could not be refreshed.');
+      } finally {
+        if (active) setIncidentMapLoading(false);
+      }
+    };
+
+    void loadIncidents();
+    const refresh = status === 'active' ? setInterval(() => { void loadIncidents(); }, 60_000) : null;
+    return () => {
+      active = false;
+      controller?.abort();
+      if (refresh) clearInterval(refresh);
+    };
+  }, [currentCoordinate?.latitude, currentCoordinate?.longitude, status]);
 
   return (
     <View style={membershipStyles.screen}>
@@ -187,6 +233,85 @@ export default function LiveRadar({
                 </Text>
               </View>
             </View>
+          </View>
+
+          <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`mb-5`]}>
+            <View style={tw`flex-row items-start justify-between mb-4`}>
+              <View style={tw`flex-1 pr-3`}>
+                <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mb-1`}>LIVE INCIDENT MAP</Text>
+                <Text style={tw`text-lg font-black text-slate-950`}>
+                  {incidentMap?.summary.title || (currentCoordinate ? 'Checking current live incidents' : 'Scan your location to open the live map')}
+                </Text>
+                <Text style={tw`text-xs text-slate-500 leading-5 mt-2`}>
+                  {incidentMap?.summary.detail || 'RiskRadar will map named-source incidents around your current position without mixing them with monthly crime records.'}
+                </Text>
+              </View>
+              {incidentMapLoading ? <ActivityIndicator color={membershipColors.indigo} /> : (
+                <View style={tw`rounded-2xl bg-indigo-50 px-3 py-2 items-center`}>
+                  <Text style={tw`text-lg font-black text-indigo-700`}>{incidentMap?.markers.length ?? 0}</Text>
+                  <Text style={tw`text-[8px] font-black tracking-widest text-indigo-600`}>LIVE</Text>
+                </View>
+              )}
+            </View>
+
+            {currentCoordinate ? (
+              <View style={tw`overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 mb-4`}>
+                <CrimeMapCanvas
+                  center={currentCoordinate}
+                  markers={[]}
+                  liveIncidentMarkers={incidentMap?.markers ?? []}
+                  selectedPoint={currentCoordinate}
+                  selectedPointLabel="Your latest Live Radar position"
+                  areaPoints={[]}
+                  boundaryPoints={[]}
+                  radiusMeters={10_000}
+                  dataKey={`live-incidents:${incidentMap?.generatedAt ?? 'loading'}`}
+                  onMapPress={() => undefined}
+                  onOpenEvidence={() => undefined}
+                />
+              </View>
+            ) : null}
+
+            {incidentMapWarning ? (
+              <View style={tw`rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 mb-3`}>
+                <Text style={tw`text-xs font-black text-amber-800`}>Live refresh unavailable</Text>
+                <Text selectable style={tw`text-xs text-amber-700 leading-5 mt-1`}>
+                  {incidentMapWarning} {incidentMap ? 'The last successful map remains visible.' : 'Scan again when the connection returns.'}
+                </Text>
+              </View>
+            ) : null}
+
+            {incidentMap?.cards.slice(0, 5).map((incident) => (
+              <View key={incident.id} style={[tw`rounded-2xl border px-4 py-4 mb-3`, { borderColor: `${incident.color}33`, backgroundColor: incident.softColor }]}>
+                <View style={tw`flex-row items-start justify-between`}>
+                  <View style={tw`flex-1 pr-3`}>
+                    <Text style={{ color: incident.color, fontSize: 10, fontWeight: '900', letterSpacing: 1 }}>LIVE · SEVERITY {incident.severity}</Text>
+                    <Text style={tw`text-sm font-black text-slate-950 mt-1`}>{incident.title}</Text>
+                    <Text style={tw`text-xs text-slate-600 leading-5 mt-1`}>{incident.locationLabel}</Text>
+                    <Text style={tw`text-[10px] font-bold text-slate-500 mt-2`}>
+                      {incident.providerLabel} · {incident.verificationLabel} · {incident.updatedAtLabel}
+                    </Text>
+                  </View>
+                  <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: incident.color, marginTop: 3 }} />
+                </View>
+                <Text style={tw`text-xs text-slate-600 leading-5 mt-3`}>{incident.summary}</Text>
+                {incident.sourceUrl ? (
+                  <Pressable
+                    onPress={() => { void Linking.openURL(incident.sourceUrl!); }}
+                    accessibilityRole="link"
+                    style={({ pressed }) => [tw`self-start flex-row items-center rounded-xl bg-white px-3 py-2 mt-3`, pressed && tw`opacity-70`]}
+                  >
+                    <ExternalLink size={14} color={incident.color} />
+                    <Text style={{ color: incident.color, fontSize: 11, fontWeight: '900', marginLeft: 6 }}>Open official source</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+
+            <Text style={tw`text-[10px] text-slate-400 leading-4`}>
+              {incidentMap?.generatedAt ? `Live layer checked ${formatTimestamp(incidentMap.generatedAt)}. ` : ''}
+              {incidentMap?.disclaimer || 'Live coverage depends on connected public sources and may be incomplete.'}
+            </Text>
           </View>
 
           {access.showUpgradeGate ? (

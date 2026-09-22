@@ -42,6 +42,7 @@ function Recenter({ center, routeKey, followPoint }: { center: MapCoordinate; ro
 export default function CrimeMapCanvas({
   center,
   markers,
+  liveIncidentMarkers = [],
   selectedPoint,
   selectedPointLabel = 'Selected search location',
   followPoint,
@@ -74,6 +75,25 @@ export default function CrimeMapCanvas({
         <MapEvents onMapPress={onMapPress} onFollowInterrupted={onFollowInterrupted} />
         <Recenter center={center} routeKey={routeKey} followPoint={followPoint} />
         <LayerGroup key={dataKey}>
+          {liveIncidentMarkers.map((incident) => (
+            <React.Fragment key={`live-${incident.id}`}>
+              <Circle
+                center={[incident.latitude, incident.longitude]}
+                radius={incident.affectedRadiusMetres}
+                pathOptions={{ color: incident.color, fillColor: incident.color, fillOpacity: 0.1, weight: 1.5 }}
+              />
+              <CircleMarker
+                center={[incident.latitude, incident.longitude]}
+                radius={9}
+                pathOptions={{ color: 'white', fillColor: incident.color, fillOpacity: 1, weight: 3 }}
+              >
+                <Tooltip direction="top" offset={[0, -10]} opacity={1} sticky>
+                  <LiveIncidentDetails incident={incident} />
+                </Tooltip>
+                <Popup><LiveIncidentDetails incident={incident} /></Popup>
+              </CircleMarker>
+            </React.Fragment>
+          ))}
           {routeLine && routeLine.points.length >= 2 ? (
             <Polyline
               positions={routeLine.points.map((point) => [point.latitude, point.longitude])}
@@ -135,6 +155,37 @@ export default function CrimeMapCanvas({
       </MapContainer>
     </div>
   );
+}
+
+function LiveIncidentDetails({ incident }: { incident: NonNullable<CrimeMapCanvasProps['liveIncidentMarkers']>[number] }) {
+  return (
+    <div style={{ minWidth: 220, maxWidth: 320 }}>
+      <strong style={{ color: incident.color }}>LIVE · SEVERITY {incident.severity}</strong>
+      <br /><strong>{incident.title}</strong>
+      <br />{incident.locationLabel}
+      <br />{incident.providerLabel} · {incident.verificationLabel}
+      <br />{incident.locationPrecisionLabel}
+      {incident.summary ? <><br /><span>{incident.summary}</span></> : null}
+      {incident.sourceUpdatedAt ? <><br /><span>Source updated: {formatLiveTimestamp(incident.sourceUpdatedAt)}</span></> : null}
+      {isSafeSourceUrl(incident.sourceUrl) ? (
+        <><br /><a href={incident.sourceUrl!} target="_blank" rel="noreferrer">Open official source</a></>
+      ) : null}
+    </div>
+  );
+}
+
+function isSafeSourceUrl(value: string | null) {
+  if (!value) return false;
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function formatLiveTimestamp(value: string) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 'Unavailable' : parsed.toLocaleString('en-GB');
 }
 
 function riskColor(value?: string) {

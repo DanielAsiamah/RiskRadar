@@ -109,7 +109,9 @@ Background timing and locked-screen delivery depend on OS permissions, battery p
 ### Live Radar local notes
 
 - `Scan My Current Location Now` works with foreground location permission.
+- A successful scan opens the live incident map around the latest in-memory GPS coordinate. Current incident markers use severity colours, show the affected radius, provider, confidence label, location precision, source update time, and an HTTPS official-source link when supplied.
 - `Start Journey Radar` on the web is free and starts a keep-open session without Supabase. Keep the page open to monitor your current area; closing or reloading it stops the session.
+- While Live Radar is active, the map requests `/api/live-incidents` every 60 seconds for a bounded 10 km view. A failed refresh leaves the last successful layer visible and shows a coverage warning rather than claiming the area is clear.
 - Native background Live Radar is a Premium feature and requires foreground and background location permission. Notification permission is needed for device banners, but denied notifications do not block local status and alert-history updates.
 - Native background Live Radar also requires a development build or standalone app. Expo Go is not enough for this path.
 - Native background scans must be able to reach the RiskRadar backend. Set `EXPO_PUBLIC_API_BASE_URL` to the deployed API URL, or to the computer's LAN URL while testing on a phone.
@@ -118,6 +120,16 @@ Background timing and locked-screen delivery depend on OS permissions, battery p
 - The backend starts a free England-only Environment Agency flood poll every 15 minutes. Its live history is intentionally in memory for local development, so it clears whenever `npm run api` restarts. Set `LIVE_INGESTION_AUTOSTART=false` to turn off automatic polling.
 - `GET /api/live-incidents?lat=51.4062&lng=0.0186` returns the current public live layer, while `GET /api/live-incidents/:id` returns its allow-listed history. `GET /api/live-source-status` shows source coverage and freshness. `POST /api/live-risk` accepts a postcode, coordinate, or up to 12 route samples and combines named current incidents with the existing historical score.
 - `POST /api/internal/live-ingestion/run` is an operator endpoint. It is disabled unless `LIVE_INGESTION_SECRET` is at least 32 characters, and accepts that value only in `x-live-ingestion-secret`.
+
+To test the live map on web:
+
+1. Leave `npm run api` running until the terminal reports the Environment Agency poll result.
+2. Start Expo with `npm run start`, open the web URL, then open **Live Radar**.
+3. Select **Scan My Current Location Now** and allow location access.
+4. Confirm the map marks your latest position and reports either named current incidents or an honest connected-source empty/limited state.
+5. If an incident is shown, open its card and confirm **Open official source** launches only an HTTPS source page.
+
+For iOS or Android, use a development or installed build, set `EXPO_PUBLIC_API_BASE_URL` to a backend URL the phone can reach, and repeat the same foreground test. Expo Go can preview foreground screens but is not proof of native background delivery. Exact GPS coordinates used by the live map remain in memory and are not added to the persisted Live Radar store; after an app restart, run a fresh location scan.
 
 Optional:
 

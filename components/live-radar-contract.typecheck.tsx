@@ -15,6 +15,7 @@ export function liveRadarContractFixture() {
       }}
       onboardingVisible={false}
       busy={false}
+      currentCoordinate={null}
       currentReading={null}
       history={[]}
       warning={null}

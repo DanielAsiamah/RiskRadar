@@ -1,10 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MapView, { Circle, Marker, Polygon, Polyline } from 'react-native-maps';
+import { Linking } from 'react-native';
 import { CrimeMapCanvasProps } from './map-types';
 
 export default function CrimeMapCanvas({
   center,
   markers,
+  liveIncidentMarkers = [],
   selectedPoint,
   selectedPointLabel = 'Selected point',
   followPoint,
@@ -55,6 +57,31 @@ export default function CrimeMapCanvas({
       showsMyLocationButton
       accessibilityLabel="Interactive UK crime map"
     >
+      {liveIncidentMarkers.map((incident) => (
+        <React.Fragment key={`live-${incident.id}`}>
+          <Circle
+            center={incident}
+            radius={incident.affectedRadiusMetres}
+            fillColor={`${incident.color}18`}
+            strokeColor={incident.color}
+            strokeWidth={2}
+          />
+          <Marker
+            coordinate={incident}
+            title={`LIVE · ${incident.title}`}
+            description={[
+              incident.locationLabel,
+              `${incident.providerLabel} · ${incident.verificationLabel}`,
+              incident.locationPrecisionLabel,
+              incident.summary,
+              incident.sourceUpdatedAt ? `Source updated: ${formatLiveTimestamp(incident.sourceUpdatedAt)}` : '',
+              isSafeSourceUrl(incident.sourceUrl) ? 'Tap this card to open the official source.' : '',
+            ].filter(Boolean).join('\n')}
+            pinColor={incident.color}
+            onCalloutPress={isSafeSourceUrl(incident.sourceUrl) ? () => { void Linking.openURL(incident.sourceUrl!); } : undefined}
+          />
+        </React.Fragment>
+      ))}
       {routeLine && routeLine.points.length >= 2 ? (
         <Polyline
           coordinates={routeLine.points}
@@ -118,6 +145,20 @@ export default function CrimeMapCanvas({
       ))}
     </MapView>
   );
+}
+
+function isSafeSourceUrl(value: string | null) {
+  if (!value) return false;
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function formatLiveTimestamp(value: string) {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime()) ? 'Unavailable' : parsed.toLocaleString('en-GB');
 }
 
 function riskColor(value?: string) {

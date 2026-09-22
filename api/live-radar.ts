@@ -1,4 +1,5 @@
 import type { PostcodeResult } from '../types.ts';
+import type { LiveIncidentListResponse } from '../live-incidents/types.ts';
 import { apiRequest } from './client';
 
 interface LocationSuggestionsResponse {
@@ -72,4 +73,23 @@ export function fetchLiveRiskForPostcode(postcode: string) {
 
 export function fetchLiveSourceStatus() {
   return apiRequest<LiveSourceStatusResponse>('/api/live-source-status', {}, 8_000);
+}
+
+export function fetchLiveIncidentsNear(
+  point: { latitude: number; longitude: number },
+  options: { radiusKm?: number; limit?: number; signal?: AbortSignal } = {},
+) {
+  if (!Number.isFinite(point.latitude) || point.latitude < -90 || point.latitude > 90
+    || !Number.isFinite(point.longitude) || point.longitude < -180 || point.longitude > 180) {
+    return Promise.reject(new TypeError('A valid latitude and longitude are required for live incidents.'));
+  }
+  const radiusKm = Math.min(10, Math.max(0.1, Number.isFinite(options.radiusKm) ? Number(options.radiusKm) : 10));
+  const limit = Math.min(100, Math.max(1, Number.isInteger(options.limit) ? Number(options.limit) : 50));
+  const query = new URLSearchParams({
+    lat: String(point.latitude),
+    lng: String(point.longitude),
+    radiusKm: String(radiusKm),
+    limit: String(limit),
+  });
+  return apiRequest<LiveIncidentListResponse>(`/api/live-incidents?${query.toString()}`, { signal: options.signal }, 12_000);
 }

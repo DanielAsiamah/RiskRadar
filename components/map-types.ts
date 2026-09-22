@@ -1,3 +1,5 @@
+import type { LiveIncidentMapMarker } from '../live-incidents/types';
+
 export interface MapCoordinate {
   latitude: number;
   longitude: number;
@@ -45,6 +47,7 @@ export interface RouteMapRiskSample extends MapCoordinate {
 export interface CrimeMapCanvasProps {
   center: MapCoordinate;
   markers: CrimeMapMarker[];
+  liveIncidentMarkers?: LiveIncidentMapMarker[];
   selectedPoint?: MapCoordinate | null;
   selectedPointLabel?: string;
   followPoint?: MapCoordinate | null;
