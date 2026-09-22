@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { MapContainer, TileLayer, Circle, CircleMarker, LayerGroup, Polygon, Polyline, Popup, Tooltip, useMap, useMapEvents } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
+import { buildLiveMapViewport } from '../live-incidents/map-viewport';
 import { CrimeMapCanvasProps, MapCoordinate } from './map-types';
 
 const UK_BOUNDS: [[number, number], [number, number]] = [
@@ -16,20 +17,21 @@ function MapEvents({ onMapPress, onFollowInterrupted }: { onMapPress: (coordinat
   return null;
 }
 
-function Recenter({ center, routeKey, followPoint }: { center: MapCoordinate; routeKey: string; followPoint?: MapCoordinate | null }) {
+function Recenter({ center, routeKey, followPoint, radiusMeters }: { center: MapCoordinate; routeKey: string; followPoint?: MapCoordinate | null; radiusMeters?: number }) {
   const map = useMap();
   const following = useRef(false);
   useEffect(() => {
+    const viewport = buildLiveMapViewport(center, radiusMeters);
     const frame = requestAnimationFrame(() => {
       map.invalidateSize({ pan: false });
       if (routeKey) {
         const points = routeKey.split(';').map((pair) => pair.split(',').map(Number) as [number, number]);
         map.fitBounds(points, { padding: [24, 24], maxZoom: 16, animate: false });
-      } else map.setView([center.latitude, center.longitude], 14, { animate: false });
+      } else map.setView([center.latitude, center.longitude], viewport.webZoom, { animate: false });
     });
 
     return () => cancelAnimationFrame(frame);
-  }, [center.latitude, center.longitude, routeKey, map]);
+  }, [center.latitude, center.longitude, routeKey, radiusMeters, map]);
   useEffect(() => {
     if (followPoint) {
       map.setView([followPoint.latitude, followPoint.longitude], following.current ? map.getZoom() : Math.max(15, map.getZoom()), { animate: true });
@@ -57,11 +59,12 @@ export default function CrimeMapCanvas({
   onOpenEvidence,
 }: CrimeMapCanvasProps) {
   const routeKey = routeLine?.points.map((point) => `${point.latitude},${point.longitude}`).join(';') ?? '';
+  const viewport = buildLiveMapViewport(center, radiusMeters);
   return (
     <div style={{ width: '100%', height: 390 }}>
       <MapContainer
         center={[center.latitude, center.longitude]}
-        zoom={14}
+        zoom={viewport.webZoom}
         minZoom={5}
         maxBounds={UK_BOUNDS}
         maxBoundsViscosity={0.8}
@@ -73,7 +76,7 @@ export default function CrimeMapCanvas({
           noWrap
         />
         <MapEvents onMapPress={onMapPress} onFollowInterrupted={onFollowInterrupted} />
-        <Recenter center={center} routeKey={routeKey} followPoint={followPoint} />
+        <Recenter center={center} routeKey={routeKey} followPoint={followPoint} radiusMeters={radiusMeters} />
         <LayerGroup key={dataKey}>
           {liveIncidentMarkers.map((incident) => (
             <React.Fragment key={`live-${incident.id}`}>

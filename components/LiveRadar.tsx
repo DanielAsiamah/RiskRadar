@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Linking, Modal, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { ArrowLeft, Bell, ExternalLink, LocateFixed, LockKeyhole, MapPin, Radar, ShieldAlert, ShieldCheck } from 'lucide-react-native';
 import tw from 'twrnc';
 
 import { fetchLiveIncidentsNear, fetchLiveSourceStatus, type LiveSourceStatusResponse } from '../api/live-radar';
 import { buildLiveIncidentMapModel } from '../live-incidents/presentation';
+import { createLiveIncidentRefreshCoordinator } from '../live-incidents/refresh';
 import type { LiveIncidentMapModel } from '../live-incidents/types';
 import type {
   LiveRadarAlertEvent,
@@ -95,6 +96,7 @@ export default function LiveRadar({
   const [incidentMap, setIncidentMap] = useState<LiveIncidentMapModel | null>(null);
   const [incidentMapLoading, setIncidentMapLoading] = useState(false);
   const [incidentMapWarning, setIncidentMapWarning] = useState<string | null>(null);
+  const incidentRefreshCoordinator = useRef(createLiveIncidentRefreshCoordinator()).current;
   const monitoringCopy = isWeb
     ? 'Keep this page open to monitor your current area.'
     : 'Live Radar can watch for higher-risk area changes on this device.';
@@ -125,6 +127,7 @@ export default function LiveRadar({
 
   useEffect(() => {
     if (!currentCoordinate) {
+      incidentRefreshCoordinator.cancel();
       setIncidentMap(null);
       setIncidentMapWarning(null);
       setIncidentMapLoading(false);
@@ -132,22 +135,20 @@ export default function LiveRadar({
     }
 
     let active = true;
-    let controller: AbortController | null = null;
 
     const loadIncidents = async () => {
-      controller?.abort();
-      controller = new AbortController();
+      const request = incidentRefreshCoordinator.start();
       setIncidentMapLoading(true);
       try {
-        const response = await fetchLiveIncidentsNear(currentCoordinate, { signal: controller.signal });
-        if (!active) return;
+        const response = await fetchLiveIncidentsNear(currentCoordinate, { signal: request.signal });
+        if (!active || !request.isCurrent()) return;
         setIncidentMap(buildLiveIncidentMapModel(response));
         setIncidentMapWarning(null);
       } catch (incidentError) {
-        if (!active || controller.signal.aborted) return;
+        if (!active || !request.isCurrent()) return;
         setIncidentMapWarning(incidentError instanceof Error ? incidentError.message : 'Live incidents could not be refreshed.');
       } finally {
-        if (active) setIncidentMapLoading(false);
+        if (active && request.isCurrent()) setIncidentMapLoading(false);
       }
     };
 
@@ -155,10 +156,10 @@ export default function LiveRadar({
     const refresh = status === 'active' ? setInterval(() => { void loadIncidents(); }, 60_000) : null;
     return () => {
       active = false;
-      controller?.abort();
+      incidentRefreshCoordinator.cancel();
       if (refresh) clearInterval(refresh);
     };
-  }, [currentCoordinate?.latitude, currentCoordinate?.longitude, status]);
+  }, [currentCoordinate?.latitude, currentCoordinate?.longitude, status, incidentRefreshCoordinator]);
 
   return (
     <View style={membershipStyles.screen}>

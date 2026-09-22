@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import MapView, { Circle, Marker, Polygon, Polyline } from 'react-native-maps';
 import { Linking } from 'react-native';
+import { buildLiveMapViewport } from '../live-incidents/map-viewport';
 import { CrimeMapCanvasProps } from './map-types';
 
 export default function CrimeMapCanvas({
@@ -24,6 +25,7 @@ export default function CrimeMapCanvas({
   const [mapReady, setMapReady] = useState(false);
   const following = useRef(false);
   const routeKey = routeLine?.points.map((point) => `${point.latitude},${point.longitude}`).join(';') ?? '';
+  const viewport = buildLiveMapViewport(center, radiusMeters);
 
   useEffect(() => {
     if (!mapReady) return;
@@ -33,8 +35,8 @@ export default function CrimeMapCanvas({
         return { latitude, longitude };
       });
       mapRef.current?.fitToCoordinates(coordinates, { edgePadding: { top: 30, right: 30, bottom: 30, left: 30 }, animated: false });
-    } else mapRef.current?.animateToRegion({ ...center, latitudeDelta: 0.025, longitudeDelta: 0.025 }, 450);
-  }, [center.latitude, center.longitude, routeKey, mapReady]);
+    } else mapRef.current?.animateToRegion({ ...center, latitudeDelta: viewport.latitudeDelta, longitudeDelta: viewport.longitudeDelta }, 450);
+  }, [center.latitude, center.longitude, routeKey, radiusMeters, mapReady]);
 
   useEffect(() => {
     if (!mapReady) return;
@@ -49,7 +51,7 @@ export default function CrimeMapCanvas({
     <MapView
       ref={mapRef}
       style={{ width: '100%', height: 390 }}
-      initialRegion={{ ...center, latitudeDelta: 0.025, longitudeDelta: 0.025 }}
+      initialRegion={{ ...center, latitudeDelta: viewport.latitudeDelta, longitudeDelta: viewport.longitudeDelta }}
       onPress={(event) => onMapPress(event.nativeEvent.coordinate)}
       onMapReady={() => setMapReady(true)}
       onPanDrag={onFollowInterrupted}
