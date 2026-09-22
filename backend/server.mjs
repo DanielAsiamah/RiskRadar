@@ -29,12 +29,12 @@ import { createStripeBilling } from './membership/stripe-billing.mjs';
 import { createMembershipRouteHandler } from './membership/routes.mjs';
 import { createWatchlistStore } from './membership/watchlist-store.mjs';
 import { createRouteGuardRouteHandler } from './route-guard.mjs';
-import { createEnvironmentAgencyAdapter } from './live-incidents/adapters/environment-agency.mjs';
 import { createLiveIncidentIngestionService } from './live-incidents/ingestion-service.mjs';
 import { createMemoryLiveIncidentStore } from './live-incidents/memory-store.mjs';
 import { calculateLiveRisk } from './live-incidents/risk-overlay.mjs';
 import { createLiveIncidentRouteHandler } from './live-incidents/routes.mjs';
-import { LIVE_SOURCE_DEFINITIONS } from './live-incidents/sources.mjs';
+import { createConfiguredLiveAdapters, startLiveIngestionPolling } from './live-incidents/runtime.mjs';
+import { createLiveSourceDefinitions } from './live-incidents/sources.mjs';
 
 const PORT = Number(process.env.PORT || 3001);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -104,15 +104,17 @@ const membershipRoutes = createMembershipRouteHandler({
   analyzeLocation,
   fetchMonthlyCrimeSeries,
 });
-const liveIncidentStore = createMemoryLiveIncidentStore({ sourceDefinitions: LIVE_SOURCE_DEFINITIONS });
+const liveSourceDefinitions = createLiveSourceDefinitions(process.env);
+const liveIncidentAdapters = createConfiguredLiveAdapters(process.env);
+const liveIncidentStore = createMemoryLiveIncidentStore({ sourceDefinitions: liveSourceDefinitions });
 const liveIncidentIngestion = createLiveIncidentIngestionService({
   store: liveIncidentStore,
-  adapters: [createEnvironmentAgencyAdapter()],
+  adapters: liveIncidentAdapters,
 });
 const liveIncidentRoutes = createLiveIncidentRouteHandler({
   store: liveIncidentStore,
   ingestionService: liveIncidentIngestion,
-  sourceDefinitions: LIVE_SOURCE_DEFINITIONS,
+  sourceDefinitions: liveSourceDefinitions,
   analyzeLocation,
   analyzePoint,
   ingestionSecret: LIVE_INGESTION_SECRET,
@@ -122,7 +124,7 @@ const routeGuardRoutes = createRouteGuardRouteHandler({
   sendJson,
   sampleRisk: sampleRouteGuardRisk,
 });
-let liveIngestionTimer = null;
+let stopLiveIngestionPolling = null;
 const upstreamCache = new Map();
 const inflightFetches = new Map();
 const rateLimitBuckets = new Map();
@@ -5285,15 +5287,14 @@ loadSafetySessions();
 server.listen(PORT, HOST, () => {
   console.log(`RiskRadar API listening on http://${HOST}:${PORT}`);
   if (LIVE_INGESTION_AUTOSTART) {
-    const pollLiveIncidents = () => liveIncidentIngestion.run({
-      sourceId: 'environment-agency-floods-england',
-      requestedBy: 'server-schedule',
-    }).then((result) => {
-      console.log(`RiskRadar live source poll: ${result.sourceId} ${result.status}`);
+    stopLiveIngestionPolling = startLiveIngestionPolling({
+      adapters: liveIncidentAdapters,
+      ingestionService: liveIncidentIngestion,
+      logger: {
+        info(message) { console.log(message); },
+        warn(message, metadata) { console.warn(message, metadata); },
+      },
     });
-    void pollLiveIncidents();
-    liveIngestionTimer = setInterval(pollLiveIncidents, 15 * 60 * 1000);
-    liveIngestionTimer.unref();
   }
 });
 
@@ -5325,9 +5326,9 @@ function shutdown(signal) {
   }
 
   isShuttingDown = true;
-  if (liveIngestionTimer) {
-    clearInterval(liveIngestionTimer);
-    liveIngestionTimer = null;
+  if (stopLiveIngestionPolling) {
+    stopLiveIngestionPolling();
+    stopLiveIngestionPolling = null;
   }
   console.log(`RiskRadar API received ${signal}; draining requests.`);
 

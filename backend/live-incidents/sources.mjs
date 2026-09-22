@@ -1,6 +1,13 @@
 const FIFTEEN_MINUTES_MS = 15 * 60 * 1000;
+const FIVE_MINUTES_MS = 5 * 60 * 1000;
 
-export const LIVE_SOURCE_DEFINITIONS = Object.freeze([
+function hasTflKey(env) {
+  return typeof env?.TFL_APP_KEY === 'string' && env.TFL_APP_KEY.trim().length > 0;
+}
+
+export function createLiveSourceDefinitions(env = {}) {
+  const tflConfigured = hasTflKey(env);
+  return Object.freeze([
   Object.freeze({
     id: 'environment-agency-floods-england',
     provider: 'environment-agency',
@@ -14,8 +21,11 @@ export const LIVE_SOURCE_DEFINITIONS = Object.freeze([
   Object.freeze({
     id: 'tfl-disruptions-london', provider: 'transport-for-london', label: 'TfL road and transport disruptions',
     coverage: Object.freeze({ countries: Object.freeze(['England']), regions: Object.freeze(['London']), kind: 'transport' }),
-    defaultState: 'not-configured', pollIntervalMs: FIFTEEN_MINUTES_MS, staleAfterMs: null,
-    disclosure: 'TfL live disruptions need a configured provider key before they can be displayed.',
+    defaultState: tflConfigured ? 'enabled' : 'not-configured', pollIntervalMs: FIVE_MINUTES_MS,
+    staleAfterMs: tflConfigured ? 15 * 60 * 1000 : null,
+    disclosure: tflConfigured
+      ? 'Official TfL road and transport disruptions are connected for London.'
+      : 'TfL live disruptions need a configured provider key before they can be displayed.',
   }),
   Object.freeze({
     id: 'national-highways-england', provider: 'national-highways', label: 'National Highways road disruptions',
@@ -31,14 +41,17 @@ export const LIVE_SOURCE_DEFINITIONS = Object.freeze([
     defaultState: 'not-configured', pollIntervalMs: FIFTEEN_MINUTES_MS, staleAfterMs: null,
     disclosure: `${country} live flood feed not yet connected.`,
   })),
-]);
+  ]);
+}
+
+export const LIVE_SOURCE_DEFINITIONS = createLiveSourceDefinitions();
 
 export function createInitialSourceStates(env = {}, now = () => new Date()) {
   const at = now().toISOString();
-  return LIVE_SOURCE_DEFINITIONS.map((source) => ({
+  return createLiveSourceDefinitions(env).map((source) => ({
     sourceId: source.id,
     provider: source.provider,
-    state: source.id === 'tfl-disruptions-london' && !env.TFL_APP_KEY ? 'not-configured' : source.defaultState,
+    state: source.defaultState,
     lastAttemptAt: null,
     lastSuccessAt: null,
     sourceWatermark: null,
