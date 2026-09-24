@@ -118,6 +118,7 @@ Background timing and locked-screen delivery depend on OS permissions, battery p
 - RiskRadar still runs without Supabase or Stripe configured. Public search, maps, and local intelligence remain available while membership features stay in a controlled fallback state.
 - Live Radar is informational area intelligence, not an emergency service or guaranteed-safety system.
 - The backend starts a free England-only Environment Agency flood poll every 15 minutes. Its live history is intentionally in memory for local development, so it clears whenever `npm run api` restarts. Set `LIVE_INGESTION_AUTOSTART=false` to turn off automatic polling.
+- London road and transport disruptions use TfL's official Unified API every five minutes when `TFL_APP_KEY` is configured on the backend. TfL registration and the standard 500-requests-per-minute product are free at `https://api-portal.tfl.gov.uk/`. Put the resulting key in the backend `.env` as `TFL_APP_KEY=...`; never use `EXPO_PUBLIC_TFL_APP_KEY` or place the key in app code. Without the key, the app continues working and reports TfL as `not-configured` rather than showing fake or fixture incidents.
 - `GET /api/live-incidents?lat=51.4062&lng=0.0186` returns the current public live layer, while `GET /api/live-incidents/:id` returns its allow-listed history. `GET /api/live-source-status` shows source coverage and freshness. `POST /api/live-risk` accepts a postcode, coordinate, or up to 12 route samples and combines named current incidents with the existing historical score.
 - `POST /api/internal/live-ingestion/run` is an operator endpoint. It is disabled unless `LIVE_INGESTION_SECRET` is at least 32 characters, and accepts that value only in `x-live-ingestion-secret`.
 
@@ -128,6 +129,14 @@ To test the live map on web:
 3. Select **Scan My Current Location Now** and allow location access.
 4. Confirm the map marks your latest position and reports either named current incidents or an honest connected-source empty/limited state.
 5. If an incident is shown, open its card and confirm **Open official source** launches only an HTTPS source page.
+
+To verify TfL without exposing the key:
+
+```bash
+curl http://127.0.0.1:3001/api/live-source-status
+```
+
+Find `tfl-disruptions-london` in `sources`. With a valid backend key it moves from `enabled` to `healthy` after a successful poll and reports London-only transport coverage. The public response and web bundle must never contain `TFL_APP_KEY` or its value. TfL records are current operational disruptions, not live police reports, and records without usable official coordinates are not mapped.
 
 For iOS or Android, use a development or installed build, set `EXPO_PUBLIC_API_BASE_URL` to a backend URL the phone can reach, and repeat the same foreground test. Expo Go can preview foreground screens but is not proof of native background delivery. Exact GPS coordinates used by the live map remain in memory and are not added to the persisted Live Radar store; after an app restart, run a fresh location scan.
 

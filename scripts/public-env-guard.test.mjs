@@ -57,6 +57,19 @@ test('blocks an opaque backend credential copied into an Expo public variable', 
   ]);
 });
 
+test('blocks a TfL provider key assigned to any Expo public variable', () => {
+  const tflKey = 'opaque-tfl-subscription-key-123456';
+  const problems = findUnsafePublicEnvironment({
+    TFL_APP_KEY: tflKey,
+    EXPO_PUBLIC_TFL_APP_KEY: tflKey,
+  });
+
+  assert.deepEqual(problems.map((problem) => problem.key), [
+    'EXPO_PUBLIC_TFL_APP_KEY',
+  ]);
+  assert.equal(JSON.stringify(problems).includes(tflKey), false);
+});
+
 test('reads the same project dotenv files that Expo reads before export', async (t) => {
   const projectRoot = await mkdtemp(path.join(os.tmpdir(), 'riskradar-public-env-'));
   t.after(() => rm(projectRoot, { recursive: true, force: true }));

@@ -69,6 +69,27 @@ put a Supabase secret key, Stripe secret, or webhook signing secret in an
 before Expo starts and scans the exported bundle afterward; either check blocks
 the build if a backend credential is detected.
 
+#### Live-source backend variables
+
+- `LIVE_INGESTION_AUTOSTART`
+  Starts each configured official live-source poller when the API starts. The
+  Environment Agency feed runs every 15 minutes by default. Set to `false` only
+  when an external scheduler owns ingestion.
+- `LIVE_INGESTION_SECRET`
+  Optional 32-or-more-character credential for the operator-only manual
+  ingestion endpoint.
+- `TFL_APP_KEY`
+  Optional TfL Unified API subscription key. Create a free account and select
+  the standard 500 requests per minute product at
+  `https://api-portal.tfl.gov.uk/`. The key activates five-minute London road
+  and transport disruption polling. It is backend-only and must never be named
+  `EXPO_PUBLIC_TFL_APP_KEY`, sent to a client, logged, or committed.
+
+Without `TFL_APP_KEY`, TfL remains `not-configured`; the Environment Agency
+England flood feed and the rest of RiskRadar continue normally. Check source
+health with `GET /api/live-source-status`. TfL coverage is London-only and the
+Environment Agency flood coverage is England-only.
+
 #### Premium backend variables
 
 - `SUPABASE_URL`

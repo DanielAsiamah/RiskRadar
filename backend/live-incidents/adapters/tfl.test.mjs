@@ -39,7 +39,7 @@ test('normalises active TfL road and line disruptions and rejects unusable recor
   assert.equal(result.status, 'success');
   assert.equal(result.fullSnapshot, true);
   assert.deepEqual(result.counts, { fetched: 6, accepted: 2, rejected: 4 });
-  assert.equal(result.records.length, 2);
+  assert.equal(result.records.length, 3);
 
   const road = result.records.find((record) => record.incidentDraft.externalId === 'TIMS-20260922-001');
   assert.equal(road.incidentDraft.category, 'road-collision');
@@ -51,13 +51,22 @@ test('normalises active TfL road and line disruptions and rejects unusable recor
   assert.equal(road.observationInput.sourceUpdatedAt, '2026-09-22T09:42:00.000Z');
   assert.equal(JSON.stringify(road).includes('server-secret-key'), false);
 
-  const line = result.records.find((record) => record.incidentDraft.category === 'transport-disruption');
-  assert.equal(line.incidentDraft.severity, 4);
-  assert.equal(line.incidentDraft.geometry.type, 'LineString');
-  assert.deepEqual(line.incidentDraft.geometry.coordinates, [[-0.059406, 51.519587], [-0.17609, 51.516031]]);
-  assert.equal(line.incidentDraft.locationLabel, 'Whitechapel Rail Station to London Paddington Rail Station');
-  assert.match(line.incidentDraft.externalId, /^line_[a-f0-9]{24}$/);
-  assert.equal(line.observationInput.sourceUrl, 'https://tfl.gov.uk/tube-dlr-overground/status/');
+  const lineRecords = result.records.filter((record) => record.incidentDraft.category === 'transport-disruption');
+  assert.equal(lineRecords.length, 2);
+  assert.deepEqual(lineRecords.map((record) => record.incidentDraft.geometry), [
+    { type: 'Point', coordinates: [-0.059406, 51.519587] },
+    { type: 'Point', coordinates: [-0.17609, 51.516031] },
+  ]);
+  assert.deepEqual(lineRecords.map((record) => record.incidentDraft.locationLabel), [
+    'Whitechapel Rail Station',
+    'London Paddington Rail Station',
+  ]);
+  for (const line of lineRecords) {
+    assert.equal(line.incidentDraft.severity, 4);
+    assert.equal(line.incidentDraft.locationPrecision, 'exact-area');
+    assert.match(line.incidentDraft.externalId, /^line_[a-f0-9]{24}_stop_[a-f0-9]{12}$/);
+    assert.equal(line.observationInput.sourceUrl, 'https://tfl.gov.uk/tube-dlr-overground/status/');
+  }
 });
 
 test('sends the key only to the official API hostname and produces key-free evidence', async () => {
@@ -80,6 +89,33 @@ test('sends the key only to the official API hostname and produces key-free evid
     assert.equal(url.searchParams.get('app_key'), 'private value / with symbols');
     assert.equal(request.init.redirect, 'manual');
   }
+});
+
+test('keeps line station identifiers stable when TfL updates disruption wording', async () => {
+  const lines = await fixture('tfl-line-disruptions.json');
+  let updated = false;
+  const adapter = createTflAdapter({
+    appKey: 'server-secret-key',
+    now,
+    fetchImpl: async (input) => {
+      if (new URL(input).pathname === '/Road/all/Disruption') return jsonResponse([]);
+      const payload = structuredClone(lines);
+      if (updated) {
+        payload[0].description = 'Updated wording with the same affected line and stations.';
+        payload[0].lastUpdate = '2026-09-22T09:55:00Z';
+      }
+      return jsonResponse(payload);
+    },
+  });
+  const first = await adapter.fetchChanges({ runId: 'run-tfl-before-update' });
+  updated = true;
+  const second = await adapter.fetchChanges({ runId: 'run-tfl-after-update' });
+
+  assert.deepEqual(
+    second.records.map((record) => record.incidentDraft.externalId),
+    first.records.map((record) => record.incidentDraft.externalId),
+  );
+  assert.notEqual(second.records[0].observationInput.sourceUpdatedAt, first.records[0].observationInput.sourceUpdatedAt);
 });
 
 test('rejects redirects away from api.tfl.gov.uk without forwarding the key', async () => {

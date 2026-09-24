@@ -18,7 +18,7 @@ It combines postcode lookup, UK Police crime feeds, local boundaries, monthly tr
 - Saved analyses and reusable search presets
 - Conservative, explainable scoring with a deliberately exceptional 50+ band
 - Live Radar with a current-position incident map, named official source links, 60-second active refresh, local alert history, reduced-alert controls, muted postcodes, and a lighter keep-open web mode
-- Route Guard route hotzone scans with a mock provider ready to swap to Google later
+- Route Guard route hotzone scans with free OpenStreetMap-backed routing and a safe mock fallback
 - Live API mode or imported monthly police CSV snapshots
 - Persistent JSON or SQLite backend state
 - Rate limiting, retries, request deduplication, caching, and stale-data fallback
@@ -59,7 +59,7 @@ Live Radar notes:
 
 - Web uses a free keep-open Journey Radar flow, works without Supabase, and does not promise background monitoring after the page closes or reloads.
 - After a successful location scan, Live Radar requests current named-source incidents inside a bounded 10 km view. While monitoring is active it refreshes that layer every 60 seconds and keeps the last successful map visible through transient network failures.
-- The first connected live source is the Environment Agency warning feed for England. A clear map means no active incident was returned by the connected sources in that view; it does not prove that no hazard exists or imply UK-wide coverage.
+- The always-connected source is the Environment Agency warning feed for England. Add a free backend-only TfL key to connect current London road and transport disruptions; without it, London is honestly shown as `not-configured`. A clear map means no active incident was returned by connected sources in that view, not that an area is guaranteed safe or that coverage is UK-wide.
 - Native background Live Radar requires a development build or standalone app because Expo Go does not expose the full background-location path needed here.
 - Native background wakes are processed from local device state even when the Live Radar screen is not mounted; turning Live Radar off prevents further scans.
 - The public explorer still works when Supabase or Stripe are not configured.

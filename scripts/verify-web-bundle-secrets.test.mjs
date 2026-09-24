@@ -30,6 +30,23 @@ test('reports backend secrets without returning their values', async (t) => {
   assert.equal(JSON.stringify(leaks).includes(secret), false);
 });
 
+test('reports a bundled TfL provider key without returning its value', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'riskradar-tfl-secret-bundle-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const secret = 'opaque-tfl-subscription-key-123456';
+  await writeFile(path.join(directory, 'index.js'), `const leaked="${secret}";`);
+
+  const leaks = await findWebBundleSecretLeaks(directory, {
+    TFL_APP_KEY: secret,
+  });
+
+  assert.deepEqual(leaks, [{
+    file: 'index.js',
+    source: 'TFL_APP_KEY',
+  }]);
+  assert.equal(JSON.stringify(leaks).includes(secret), false);
+});
+
 test('detects secret-shaped values even when the backend environment is unavailable', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'riskradar-shaped-bundle-'));
   t.after(() => rm(directory, { recursive: true, force: true }));

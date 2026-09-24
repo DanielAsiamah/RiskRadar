@@ -86,24 +86,20 @@ function expiryFor(value, now, fallbackMs = 30 * 60 * 1000) {
   return new Date(now.getTime() + fallbackMs).toISOString();
 }
 
-function centroidForCoordinates(coordinates) {
-  return {
-    latitude: coordinates.reduce((sum, coordinate) => sum + coordinate[1], 0) / coordinates.length,
-    longitude: coordinates.reduce((sum, coordinate) => sum + coordinate[0], 0) / coordinates.length,
-  };
-}
-
 function stableLineId(disruption) {
   const routeNames = (disruption.affectedRoutes ?? []).map((route) => cleanText(route?.name, 100)).filter(Boolean).sort();
-  const stopIds = (disruption.affectedStops ?? []).map((stop) => cleanText(stop?.naptanId, 80)).filter(Boolean).sort();
   const identity = JSON.stringify({
     category: cleanText(disruption.category, 40),
     created: isoOrNull(disruption.created),
-    description: cleanText(disruption.description, 600),
     routeNames,
-    stopIds,
+    type: cleanText(disruption.type, 80),
   });
   return `line_${createHash('sha256').update(identity).digest('hex').slice(0, 24)}`;
+}
+
+function stableStopSuffix(stop, coordinates, name) {
+  const identity = cleanText(stop?.naptanId, 80) || JSON.stringify({ coordinates, name });
+  return createHash('sha256').update(identity).digest('hex').slice(0, 12);
 }
 
 function prepareRoad(disruption, runId, now) {
@@ -140,46 +136,47 @@ function prepareLine(disruption, runId, now) {
   if (!['RealTime', 'PlannedWork', 'Event', 'Crowding', 'StatusAlert'].includes(disruption.category)) {
     throw new TypeError('TfL line disruption is not an actionable current disruption');
   }
-  const coordinates = [];
-  const stopNames = [];
+  const mappedStops = [];
   for (const stop of disruption.affectedStops ?? []) {
     const latitude = Number(stop?.lat);
     const longitude = Number(stop?.lon);
     if (!Number.isFinite(latitude) || !Number.isFinite(longitude)
       || latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) continue;
-    coordinates.push([longitude, latitude]);
     const name = cleanText(stop?.commonName, 100);
-    if (name) stopNames.push(name);
+    if (!name) continue;
+    const coordinates = [longitude, latitude];
+    mappedStops.push({ stop, coordinates, name });
   }
-  if (coordinates.length === 0) throw new TypeError('TfL line disruption has no mappable affected stops');
+  if (mappedStops.length === 0) throw new TypeError('TfL line disruption has no mappable affected stops');
   const sourcePublishedAt = isoOrNull(disruption.created);
   const sourceUpdatedAt = isoOrNull(disruption.lastUpdate ?? disruption.created);
   if (!sourcePublishedAt || !sourceUpdatedAt) throw new TypeError('TfL line disruption is missing source timestamps');
-  const externalId = stableLineId(disruption);
-  const geometry = coordinates.length === 1
-    ? { type: 'Point', coordinates: coordinates[0] }
-    : { type: 'LineString', coordinates };
+  const disruptionId = stableLineId(disruption);
   const routeName = cleanText(disruption.affectedRoutes?.[0]?.name, 100);
   const title = cleanText(disruption.summary || `${routeName || 'TfL'} disruption`, 160);
   const summary = cleanText([disruption.description, disruption.additionalInfo].filter(Boolean).join(' '), 600);
   if (!title || !summary) throw new TypeError('TfL line disruption is missing public text');
-  const locationLabel = stopNames.length > 1
-    ? `${stopNames[0]} to ${stopNames.at(-1)}`
-    : stopNames[0] ?? routeName;
-  return {
-    observationInput: {
-      provider: 'transport-for-london', providerTier: 1, externalId, sourceUrl: LINE_STATUS_URL,
-      sourcePublishedAt, sourceUpdatedAt, rawPayload: disruption, ingestionRunId: runId,
-      validationState: 'valid', validationErrors: [],
-    },
-    incidentDraft: {
-      provider: 'transport-for-london', externalId, category: 'transport-disruption',
-      subcategory: cleanText(disruption.closureText || disruption.categoryDescription, 100) || null,
-      title, summary, status: 'active', severity: lineSeverity(disruption), geometry,
-      centroid: centroidForCoordinates(coordinates), locationLabel, locationPrecision: 'road-segment',
-      affectedRadiusMetres: 600, sourceOccurredAt: sourcePublishedAt, expiresAt: expiryFor(null, now),
-    },
-  };
+  const recordsByExternalId = new Map();
+  for (const mappedStop of mappedStops) {
+    const externalId = `${disruptionId}_stop_${stableStopSuffix(mappedStop.stop, mappedStop.coordinates, mappedStop.name)}`;
+    const geometry = { type: 'Point', coordinates: mappedStop.coordinates };
+    recordsByExternalId.set(externalId, {
+      observationInput: {
+        provider: 'transport-for-london', providerTier: 1, externalId, sourceUrl: LINE_STATUS_URL,
+        sourcePublishedAt, sourceUpdatedAt, rawPayload: disruption, ingestionRunId: runId,
+        validationState: 'valid', validationErrors: [],
+      },
+      incidentDraft: {
+        provider: 'transport-for-london', externalId, category: 'transport-disruption',
+        subcategory: cleanText(disruption.closureText || disruption.categoryDescription, 100) || null,
+        title, summary, status: 'active', severity: lineSeverity(disruption), geometry,
+        centroid: { latitude: mappedStop.coordinates[1], longitude: mappedStop.coordinates[0] },
+        locationLabel: mappedStop.name, locationPrecision: 'exact-area', affectedRadiusMetres: 600,
+        sourceOccurredAt: sourcePublishedAt, expiresAt: expiryFor(null, now),
+      },
+    });
+  }
+  return [...recordsByExternalId.values()];
 }
 
 export function createTflAdapter(options = {}) {
@@ -258,11 +255,14 @@ export function createTflAdapter(options = {}) {
         ...lineResult.payload.map((payload) => ({ kind: 'line', payload })),
       ];
       const prepared = [];
+      let accepted = 0;
       for (const candidate of candidates) {
         try {
-          prepared.push(candidate.kind === 'road'
-            ? prepareRoad(candidate.payload, runId, currentTime)
-            : prepareLine(candidate.payload, runId, currentTime));
+          const records = candidate.kind === 'road'
+            ? [prepareRoad(candidate.payload, runId, currentTime)]
+            : prepareLine(candidate.payload, runId, currentTime);
+          prepared.push(...records);
+          accepted += 1;
         } catch {
           // Provider snapshots can contain incomplete records; retain other valid incidents.
         }
@@ -277,7 +277,7 @@ export function createTflAdapter(options = {}) {
         cursor: { sourceWatermark }, sourceWatermark,
         httpStatus: roadResult.status === 200 && lineResult.status === 200 ? 200 : null,
         latencyMs: Math.max(0, now().getTime() - startedAt),
-        counts: { fetched: candidates.length, accepted: prepared.length, rejected: candidates.length - prepared.length },
+        counts: { fetched: candidates.length, accepted, rejected: candidates.length - accepted },
       };
     },
   });
