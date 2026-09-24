@@ -122,6 +122,17 @@ function toMarker(value: unknown): LiveIncidentMapMarker | null {
   };
 }
 
+export function buildLiveIncidentMarkers(value: unknown): LiveIncidentMapMarker[] {
+  if (!Array.isArray(value)) return [];
+  const markers = new Map<string, LiveIncidentMapMarker>();
+  for (const candidate of value) {
+    const marker = toMarker(candidate);
+    if (marker?.id && !markers.has(marker.id)) markers.set(marker.id, marker);
+  }
+  return [...markers.values()].sort((left, right) => right.severity - left.severity
+    || Date.parse(right.sourceUpdatedAt ?? '') - Date.parse(left.sourceUpdatedAt ?? ''));
+}
+
 function limitedDetail(sources: LiveIncidentSourceState[]) {
   const unavailable = sources.find((source) => ['stale', 'failed', 'disabled', 'not-configured'].includes(source.state));
   return typeof unavailable?.disclosure === 'string' && unavailable.disclosure.trim()
@@ -133,11 +144,7 @@ export function buildLiveIncidentMapModel(value: LiveIncidentListResponse | unkn
   const response = value && typeof value === 'object' ? value as Partial<LiveIncidentListResponse> : {};
   const generatedAt = validTimestamp(response.generatedAt);
   const sources = Array.isArray(response.sources) ? response.sources : [];
-  const markers = (Array.isArray(response.incidents) ? response.incidents : [])
-    .map(toMarker)
-    .filter((marker): marker is LiveIncidentMapMarker => marker !== null)
-    .sort((left, right) => right.severity - left.severity
-      || Date.parse(right.sourceUpdatedAt ?? '') - Date.parse(left.sourceUpdatedAt ?? ''));
+  const markers = buildLiveIncidentMarkers(response.incidents);
   const cards: LiveIncidentCard[] = markers.map((marker) => ({
     ...marker,
     updatedAtLabel: relativeTime(marker.sourceUpdatedAt, generatedAt),

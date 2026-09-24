@@ -1,8 +1,10 @@
 import type { RouteGuardHotzone, RouteGuardRiskLevel, RouteGuardRiskSample } from '../api/route-guard.ts';
+import { buildLiveIncidentMarkers } from '../live-incidents/presentation.ts';
 
 export interface RouteLiveRefresh {
   mode: 'route';
   samples: Array<{ id: string; latitude: number; longitude: number }>;
+  incidents: unknown[];
   live: {
     calculatedAt: string;
     samples: Array<{
@@ -51,6 +53,7 @@ export function startRouteRiskPolling(input: {
 
 export function applyRouteLiveRefresh(original: RouteGuardRiskSample[], response: RouteLiveRefresh) {
   if (response?.mode !== 'route' || !Array.isArray(response.samples) || !Array.isArray(response.live?.samples)
+    || !Array.isArray(response.incidents)
     || !original.length || response.samples.length !== original.length || response.live.samples.length !== original.length
     || !Number.isFinite(Date.parse(response.live.calculatedAt))) throw new Error('Incomplete live route update.');
   const sampledRiskScores = original.map((sample, index): RouteGuardRiskSample => {
@@ -78,5 +81,11 @@ export function applyRouteLiveRefresh(original: RouteGuardRiskSample[], response
   const average = sampledRiskScores.reduce((sum, sample) => sum + sample.score, 0) / sampledRiskScores.length;
   const maximum = Math.max(...sampledRiskScores.map((sample) => sample.score));
   const overallRiskScore = Math.round(average * 0.7 + maximum * 0.3);
-  return { sampledRiskScores, hotzoneSections, overallRiskScore, overallRiskLevel: level(overallRiskScore) };
+  return {
+    sampledRiskScores,
+    hotzoneSections,
+    overallRiskScore,
+    overallRiskLevel: level(overallRiskScore),
+    liveIncidentMarkers: buildLiveIncidentMarkers(response.incidents),
+  };
 }

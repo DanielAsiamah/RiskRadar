@@ -70,7 +70,7 @@ test('a stop during risk refresh prevents late alerts and state writes', async (
     ...h.dependencies,
     refresh: async () => {
       h.replace(null);
-      return { mode: 'route' as const, samples: [{ id: '0', latitude: 51.5, longitude: -0.092 }], live: {
+      return { mode: 'route' as const, samples: [{ id: '0', latitude: 51.5, longitude: -0.092 }], incidents: [], live: {
         calculatedAt: new Date(now).toISOString(), samples: [{ liveScore: 85, contextScore: 20, contributors: [] }],
       } };
     },
@@ -101,7 +101,7 @@ test('a fresh incident can raise background route risk and trigger an approach a
   const h = harness(initial);
   const result = await processRouteBackgroundUpdate([location], {
     ...h.dependencies,
-    refresh: async () => ({ mode: 'route', samples: [{ id: '0', latitude: 51.5, longitude: -0.092 }], live: {
+    refresh: async () => ({ mode: 'route', samples: [{ id: '0', latitude: 51.5, longitude: -0.092 }], incidents: [], live: {
       calculatedAt: new Date(now).toISOString(), samples: [{ liveScore: 85, contextScore: 20, contributors: [{ reason: 'Road closure nearby' }] }],
     } }),
   });

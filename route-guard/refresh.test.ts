@@ -9,6 +9,14 @@ const samples: RouteGuardRiskSample[] = [
 const response: RouteLiveRefresh = {
   mode: 'route', samples: [{ id: '3', latitude: 51, longitude: -1 }],
   live: { calculatedAt: '2026-09-08T12:00:00Z', samples: [{ liveScore: 82, contextScore: 20, contributors: [{ incidentId: 'flood-1', reason: 'Flood warning nearby' }] }] },
+  incidents: [{
+    id: 'flood-1', provider: 'environment-agency', category: 'flood', title: 'Flood warning',
+    summary: 'Flooding affects the route.', severity: 4, verificationLevel: 'Official',
+    centroid: { latitude: 51, longitude: -1 }, affectedRadiusMetres: 500,
+    locationLabel: 'High Street', locationPrecision: 'road-segment',
+    sourceUrl: 'https://environment.data.gov.uk/flood-monitoring/id/floods/example',
+    sourceUpdatedAt: '2026-09-08T11:55:00Z',
+  }],
 };
 test('refresh replaces risk and hotzones while preserving road context', () => {
   const updated = applyRouteLiveRefresh(samples, response);
@@ -18,6 +26,8 @@ test('refresh replaces risk and hotzones while preserving road context', () => {
   assert.match(updated.sampledRiskScores[0].basis, /Flood warning nearby/);
   assert.equal(updated.hotzoneSections.length, 1);
   assert.equal(updated.overallRiskScore, 82);
+  assert.deepEqual(updated.liveIncidentMarkers.map((marker) => marker.id), ['flood-1']);
+  assert.equal(updated.liveIncidentMarkers[0].color, '#dc2626');
   assert.equal(samples[0].score, 20);
 });
 test('cleared incidents reduce scores without compounding previous live contributions', () => {

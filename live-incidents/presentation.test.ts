@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildLiveIncidentMapModel } from './presentation.ts';
+import { buildLiveIncidentMapModel, buildLiveIncidentMarkers } from './presentation.ts';
 
 const generatedAt = '2026-09-20T08:30:00.000Z';
 
@@ -110,6 +110,19 @@ test('excludes malformed coordinates and unsafe source links from map output', (
   assert.deepEqual(model.markers.map((marker) => marker.id), ['unsafe-link']);
   assert.equal(model.markers[0].sourceUrl, null);
   assert.deepEqual(model.cards.map((card) => card.id), ['unsafe-link']);
+});
+
+test('builds one safe route marker per valid incident id', () => {
+  const markers = buildLiveIncidentMarkers([
+    incident(),
+    incident(),
+    incident({ id: 'unsafe-link', sourceUrl: 'javascript:alert(1)' }),
+    incident({ id: 'bad-coordinate', centroid: { latitude: 200, longitude: -0.13 } }),
+  ]);
+
+  assert.deepEqual(markers.map((marker) => marker.id), ['incident-flood-1', 'unsafe-link']);
+  assert.equal(markers[0].color, '#dc2626');
+  assert.equal(markers[1].sourceUrl, null);
 });
 
 test('distinguishes a healthy empty result from unavailable source coverage', () => {
