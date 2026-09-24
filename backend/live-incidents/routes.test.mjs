@@ -30,10 +30,22 @@ test('route refresh queries every sample and deduplicates overlapping incident r
     affectedRadiusMetres: 500, publicationState: 'published', verificationLevel: 'Official',
     status: 'active', lastObservedAt: '2026-08-27T18:00:00.000Z',
     geometry: { type: 'Point', coordinates: [-1, 53] },
+    centroid: { latitude: 53, longitude: -1 }, title: 'Flooding at destination',
+    summary: 'Official flood warning affects the destination.', provider: 'environment-agency',
+    locationLabel: 'Destination road', locationPrecision: 'road-segment',
+    sourceUrl: 'https://environment.data.gov.uk/flood-monitoring/id/floods/example',
+    rawPayload: { mustNotLeak: true }, evidence: [{ private: true }],
+  };
+  const outsideImpactArea = {
+    ...incident,
+    id: 'nearby-but-not-contributing',
+    title: 'Distant flood warning',
+    geometry: { type: 'Point', coordinates: [-1, 53.1] },
+    centroid: { latitude: 53.1, longitude: -1 },
   };
   deps.store.listPublicIncidents = async ({ point }) => {
     queried.push(point.latitude);
-    return point.latitude === 53 ? [incident, incident] : [];
+    return point.latitude === 53 ? [incident, incident, outsideImpactArea] : [];
   };
   const routes = createLiveIncidentRouteHandler(deps);
   const response = createResponse();
@@ -46,6 +58,10 @@ test('route refresh queries every sample and deduplicates overlapping incident r
   const payload = JSON.parse(response.body);
   assert.ok(payload.live.samples[1].liveScore > 36);
   assert.equal(payload.live.samples[1].contributors.length, 1);
+  assert.deepEqual(payload.incidents.map((item) => item.id), ['destination-flood']);
+  assert.equal(payload.incidents[0].title, 'Flooding at destination');
+  assert.equal('rawPayload' in payload.incidents[0], false);
+  assert.equal('evidence' in payload.incidents[0], false);
 });
 
 function dependencies(overrides = {}) {

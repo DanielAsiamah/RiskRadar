@@ -168,7 +168,11 @@ export function createLiveIncidentRouteHandler({
             const nearbyGroups = await Promise.all(samples.map((sample) => incidentsNear(sample.latitude, sample.longitude, calculatedAt)));
             const incidents = [...new Map(nearbyGroups.flat().map((incident) => [incident.id, incident])).values()];
             const live = calculateRouteLiveRisk({ samples, incidents, calculatedAt });
-            sendJson(response, 200, { mode: 'route', samples, live, disclaimer: DISCLAIMER });
+            const contributingIds = new Set(live.contributingIncidentIds);
+            const contributingIncidents = incidents
+              .filter((incident) => contributingIds.has(incident.id))
+              .map((incident) => toPublicIncident(incident));
+            sendJson(response, 200, { mode: 'route', samples, live, incidents: contributingIncidents, disclaimer: DISCLAIMER });
             return true;
           }
           throw new TypeError('Provide exactly one postcode, point, or routeSamples request.');
