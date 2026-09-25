@@ -44,6 +44,7 @@ import { summarizeRouteProgress, type RouteGuardProgressSummary } from '../route
 import CrimeMapCanvas from './CrimeMapCanvas';
 import { membershipColors, membershipStyles } from './membershipStyles';
 import type { MapCoordinate, RouteMapRiskSample } from './map-types';
+import type { LiveIncidentMapMarker } from '../live-incidents/types';
 
 interface RouteGuardProps {
   premium: boolean;
@@ -520,6 +521,7 @@ function RouteResult({
 }) {
   const tracking = foregroundTracking || backgroundTracking;
   const [liveResult, setLiveResult] = useState<RouteGuardScan | null>(null);
+  const [liveIncidentMarkers, setLiveIncidentMarkers] = useState<LiveIncidentMapMarker[]>([]);
   const [liveUpdatedAt, setLiveUpdatedAt] = useState<string | null>(null);
   const [liveRefreshError, setLiveRefreshError] = useState<string | null>(null);
   const [followPosition, setFollowPosition] = useState(true);
@@ -531,6 +533,7 @@ function RouteResult({
 
   useEffect(() => {
     setLiveResult(null);
+    setLiveIncidentMarkers([]);
     setLiveUpdatedAt(null);
     setLiveRefreshError(null);
   }, [scannedResult]);
@@ -542,6 +545,7 @@ function RouteResult({
       onValue: (response) => {
         const updated = applyRouteLiveRefresh(scannedResult.sampledRiskScores, response);
         setLiveResult({ ...scannedResult, ...updated });
+        setLiveIncidentMarkers(updated.liveIncidentMarkers);
         setLiveUpdatedAt(response.live.calculatedAt);
         setLiveRefreshError(null);
       },
@@ -596,6 +600,7 @@ function RouteResult({
           <CrimeMapCanvas
             center={mapCenter}
             markers={[]}
+            liveIncidentMarkers={liveIncidentMarkers}
             selectedPoint={currentLocation ?? routePoints[0]}
             selectedPointLabel={currentLocation ? 'Your current location' : 'Route start'}
             followPoint={tracking && followPosition ? currentLocation : null}

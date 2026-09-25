@@ -7,6 +7,25 @@ export function routeGuardMapContractFixture() {
     <CrimeMapCanvas
       center={{ latitude: 51.5, longitude: -0.08 }}
       markers={[]}
+      liveIncidentMarkers={[{
+        id: 'route-incident-1',
+        latitude: 51.49,
+        longitude: -0.06,
+        title: 'Road closure',
+        summary: 'Official disruption affecting this route.',
+        category: 'road-closure',
+        categoryLabel: 'Road closure',
+        severity: 4,
+        color: '#dc2626',
+        softColor: '#fee2e2',
+        affectedRadiusMetres: 350,
+        providerLabel: 'Transport for London',
+        verificationLabel: 'Official',
+        locationLabel: 'A route road',
+        locationPrecisionLabel: 'Approximate road segment',
+        sourceUpdatedAt: '2026-09-24T12:00:00.000Z',
+        sourceUrl: 'https://tfl.gov.uk/traffic/status/',
+      }]}
       selectedPoint={{ latitude: 51.5, longitude: -0.08 }}
       areaPoints={[]}
       boundaryPoints={[]}
