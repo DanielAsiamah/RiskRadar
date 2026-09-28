@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   Platform,
   Pressable,
   ScrollView,
@@ -521,7 +522,9 @@ function RouteResult({
 }) {
   const tracking = foregroundTracking || backgroundTracking;
   const [liveResult, setLiveResult] = useState<RouteGuardScan | null>(null);
-  const [liveIncidentMarkers, setLiveIncidentMarkers] = useState<LiveIncidentMapMarker[]>([]);
+  const [liveIncidentMarkers, setLiveIncidentMarkers] = useState<LiveIncidentMapMarker[]>(
+    () => scannedResult.liveIncidentMarkers ?? [],
+  );
   const [liveUpdatedAt, setLiveUpdatedAt] = useState<string | null>(null);
   const [liveRefreshError, setLiveRefreshError] = useState<string | null>(null);
   const [followPosition, setFollowPosition] = useState(true);
@@ -533,7 +536,7 @@ function RouteResult({
 
   useEffect(() => {
     setLiveResult(null);
-    setLiveIncidentMarkers([]);
+    setLiveIncidentMarkers(scannedResult.liveIncidentMarkers ?? []);
     setLiveUpdatedAt(null);
     setLiveRefreshError(null);
   }, [scannedResult]);
@@ -660,6 +663,19 @@ function RouteResult({
           {result.provider === 'free-osm' ? 'Free OSM/OSRM route scan' : 'Generated fallback route scan'}
         </Text>
         {result.routeProvider ? <Text style={tw`text-[11px] text-slate-500 leading-4 mt-1`}>{result.routeProvider.modeDisclosure}</Text> : null}
+        {result.provider === 'free-osm' ? (
+          <View style={tw`flex-row flex-wrap gap-3 mt-2`}>
+            {[
+              { label: 'OpenStreetMap contributors', url: 'https://www.openstreetmap.org/copyright' },
+              { label: 'Routing: OSRM / FOSSGIS', url: 'https://routing.openstreetmap.de/about.html' },
+              { label: 'Fix the map', url: 'https://www.openstreetmap.org/fixthemap' },
+            ].map((link) => (
+              <Pressable key={link.url} accessibilityRole="link" onPress={() => void Linking.openURL(link.url).catch(() => undefined)}>
+                <Text style={tw`text-[11px] text-indigo-700 underline`}>{link.label}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ) : null}
         {result.fallbackReason ? <Text selectable style={tw`text-[11px] text-amber-700 leading-4 mt-1`}>Fallback used: {result.fallbackReason}</Text> : null}
       </View>
 

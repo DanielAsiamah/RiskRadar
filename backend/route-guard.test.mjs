@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createFreeRouteGuardScan, createMockRouteGuardScan, RouteGuardError } from './route-guard.mjs';
+import { createFreeRouteGuardScan, createMockRouteGuardScan, fetchFreeOsmRoute, RouteGuardError } from './route-guard.mjs';
 
 const request = {
   start: 'SE10 8EP',
@@ -10,6 +10,29 @@ const request = {
   entitlement: 'pro',
   routeScansUsed: 12,
 };
+
+test('sends walking and driving to their distinct routing services', async (t) => {
+  const requested = [];
+  t.mock.method(globalThis, 'fetch', async (input) => {
+    requested.push(new URL(input));
+    return new Response(JSON.stringify({ routes: [{
+      distance: 2309, duration: 1848,
+      geometry: { coordinates: [[-0.1147, 51.5033], [-0.0865, 51.5053]] },
+    }] }), { status: 200 });
+  });
+  for (const routingProfile of ['foot', 'driving']) {
+    const result = await fetchFreeOsmRoute({
+      startPoint: { latitude: 51.5033, longitude: -0.1147 },
+      destinationPoint: { latitude: 51.5053, longitude: -0.0865 },
+      routingProfile,
+    });
+    assert.equal(result.routingMode, routingProfile);
+    assert.equal(result.routePoints.length, 2);
+  }
+  assert.equal(requested[0].origin, 'https://routing.openstreetmap.de');
+  assert.equal(requested[0].pathname, '/routed-foot/route/v1/foot/-0.1147,51.5033;-0.0865,51.5053');
+  assert.equal(requested[1].pathname, '/routed-car/route/v1/driving/-0.1147,51.5033;-0.0865,51.5053');
+});
 
 test('builds a deterministic mock route scan without a Google request', () => {
   const first = createMockRouteGuardScan(request);

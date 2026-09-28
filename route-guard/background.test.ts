@@ -101,11 +101,18 @@ test('a fresh incident can raise background route risk and trigger an approach a
   const h = harness(initial);
   const result = await processRouteBackgroundUpdate([location], {
     ...h.dependencies,
-    refresh: async () => ({ mode: 'route', samples: [{ id: '0', latitude: 51.5, longitude: -0.092 }], incidents: [], live: {
-      calculatedAt: new Date(now).toISOString(), samples: [{ liveScore: 85, contextScore: 20, contributors: [{ reason: 'Road closure nearby' }] }],
+    refresh: async () => ({ mode: 'route', samples: [{ id: '0', latitude: 51.5, longitude: -0.092 }], incidents: [{
+      id: 'closure-1', provider: 'transport-for-london', category: 'road-closure', title: 'Road closure',
+      summary: 'Official closure affecting the route.', severity: 4, verificationLevel: 'Official',
+      centroid: { latitude: 51.5, longitude: -0.092 }, affectedRadiusMetres: 300,
+      locationLabel: 'High Street', locationPrecision: 'road-segment',
+      sourceUrl: 'https://tfl.gov.uk/traffic/status/', sourceUpdatedAt: new Date(now).toISOString(),
+    }], live: {
+      calculatedAt: new Date(now).toISOString(), samples: [{ liveScore: 85, contextScore: 20, contributors: [{ incidentId: 'closure-1', reason: 'Road closure nearby' }] }],
     } }),
   });
   assert.equal(result, 'alerted');
   assert.equal(h.read()?.route.sampledRiskScores[0].score, 85);
+  assert.deepEqual(h.read()?.route.liveIncidentMarkers?.map((marker) => marker.id), ['closure-1']);
   assert.match(h.read()?.lastAlert?.body ?? '', /Road closure/);
 });

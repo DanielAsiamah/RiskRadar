@@ -81,11 +81,18 @@ export function applyRouteLiveRefresh(original: RouteGuardRiskSample[], response
   const average = sampledRiskScores.reduce((sum, sample) => sum + sample.score, 0) / sampledRiskScores.length;
   const maximum = Math.max(...sampledRiskScores.map((sample) => sample.score));
   const overallRiskScore = Math.round(average * 0.7 + maximum * 0.3);
+  const contributingIncidentIds = new Set(response.live.samples
+    .flatMap((sample) => sample.contributors)
+    .map((contributor) => contributor.incidentId)
+    .filter((incidentId): incidentId is string => typeof incidentId === 'string' && incidentId.length > 0));
   return {
     sampledRiskScores,
     hotzoneSections,
     overallRiskScore,
     overallRiskLevel: level(overallRiskScore),
-    liveIncidentMarkers: buildLiveIncidentMarkers(response.incidents),
+    // Keep the highest-severity map markers within the background storage limit.
+    // All contributors above still participate in scoring and approach warnings.
+    liveIncidentMarkers: buildLiveIncidentMarkers(response.incidents)
+      .filter((marker) => contributingIncidentIds.has(marker.id)).slice(0, 100),
   };
 }

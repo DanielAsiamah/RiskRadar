@@ -1,5 +1,6 @@
 import { apiRequest } from './client';
 import type { RouteLiveRefresh } from '../route-guard/refresh';
+import type { LiveIncidentMapMarker } from '../live-incidents/types';
 
 export type RouteGuardTravelMode = 'walking' | 'driving' | 'transit';
 export type RouteGuardRiskLevel = 'low' | 'amber' | 'red';
@@ -63,6 +64,7 @@ export interface RouteGuardScan {
   hotzoneSections: RouteGuardHotzone[];
   overallRiskScore: number;
   overallRiskLevel: RouteGuardRiskLevel;
+  liveIncidentMarkers?: LiveIncidentMapMarker[];
   usage: {
     entitlement: 'pro';
     includedMonthlyScans: 100;

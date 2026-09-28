@@ -1,9 +1,15 @@
+import { createRouteProviderQueue } from './route-provider-queue.mjs';
+
 const PRO_MONTHLY_ROUTE_SCANS = 100;
 const SUPPORTED_TRAVEL_MODES = new Set(['walking', 'driving', 'transit']);
 const RISK_DISCLAIMER = 'Route Guard provides generated planning estimates for area intelligence, not guaranteed safety, live routing, or incident avoidance.';
 const FREE_ROUTE_DISCLAIMER = 'Route Guard provides current area intelligence from free public map sources and RiskRadar data. It is not an emergency service and does not guarantee that a place or route is safe.';
 const NOMINATIM_ENDPOINT = 'https://nominatim.openstreetmap.org/search';
-const OSRM_ENDPOINT = 'https://router.project-osrm.org/route/v1';
+const OSRM_ENDPOINTS = {
+  foot: 'https://routing.openstreetmap.de/routed-foot/route/v1',
+  driving: 'https://routing.openstreetmap.de/routed-car/route/v1',
+};
+const routeProviderQueue = createRouteProviderQueue();
 const ROUTE_GUARD_USER_AGENT = process.env.ROUTE_GUARD_USER_AGENT
   || 'RiskRadar/1.0 route-guard (contact: supr3ltd@gmail.com)';
 
@@ -278,12 +284,17 @@ export async function fetchFreeOsmRoute({ startPoint, destinationPoint, routingP
   const destination = normalizePoint(destinationPoint, 'destinationPoint');
   const profile = ['driving', 'foot'].includes(routingProfile) ? routingProfile : 'foot';
   const coordinates = `${start.longitude},${start.latitude};${destination.longitude},${destination.latitude}`;
-  const url = new URL(`${OSRM_ENDPOINT}/${profile}/${coordinates}`);
+  const url = new URL(`${OSRM_ENDPOINTS[profile]}/${profile}/${coordinates}`);
   url.searchParams.set('overview', 'full');
   url.searchParams.set('geometries', 'geojson');
   url.searchParams.set('steps', 'false');
   url.searchParams.set('alternatives', 'false');
-  const payload = await fetchJson(url);
+  const payload = await routeProviderQueue(() => fetchJson(url)).catch((error) => {
+    if (error?.code === 'ROUTE_PROVIDER_BUSY') {
+      throw new RouteGuardError(error.message, 503, error.code);
+    }
+    throw error;
+  });
   const route = payload?.routes?.[0];
   const coordinatesList = route?.geometry?.coordinates;
   if (!Array.isArray(coordinatesList) || coordinatesList.length < 2) {

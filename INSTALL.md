@@ -82,7 +82,9 @@ curl -X POST http://127.0.0.1:3001/api/route-guard \
   --data '{"start":"SE10 8EP","destination":"London Bridge","travelMode":"walking","entitlement":"pro","routeScansUsed":0}'
 ```
 
-The response should include `provider: "free-osm"` or a safe mock fallback, `googleRequestMade: false`, route points, sampled risk scores, and anonymised context labels such as Police.uk-style "On or near..." areas when available.
+The response should include `provider: "free-osm"` or a clearly labelled mock fallback, `googleRequestMade: false`, route points, sampled risk scores, and anonymised context labels such as Police.uk-style "On or near..." areas when available. Mock routes must not be used for real journeys.
+
+Walking uses the dedicated FOSSGIS/OSRM pedestrian service, while driving uses its car service. The backend serializes routing requests with at least 1.1 seconds between starts and accepts at most three pending routing requests per process. This public service is for light use, not unlimited production capacity. Review the [provider usage policy](https://routing.openstreetmap.de/about.html) before deployment; multiple backend processes need a shared rate limit or a self-hosted routing service. The route-source panel includes attribution and the required map-correction link. Transit remains a disclosed walking-corridor estimate, not a bus or train itinerary.
 
 ### Test Route Guard approach alerts
 
@@ -97,6 +99,8 @@ Approach alerts require a GPS reading no older than 30 seconds with accuracy of 
 Browser banners may be unavailable even after permission is granted, so the latest alert remains visible in the page. This foreground website feature does not promise alerts with the page closed or the phone locked.
 
 During live position tracking, real routes refresh their risk samples immediately and one minute after each completed request using `POST /api/live-risk`. Refreshes do not request another route or consume the route-scan allowance. The map, scores, and hotzones update together, and the page shows the last successful check time. Failed refreshes retain the last reading, pause new approach alerts, and retry automatically. Stopping tracking or replacing a route cancels its pending refresh. Public source coverage and publication delays still apply; this is not a feed of all crimes as they happen.
+
+Successful route refreshes also show the live incidents contributing to the sampled route risk. Select a coloured incident marker for its location, source, verification label, update time, and official source link. Nearby incidents outside their affected radius are excluded from this route overlay. A failed refresh retains the last successful overlay; a new route clears it. Native background route sessions retain validated incident markers when the app resumes.
 
 Route Guard supports foreground iOS and Android location through Expo. Select **Use current location**, allow foreground location permission, scan a route, then start live position. **Enable device alerts** requests local-notification permission; denied permission still allows on-screen alerts. Foreground live position requires keeping Route Guard visible. Pending foreground permission requests and late location callbacks are discarded when a route watcher is stopped or the screen closes.
 

@@ -16,6 +16,12 @@ const response: RouteLiveRefresh = {
     locationLabel: 'High Street', locationPrecision: 'road-segment',
     sourceUrl: 'https://environment.data.gov.uk/flood-monitoring/id/floods/example',
     sourceUpdatedAt: '2026-09-08T11:55:00Z',
+  }, {
+    id: 'not-a-contributor', provider: 'transport-for-london', category: 'road-closure', title: 'Unrelated closure',
+    summary: 'This incident did not affect a sampled route point.', severity: 3, verificationLevel: 'Official',
+    centroid: { latitude: 52, longitude: -1 }, affectedRadiusMetres: 100,
+    locationLabel: 'Another road', locationPrecision: 'road-segment',
+    sourceUrl: 'https://tfl.gov.uk/traffic/status/', sourceUpdatedAt: '2026-09-08T11:54:00Z',
   }],
 };
 test('refresh replaces risk and hotzones while preserving road context', () => {
@@ -37,6 +43,7 @@ test('cleared incidents reduce scores without compounding previous live contribu
   });
   assert.equal(cooled.overallRiskScore, 20);
   assert.equal(cooled.hotzoneSections.length, 0);
+  assert.deepEqual(cooled.liveIncidentMarkers, []);
   assert.doesNotMatch(cooled.sampledRiskScores[0].basis, /Flood warning/);
 });
 test('rejects incomplete, mismatched and malformed refresh responses', () => {

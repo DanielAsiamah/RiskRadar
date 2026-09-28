@@ -4,6 +4,21 @@ import type { RouteGuardScan } from '../api/route-guard.ts';
 export const ROUTE_BACKGROUND_STORAGE_KEY = 'riskradar-route-background-v1';
 export const ROUTE_BACKGROUND_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 
+function validLiveMarker(marker: any, point: (value: any) => boolean) {
+  if (!point(marker) || typeof marker.id !== 'string' || !marker.id
+    || typeof marker.title !== 'string' || typeof marker.summary !== 'string'
+    || typeof marker.category !== 'string' || typeof marker.categoryLabel !== 'string'
+    || !Number.isInteger(marker.severity) || marker.severity < 1 || marker.severity > 5
+    || !/^#[0-9a-f]{6}$/i.test(marker.color) || !/^#[0-9a-f]{6}$/i.test(marker.softColor)
+    || !Number.isFinite(marker.affectedRadiusMetres) || marker.affectedRadiusMetres < 1 || marker.affectedRadiusMetres > 100_000
+    || typeof marker.providerLabel !== 'string' || typeof marker.verificationLabel !== 'string'
+    || typeof marker.locationLabel !== 'string' || typeof marker.locationPrecisionLabel !== 'string'
+    || (marker.sourceUpdatedAt !== null && (typeof marker.sourceUpdatedAt !== 'string' || !Number.isFinite(Date.parse(marker.sourceUpdatedAt))))) return false;
+  if (marker.sourceUrl === null) return true;
+  if (typeof marker.sourceUrl !== 'string') return false;
+  try { return new URL(marker.sourceUrl).protocol === 'https:'; } catch { return false; }
+}
+
 export function createRouteBackgroundState(route: RouteGuardScan, sessionId: string, now: number): RouteBackgroundState {
   const state = {
     sessionId, enabled: true, expiresAt: now + ROUTE_BACKGROUND_MAX_AGE_MS, route,
@@ -40,6 +55,15 @@ export function parseRouteBackgroundState(raw: string | null): RouteBackgroundSt
     if (route.geocoded !== undefined && (typeof route.geocoded?.start?.label !== 'string' || typeof route.geocoded?.destination?.label !== 'string')) return null;
     if (route.routeProvider !== undefined && typeof route.routeProvider?.modeDisclosure !== 'string') return null;
     if (route.fallbackReason !== undefined && typeof route.fallbackReason !== 'string') return null;
+    if (route.liveIncidentMarkers !== undefined) {
+      if (!Array.isArray(route.liveIncidentMarkers) || route.liveIncidentMarkers.length > 100) return null;
+      const ids = new Set<string>();
+      if (!route.liveIncidentMarkers.every((marker: any) => {
+        if (!validLiveMarker(marker, point) || ids.has(marker.id)) return false;
+        ids.add(marker.id);
+        return true;
+      })) return null;
+    }
     if (value.warning !== null && typeof value.warning !== 'string') return null;
     if (value.lastLocation !== null && (!point(value.lastLocation) || !Number.isFinite(value.lastLocation.timestamp)
       || (value.lastLocation.accuracyMetres !== null && (!Number.isFinite(value.lastLocation.accuracyMetres) || value.lastLocation.accuracyMetres < 0)))) return null;
