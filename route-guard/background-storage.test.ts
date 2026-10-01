@@ -52,6 +52,17 @@ test('a busy live route keeps monitoring after restoring its bounded map overlay
   assert.equal(restored?.route.overallRiskScore, 85);
 });
 
+test('restores unavailable samples without accepting a fabricated numeric unknown score', () => {
+  const unavailable: RouteGuardScan = {
+    ...route, overallRiskScore: null, overallRiskLevel: 'unknown',
+    sampledRiskScores: [{ ...route.sampledRiskScores[0], score: null, riskLevel: 'unknown' }],
+  };
+  const state = createRouteBackgroundState(unavailable, 'unavailable-route', 1000);
+  assert.equal(parseRouteBackgroundState(JSON.stringify(state))?.enabled, true);
+  const inconsistent = { ...state, route: { ...unavailable, overallRiskScore: 0 } };
+  assert.equal(parseRouteBackgroundState(JSON.stringify(inconsistent)), null);
+});
+
 test('rejects missing, corrupt, generated and unbounded route state', () => {
   const state = createRouteBackgroundState(route, 'session-1', 1000);
   for (const value of [

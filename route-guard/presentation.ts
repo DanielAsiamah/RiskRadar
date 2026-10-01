@@ -48,6 +48,14 @@ export function formatRouteGuardAlert(progress: RouteGuardProgressSummary | null
 
   if (progress.nearestSample) {
     const sample = progress.nearestSample;
+    if (sample.riskLevel === 'unknown' || sample.score === null) {
+      return {
+        level: 'unknown', title: 'Route risk unavailable', scoreLabel: null,
+        distanceLabel: formatDistance(sample.distanceMetres),
+        detail: cleanBasis(sample.basis) || progress.message,
+        action: 'Missing data does not mean low risk. Check official local advice.',
+      };
+    }
     return {
       level: sample.riskLevel,
       title: `Tracking ${cleanPlaceLabel(sample.contextLabel)}`,
@@ -68,7 +76,8 @@ export function formatRouteGuardAlert(progress: RouteGuardProgressSummary | null
   };
 }
 
-function scoreLabel(score: number, riskLevel: RouteProgressRiskLevel) {
+function scoreLabel(score: number | null, riskLevel: RouteProgressRiskLevel) {
+  if (score === null || riskLevel === 'unknown') return null;
   return `${Math.round(score)}/100 ${riskLevel.toUpperCase()}`;
 }
 

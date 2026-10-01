@@ -3,7 +3,7 @@ import type { RouteLiveRefresh } from '../route-guard/refresh';
 import type { LiveIncidentMapMarker } from '../live-incidents/types';
 
 export type RouteGuardTravelMode = 'walking' | 'driving' | 'transit';
-export type RouteGuardRiskLevel = 'low' | 'amber' | 'red';
+export type RouteGuardRiskLevel = 'low' | 'amber' | 'red' | 'unknown';
 
 export interface RouteGuardScanInput {
   start: string;
@@ -25,7 +25,7 @@ export interface RouteGuardRiskSample {
   pointIndex: number;
   latitude?: number;
   longitude?: number;
-  score: number;
+  score: number | null;
   riskLevel: RouteGuardRiskLevel;
   basis: string;
   contextLabel?: string;
@@ -62,7 +62,7 @@ export interface RouteGuardScan {
   durationEstimate: { minutes: number };
   sampledRiskScores: RouteGuardRiskSample[];
   hotzoneSections: RouteGuardHotzone[];
-  overallRiskScore: number;
+  overallRiskScore: number | null;
   overallRiskLevel: RouteGuardRiskLevel;
   liveIncidentMarkers?: LiveIncidentMapMarker[];
   usage: {
@@ -112,7 +112,7 @@ export function scanRouteGuard(input: RouteGuardScanInput) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     },
-    15_000,
+    60_000,
     'optional',
   );
 }

@@ -71,15 +71,16 @@ export function applyRouteLiveRefresh(original: RouteGuardRiskSample[], response
   });
   const hotzoneSections: RouteGuardHotzone[] = [];
   for (const sample of sampledRiskScores) {
-    if (sample.riskLevel === 'low') continue;
+    if (sample.score === null || (sample.riskLevel !== 'amber' && sample.riskLevel !== 'red')) continue;
     hotzoneSections.push({
       id: `live-hotzone-${sample.pointIndex}`, startPointIndex: sample.pointIndex, endPointIndex: sample.pointIndex,
       riskScore: sample.score, riskLevel: sample.riskLevel,
       summary: sample.contextLabel ? `${sample.contextLabel}: ${sample.basis}` : sample.basis,
     });
   }
-  const average = sampledRiskScores.reduce((sum, sample) => sum + sample.score, 0) / sampledRiskScores.length;
-  const maximum = Math.max(...sampledRiskScores.map((sample) => sample.score));
+  const scores = response.live.samples.map((sample) => sample.liveScore);
+  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
+  const maximum = Math.max(...scores);
   const overallRiskScore = Math.round(average * 0.7 + maximum * 0.3);
   const contributingIncidentIds = new Set(response.live.samples
     .flatMap((sample) => sample.contributors)

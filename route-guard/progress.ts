@@ -1,4 +1,4 @@
-export type RouteProgressRiskLevel = 'low' | 'amber' | 'red';
+export type RouteProgressRiskLevel = 'low' | 'amber' | 'red' | 'unknown';
 
 export interface RouteProgressPoint {
   latitude: number;
@@ -7,7 +7,7 @@ export interface RouteProgressPoint {
 
 export interface RouteProgressSample extends RouteProgressPoint {
   pointIndex: number;
-  score: number;
+  score: number | null;
   riskLevel: RouteProgressRiskLevel;
   basis: string;
   contextLabel?: string;
@@ -83,7 +83,9 @@ export function summarizeRouteProgress(input: RouteGuardProgressInput): RouteGua
   }
 
   const currentRisk = nearestSample
-    ? `${nearestSample.score}/100 ${nearestSample.riskLevel.toUpperCase()} near your current route position.`
+    ? nearestSample.riskLevel === 'unknown'
+      ? 'Risk data is unavailable near your current route position. This does not mean low risk.'
+      : `${nearestSample.score}/100 ${nearestSample.riskLevel.toUpperCase()} near your current route position.`
     : 'No route risk sample is close to your current position yet.';
 
   return {
@@ -141,7 +143,8 @@ function isUsablePoint(point: RouteProgressPoint) {
 }
 
 function isUsableSample(sample: RouteProgressSample) {
-  return isUsablePoint(sample) && Number.isFinite(sample.pointIndex) && Number.isFinite(sample.score);
+  return isUsablePoint(sample) && Number.isFinite(sample.pointIndex)
+    && (sample.riskLevel === 'unknown' ? sample.score === null : Number.isFinite(sample.score));
 }
 
 function toRadians(value: number) {

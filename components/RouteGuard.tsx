@@ -66,6 +66,7 @@ const RISK_COLORS: Record<RouteGuardRiskLevel, { strong: string; soft: string; l
   low: { strong: '#059669', soft: '#ecfdf5', label: 'LOW' },
   amber: { strong: '#d97706', soft: '#fffbeb', label: 'AMBER' },
   red: { strong: '#e11d48', soft: '#fff1f2', label: 'RED' },
+  unknown: { strong: '#64748b', soft: '#f1f5f9', label: 'UNKNOWN' },
 };
 
 export default function RouteGuard({
@@ -593,10 +594,16 @@ function RouteResult({
           ) : null}
         </View>
         <View style={{ borderRadius: 18, backgroundColor: risk.soft, paddingHorizontal: 13, paddingVertical: 10, alignItems: 'center' }}>
-          <Text style={{ color: risk.strong, fontSize: 22, fontWeight: '900' }}>{result.overallRiskScore}</Text>
+          <Text style={{ color: risk.strong, fontSize: 22, fontWeight: '900' }}>{result.overallRiskScore ?? '-'}</Text>
           <Text style={{ color: risk.strong, fontSize: 9, fontWeight: '900', letterSpacing: 1 }}>{risk.label}</Text>
         </View>
       </View>
+
+      {result.overallRiskLevel === 'unknown' ? (
+        <Text accessibilityRole="alert" style={tw`text-sm text-slate-600 leading-5 mb-4`}>
+          Risk data is unavailable for {result.sampledRiskScores.filter((sample) => sample.riskLevel === 'unknown').length} of {result.sampledRiskScores.length} route sections. The real route is shown, but no overall score is assigned. Missing data does not mean low risk.
+        </Text>
+      ) : null}
 
       {routePoints.length >= 2 ? (
         <View style={tw`overflow-hidden rounded-3xl border border-slate-200 bg-slate-50 mb-5`}>
@@ -698,7 +705,9 @@ function RouteResult({
             <Text style={{ color: color.strong, fontSize: 16, fontWeight: '900' }}>{hotzone.riskScore}</Text>
           </View>
         );
-      }) : <Text style={tw`text-xs text-slate-500 mb-3`}>No elevated preview sections were found on this route.</Text>}
+      }) : <Text style={tw`text-xs text-slate-500 mb-3`}>{result.overallRiskLevel === 'unknown'
+        ? 'Hotzone coverage is incomplete because some route data is unavailable.'
+        : 'No elevated sections were found in the available route samples. This does not guarantee safety.'}</Text>}
 
       <Text style={tw`text-[10px] text-slate-400 leading-4 mt-3`}>{result.disclaimer}</Text>
       <Text style={tw`text-[10px] font-bold text-indigo-600 mt-2`}>Google requests made: 0</Text>

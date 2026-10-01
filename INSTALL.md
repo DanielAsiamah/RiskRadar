@@ -82,7 +82,9 @@ curl -X POST http://127.0.0.1:3001/api/route-guard \
   --data '{"start":"SE10 8EP","destination":"London Bridge","travelMode":"walking","entitlement":"pro","routeScansUsed":0}'
 ```
 
-The response should include `provider: "free-osm"` or a clearly labelled mock fallback, `googleRequestMade: false`, route points, sampled risk scores, and anonymised context labels such as Police.uk-style "On or near..." areas when available. Mock routes must not be used for real journeys.
+The response should include `provider: "free-osm"`, `googleRequestMade: false`, route points, sampled risk scores, and anonymised context labels such as Police.uk-style "On or near..." areas when available. Routing failures return an error, never generated fallback geometry. Mock routes require explicit `ROUTE_PROVIDER=mock` configuration and must not be used for real journeys.
+
+Unavailable route readings use `score: null` and `riskLevel: "unknown"`, shown in grey. An incomplete route has no overall numerical score; known elevated sections can still be shown. Each route baseline lookup has a 10-second response deadline and uses one crime-data lookup rather than generating a full area report. Existing shared upstream requests may finish populating the cache after the deadline. Start live position to retry readings through periodic refresh. Unknown risk does not mean low risk. The scan client allows up to 60 seconds for geocoding, queued routing, and risk lookup combined.
 
 Walking uses the dedicated FOSSGIS/OSRM pedestrian service, while driving uses its car service. The backend serializes routing requests with at least 1.1 seconds between starts and accepts at most three pending routing requests per process. This public service is for light use, not unlimited production capacity. Review the [provider usage policy](https://routing.openstreetmap.de/about.html) before deployment; multiple backend processes need a shared rate limit or a self-hosted routing service. The route-source panel includes attribution and the required map-correction link. Transit remains a disclosed walking-corridor estimate, not a bus or train itinerary.
 
@@ -469,7 +471,7 @@ steps and environment-variable contract.
   - Returns route points, distance and duration estimates, sampled risk scores, hotzone sections, overall risk level, monthly usage, a zero-Google request cost estimate, provider metadata, and the area-intelligence disclaimer.
   - `ROUTE_PROVIDER=free-osm` uses backend-only Nominatim/OSRM requests and does not require `GOOGLE_MAPS_API_KEY`.
   - `ROUTE_PROVIDER=mock` remains available for deterministic offline demos.
-  - `ROUTE_GUARD_FALLBACK_TO_MOCK=true` keeps the app usable if a free public route source is temporarily unavailable.
+  - Routing failures return structured errors; `ROUTE_GUARD_FALLBACK_TO_MOCK` is no longer used. A failed replacement scan leaves the previous route visible and tracking paused.
   - Transit mode currently uses a walking-corridor estimate until a public transport routing provider is connected.
   - Keep future Google credentials on the backend only. Never add a Google key to an `EXPO_PUBLIC_*` variable or frontend file.
 

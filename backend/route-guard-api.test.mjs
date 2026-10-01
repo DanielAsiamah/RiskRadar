@@ -37,7 +37,7 @@ const validBody = {
 };
 
 test('POST /api/route-guard returns a mock route scan', async () => {
-  const handler = createRouteGuardRouteHandler();
+  const handler = createRouteGuardRouteHandler({ provider: 'mock' });
   const response = createResponse();
 
   const handled = await handler.handle(
@@ -206,7 +206,7 @@ test('POST /api/route-guard rejects invalid current-location coordinates', async
   assert.equal(JSON.parse(response.body).code, 'INVALID_ROUTE_GUARD_INPUT');
 });
 
-test('free provider route failures fall back to mock without hiding entitlement errors', async () => {
+test('real routing failures return an error, never generated geometry or a consumed scan', async () => {
   const handler = createRouteGuardRouteHandler({
     provider: 'free-osm',
     geocodeLocation: async (query) => ({
@@ -225,12 +225,21 @@ test('free provider route failures fall back to mock without hiding entitlement 
   const fallbackResponse = createResponse();
   await handler.handle(createRequest(validBody), fallbackResponse, new URL('http://localhost/api/route-guard'));
   const fallbackPayload = JSON.parse(fallbackResponse.body);
-  assert.equal(fallbackResponse.statusCode, 200);
-  assert.equal(fallbackPayload.provider, 'mock');
-  assert.match(fallbackPayload.fallbackReason, /OSRM offline/);
+  assert.equal(fallbackResponse.statusCode, 502);
+  assert.equal(fallbackPayload.code, 'ROUTE_PROVIDER_FAILED');
+  assert.equal(fallbackPayload.provider, undefined);
+  assert.equal(fallbackPayload.routePoints, undefined);
+  assert.equal(fallbackPayload.usage, undefined);
 
   const freeResponse = createResponse();
   await handler.handle(createRequest({ ...validBody, entitlement: 'free' }), freeResponse, new URL('http://localhost/api/route-guard'));
   assert.equal(freeResponse.statusCode, 403);
   assert.equal(JSON.parse(freeResponse.body).code, 'PREMIUM_REQUIRED');
+});
+
+test('the default route provider is real routing rather than a generated preview', async () => {
+  const handler = createRouteGuardRouteHandler();
+  const response = createResponse();
+  await handler.handle(createRequest(null, 'GET'), response, new URL('http://localhost/api/route-guard/status'));
+  assert.equal(JSON.parse(response.body).provider, 'free-osm');
 });

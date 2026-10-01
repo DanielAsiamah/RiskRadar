@@ -37,19 +37,20 @@ export function parseRouteBackgroundState(raw: string | null): RouteBackgroundSt
       && Number.isFinite(item.longitude) && Math.abs(item.longitude) <= 180;
     const score = (n: unknown) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 100;
     const risk = (s: unknown) => ['low', 'amber', 'red'].includes(String(s));
+    const reading = (value: unknown, level: unknown) => level === 'unknown' ? value === null : score(value) && risk(level);
     if (!value || typeof value.sessionId !== 'string' || !value.sessionId || typeof value.enabled !== 'boolean'
       || !Number.isFinite(value.expiresAt) || !Number.isFinite(value.lastRefreshAt)
       || !Array.isArray(value.alertedKeys) || value.alertedKeys.length > 100 || !value.alertedKeys.every((key: unknown) => typeof key === 'string')
       || route?.provider !== 'free-osm' || typeof route.start !== 'string' || typeof route.destination !== 'string'
       || !Array.isArray(route.routePoints) || route.routePoints.length < 2 || route.routePoints.length > 500 || !route.routePoints.every(point)
       || !Array.isArray(route.sampledRiskScores) || route.sampledRiskScores.length < 1 || route.sampledRiskScores.length > 12
-      || !route.sampledRiskScores.every((sample: any) => point(sample) && score(sample.score) && risk(sample.riskLevel)
+      || !route.sampledRiskScores.every((sample: any) => point(sample) && reading(sample.score, sample.riskLevel)
         && Number.isInteger(sample.pointIndex) && sample.pointIndex >= 0 && typeof sample.basis === 'string'
         && (sample.contextLabel === undefined || typeof sample.contextLabel === 'string'))
       || !Array.isArray(route.hotzoneSections) || !route.hotzoneSections.every((zone: any) => zone && typeof zone.id === 'string'
         && typeof zone.summary === 'string' && score(zone.riskScore) && ['amber', 'red'].includes(zone.riskLevel)
         && Number.isInteger(zone.startPointIndex) && Number.isInteger(zone.endPointIndex))
-      || !score(route.overallRiskScore) || !risk(route.overallRiskLevel)
+      || !reading(route.overallRiskScore, route.overallRiskLevel)
       || !Number.isFinite(route.distanceEstimate?.kilometres) || !Number.isFinite(route.durationEstimate?.minutes)
       || typeof route.disclaimer !== 'string') return null;
     if (route.geocoded !== undefined && (typeof route.geocoded?.start?.label !== 'string' || typeof route.geocoded?.destination?.label !== 'string')) return null;

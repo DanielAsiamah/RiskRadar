@@ -43,6 +43,7 @@ function riskLevel(score) {
 }
 
 function routeRiskLevel(score) {
+  if (score === null) return 'unknown';
   return riskLevel(score) === 'high' ? 'red' : riskLevel(score);
 }
 
@@ -181,10 +182,10 @@ function selectRiskSamplePoints(routePoints, maximum = 12) {
 }
 
 function normalizeRiskSample(value, index) {
-  const score = Math.max(0, Math.min(100, Math.round(Number(value?.score))));
-  if (!Number.isFinite(score)) {
+  if (typeof value?.score !== 'number' || !Number.isFinite(value.score) || value.score < 0 || value.score > 100) {
     throw new RouteGuardError(`Risk sample ${index + 1} did not include a valid score.`, 502, 'ROUTE_RISK_BAD_RESPONSE');
   }
+  const score = Math.round(value.score);
   const contextLabel = sanitizeContextLabel(value?.contextLabel);
   return {
     score,
@@ -223,12 +224,8 @@ function routeProviderMetadata(route, travelMode, routingProfile) {
   };
 }
 
-async function defaultSampleRisk(_point, index) {
-  return {
-    score: 25 + (index % 3) * 5,
-    basis: 'Route geometry only; backend risk sampler unavailable.',
-    contributors: [],
-  };
+async function defaultSampleRisk() {
+  throw new RouteGuardError('Route risk data is unavailable.', 503, 'ROUTE_RISK_UNAVAILABLE');
 }
 
 async function fetchJson(url, { timeoutMs = 12000 } = {}) {
@@ -431,8 +428,8 @@ export async function createFreeRouteGuardScan(input, {
       risk = normalizeRiskSample(await sampleRisk(point, index), index);
     } catch {
       risk = {
-        score: 35,
-        riskLevel: 'low',
+        score: null,
+        riskLevel: 'unknown',
         basis: 'RiskRadar sample temporarily unavailable; route geometry is still shown.',
         contributors: [],
       };
@@ -453,7 +450,8 @@ export async function createFreeRouteGuardScan(input, {
   const durationSeconds = Number(route.durationSeconds);
   const averageRisk = Math.round(sampledRiskScores.reduce((sum, sample) => sum + sample.score, 0) / sampledRiskScores.length);
   const maximumRisk = Math.max(...sampledRiskScores.map((sample) => sample.score));
-  const overallScore = Math.round(averageRisk * 0.7 + maximumRisk * 0.3);
+  const overallScore = sampledRiskScores.some((sample) => sample.score === null)
+    ? null : Math.round(averageRisk * 0.7 + maximumRisk * 0.3);
 
   return {
     provider: 'free-osm',
@@ -507,8 +505,8 @@ export async function createFreeRouteGuardScan(input, {
   };
 }
 
-export function createRouteGuardStatus({ provider = process.env.ROUTE_PROVIDER || 'mock' } = {}) {
-  const selectedProvider = String(provider || 'mock').trim().toLowerCase();
+export function createRouteGuardStatus({ provider = process.env.ROUTE_PROVIDER || 'free-osm' } = {}) {
+  const selectedProvider = String(provider || 'free-osm').trim().toLowerCase();
   const normalizedProvider = ['free-osm', 'osm', 'free'].includes(selectedProvider)
     ? 'free-osm'
     : selectedProvider === 'mock'
@@ -562,12 +560,11 @@ function defaultSendJson(_request, response, statusCode, payload) {
 }
 
 export function createRouteGuardRouteHandler({
-  provider = process.env.ROUTE_PROVIDER || 'mock',
+  provider = process.env.ROUTE_PROVIDER || 'free-osm',
   sendJson = defaultSendJson,
   geocodeLocation,
   fetchRoute,
   sampleRisk,
-  fallbackToMock = process.env.ROUTE_GUARD_FALLBACK_TO_MOCK !== 'false',
 } = {}) {
   return {
     async handle(request, response, url) {
@@ -589,13 +586,8 @@ export function createRouteGuardRouteHandler({
           try {
             sendJson(request, response, 200, await createFreeRouteGuardScan(body, { geocodeLocation, fetchRoute, sampleRisk }));
           } catch (error) {
-            if (!fallbackToMock || error instanceof RouteGuardError && ['PREMIUM_REQUIRED', 'ROUTE_SCAN_LIMIT_REACHED', 'INVALID_ROUTE_GUARD_INPUT'].includes(error.code)) {
-              throw error;
-            }
-            sendJson(request, response, 200, {
-              ...createMockRouteGuardScan(body),
-              fallbackReason: error instanceof Error ? error.message : 'The free route provider was unavailable.',
-            });
+            if (error instanceof RouteGuardError) throw error;
+            throw new RouteGuardError('The route provider is unavailable. Please retry shortly.', 502, 'ROUTE_PROVIDER_FAILED');
           }
           return true;
         }
@@ -609,7 +601,7 @@ export function createRouteGuardRouteHandler({
       } catch (error) {
         const routeError = error instanceof RouteGuardError
           ? error
-          : new RouteGuardError('Route Guard could not build this mock route.', 500, 'ROUTE_GUARD_FAILED');
+          : new RouteGuardError('Route Guard could not build this route.', 500, 'ROUTE_GUARD_FAILED');
         sendJson(request, response, routeError.statusCode, {
           error: routeError.message,
           code: routeError.code,

@@ -29,6 +29,7 @@ import { createStripeBilling } from './membership/stripe-billing.mjs';
 import { createMembershipRouteHandler } from './membership/routes.mjs';
 import { createWatchlistStore } from './membership/watchlist-store.mjs';
 import { createRouteGuardRouteHandler } from './route-guard.mjs';
+import { createRoutePointAnalyzer, requireRouteCrimeRecords } from './route-analysis.mjs';
 import { createLiveIncidentIngestionService } from './live-incidents/ingestion-service.mjs';
 import { createMemoryLiveIncidentStore } from './live-incidents/memory-store.mjs';
 import { calculateLiveRisk } from './live-incidents/risk-overlay.mjs';
@@ -111,12 +112,16 @@ const liveIncidentIngestion = createLiveIncidentIngestionService({
   store: liveIncidentStore,
   adapters: liveIncidentAdapters,
 });
+const analyzeRoutePoint = createRoutePointAnalyzer({
+  loadCrimeData: (latitude, longitude) => fetchCrimeData(latitude, longitude, { requireAvailable: true }),
+});
 const liveIncidentRoutes = createLiveIncidentRouteHandler({
   store: liveIncidentStore,
   ingestionService: liveIncidentIngestion,
   sourceDefinitions: liveSourceDefinitions,
   analyzeLocation,
   analyzePoint,
+  analyzeRoutePoint,
   ingestionSecret: LIVE_INGESTION_SECRET,
 });
 const routeGuardRoutes = createRouteGuardRouteHandler({
@@ -2626,11 +2631,11 @@ async function fetchNeighbourhoodBoundary(latitude, longitude) {
   };
 }
 
-async function fetchStreetCrimesAtPoint(latitude, longitude, month = '') {
+async function fetchStreetCrimesAtPoint(latitude, longitude, month = '', { requireAvailable = false } = {}) {
   if (usingFileCrimeSource() && hasLocalCrimeFiles()) {
     const localCrimes = crimeFileSource.queryPoint(latitude, longitude, month);
     if (localCrimes.length || !CRIME_SOURCE_FALLBACK_TO_API) {
-      return localCrimes;
+      return requireAvailable ? requireRouteCrimeRecords(localCrimes) : localCrimes;
     }
   }
 
@@ -2638,13 +2643,13 @@ async function fetchStreetCrimesAtPoint(latitude, longitude, month = '') {
     ? `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}&date=${encodeURIComponent(month)}`
     : `https://data.police.uk/api/crimes-street/all-crime?lat=${encodeURIComponent(latitude)}&lng=${encodeURIComponent(longitude)}`;
   const crimes = await fetchJson(crimesUrl, {}, 18000).catch((error) => {
-    if (error.statusCode === 404) {
+    if (error.statusCode === 404 && !requireAvailable) {
       return [];
     }
     throw error;
   });
 
-  return Array.isArray(crimes) ? crimes : [];
+  return requireAvailable ? requireRouteCrimeRecords(crimes) : Array.isArray(crimes) ? crimes : [];
 }
 
 async function fetchStreetCrimesAtLocation(latitude, longitude, month = '') {
@@ -3252,8 +3257,8 @@ function buildPointComparisonSummary(results) {
   return `${highest.label} is highest at ${highest.crimeData.crimeScore}/100, while ${lowest.label} is lowest at ${lowest.crimeData.crimeScore}/100 in this point-level comparison.`;
 }
 
-async function fetchCrimeData(latitude, longitude) {
-  const safeCrimes = await fetchStreetCrimesAtPoint(latitude, longitude);
+async function fetchCrimeData(latitude, longitude, { requireAvailable = false } = {}) {
+  const safeCrimes = await fetchStreetCrimesAtPoint(latitude, longitude, '', { requireAvailable });
   const postcodeCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, POSTCODE_RADIUS_METERS);
   const contextCrimes = filterCrimesByRadius(safeCrimes, latitude, longitude, CONTEXT_RADIUS_METERS);
   const evaluationDate = new Date().toISOString();
@@ -3266,10 +3271,15 @@ async function fetchCrimeData(latitude, longitude) {
   const blendedCrimeScore = blendedScore.score;
   const totalCrimes = postcodeCrimes.length;
   const month = postcodeCrimes?.[0]?.month || contextCrimes?.[0]?.month || safeCrimes?.[0]?.month || null;
+  const nearestMappedCrime = postcodeCrimes
+    .filter((crime) => typeof crime.location?.street?.name === 'string')
+    .sort((a, b) => distanceInMeters(latitude, longitude, Number(a.location.latitude), Number(a.location.longitude))
+      - distanceInMeters(latitude, longitude, Number(b.location.latitude), Number(b.location.longitude)))[0];
 
   return {
     totalCrimes,
     crimeScore: blendedCrimeScore,
+    contextLabel: nearestMappedCrime?.location?.street?.name,
     safetyLevel: getSafetyLevel(blendedCrimeScore),
     month: month || '',
     monthDisplay: formatMonthDisplay(month),
@@ -3896,7 +3906,7 @@ async function sampleRouteGuardRisk(point, index) {
   }
 
   const calculatedAt = new Date().toISOString();
-  const analysis = await analyzePoint({ latitude, longitude, monthCount: 3 });
+  const analysis = await analyzeRoutePoint({ latitude, longitude });
   const baselineScore = analysis?.crimeData?.crimeScore;
   const timingContext = analysis?.crimeData?.timingContext ?? {};
   const contextScore = timingContext.adjustedScore ?? baselineScore;
@@ -3930,6 +3940,9 @@ async function sampleRouteGuardRisk(point, index) {
 }
 
 function buildRouteGuardSampleContextLabel(analysis) {
+  if (typeof analysis?.crimeData?.contextLabel === 'string' && analysis.crimeData.contextLabel.trim()) {
+    return analysis.crimeData.contextLabel.trim();
+  }
   const hotspot = Array.isArray(analysis?.hotspotData?.clusters) ? analysis.hotspotData.clusters[0] : null;
   const hotspotLabel = String(hotspot?.locationLabel || '').trim();
   if (hotspotLabel && !/approximate mapped location/i.test(hotspotLabel)) {

@@ -4,6 +4,20 @@ import test from 'node:test';
 import { formatRouteGuardAlert } from './presentation.ts';
 import type { RouteGuardProgressSummary } from './progress.ts';
 
+test('unavailable route risk is not displayed as zero or a reassuring tracking card', () => {
+  const alert = formatRouteGuardAlert({
+    status: 'on-route', distanceToRouteMetres: 0, message: 'Risk data unavailable',
+    nearestSample: {
+      pointIndex: 0, latitude: 51.5, longitude: -0.1, score: null, riskLevel: 'unknown',
+      basis: 'Risk data unavailable', distanceMetres: 0,
+    },
+  });
+  assert.equal(alert.level, 'unknown');
+  assert.equal(alert.scoreLabel, null);
+  assert.match(alert.title, /unavailable/i);
+  assert.match(alert.action, /not.*low risk/i);
+});
+
 const approachingProgress: RouteGuardProgressSummary = {
   status: 'on-route',
   distanceToRouteMetres: 12,

@@ -140,7 +140,7 @@ export default function CrimeMapCanvas({
         <Marker
           key={`route-risk-${sample.pointIndex}`}
           coordinate={sample}
-          title={`Route risk ${sample.score}/100`}
+          title={sample.score === null ? 'Route risk unavailable' : `Route risk ${sample.score}/100`}
           description={sample.basis}
           pinColor={riskColor(sample.riskLevel)}
         />
@@ -164,6 +164,7 @@ function formatLiveTimestamp(value: string) {
 }
 
 function riskColor(value?: string) {
+  if (value === 'unknown') return '#64748b';
   if (value === 'red') return '#e11d48';
   if (value === 'amber') return '#d97706';
   return '#059669';

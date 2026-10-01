@@ -131,7 +131,7 @@ export default function CrimeMapCanvas({
             >
               <Tooltip direction="top" offset={[0, -8]} opacity={1} sticky>
                 <div style={{ minWidth: 170 }}>
-                  <strong>Route risk {sample.score}/100</strong>
+                  <strong>{sample.score === null ? 'Route risk unavailable' : `Route risk ${sample.score}/100`}</strong>
                   <br />{sample.basis}
                 </div>
               </Tooltip>
@@ -192,6 +192,7 @@ function formatLiveTimestamp(value: string) {
 }
 
 function riskColor(value?: string) {
+  if (value === 'unknown') return '#64748b';
   if (value === 'red') return '#e11d48';
   if (value === 'amber') return '#d97706';
   return '#059669';

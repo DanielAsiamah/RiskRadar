@@ -22,6 +22,21 @@ const pointAnalysis = {
   crimeData: { crimeScore: 34, timingContext: { adjustedScore: 36, totalAdjustment: 2, factors: [{ id: 'night', label: 'Late-night pressure', points: 2 }] } },
 };
 
+test('route refresh uses its lightweight analysis dependency instead of a full area report', async () => {
+  const calls = [];
+  const routes = createLiveIncidentRouteHandler(dependencies({
+    analyzePoint: async () => { throw new Error('Full report must not run for a route'); },
+    analyzeRoutePoint: async (point) => { calls.push(point); return pointAnalysis; },
+  }));
+  const response = createResponse();
+  await routes.handle(createRequest({ method: 'POST', body: { routeSamples: [
+    { id: '0', latitude: 51.5, longitude: -0.1 },
+  ] } }), response, new URL('http://localhost/api/live-risk'));
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(calls, [{ latitude: 51.5, longitude: -0.1 }]);
+  assert.equal(JSON.parse(response.body).live.samples[0].liveScore, 36);
+});
+
 test('route refresh queries every sample and deduplicates overlapping incident results', async () => {
   const queried = [];
   const deps = dependencies();

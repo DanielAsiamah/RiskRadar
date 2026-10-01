@@ -238,7 +238,7 @@ test('uses a transparent walking corridor estimate for transit until live transi
   assert.match(result.routeProvider.modeDisclosure, /Transit routing is estimated/i);
 });
 
-test('keeps the free route scan when an individual risk sample is unavailable', async () => {
+test('keeps real geometry but reports unknown risk when an individual sample is unavailable', async () => {
   const result = await createFreeRouteGuardScan(
     request,
     {
@@ -266,8 +266,29 @@ test('keeps the free route scan when an individual risk sample is unavailable', 
   );
 
   assert.equal(result.provider, 'free-osm');
-  assert.equal(result.sampledRiskScores[1].score, 35);
+  assert.equal(result.sampledRiskScores[1].score, null);
+  assert.equal(result.sampledRiskScores[1].riskLevel, 'unknown');
+  assert.equal(result.sampledRiskScores[0].score, 42);
+  assert.equal(result.overallRiskScore, null);
+  assert.equal(result.overallRiskLevel, 'unknown');
   assert.match(result.sampledRiskScores[1].basis, /temporarily unavailable/i);
+});
+
+test('a missing or malformed risk sampler never fabricates route scores', async () => {
+  const dependencies = {
+    geocodeLocation: async () => ({ latitude: 51.5, longitude: -0.1 }),
+    fetchRoute: async () => ({
+      routePoints: [{ latitude: 51.5, longitude: -0.1 }, { latitude: 51.51, longitude: -0.1 }],
+      distanceMetres: 1200, durationSeconds: 900,
+    }),
+  };
+  for (const sampleRisk of [undefined, async () => ({ score: null }), async () => ({ score: '' })]) {
+    const result = await createFreeRouteGuardScan(request, { ...dependencies, sampleRisk });
+    assert.equal(result.overallRiskScore, null);
+    assert.equal(result.overallRiskLevel, 'unknown');
+    assert.ok(result.sampledRiskScores.every((sample) => sample.score === null && sample.riskLevel === 'unknown'));
+    assert.deepEqual(result.hotzoneSections, []);
+  }
 });
 
 test('does not trust unrealistically fast walking durations from a public route provider', async () => {

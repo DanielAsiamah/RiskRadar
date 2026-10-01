@@ -29,7 +29,7 @@ export interface CrimeMapMarker extends MapCoordinate {
   }>;
 }
 
-export type RouteMapRiskLevel = 'low' | 'amber' | 'red';
+export type RouteMapRiskLevel = 'low' | 'amber' | 'red' | 'unknown';
 
 export interface RouteMapLine {
   points: MapCoordinate[];
@@ -38,7 +38,7 @@ export interface RouteMapLine {
 
 export interface RouteMapRiskSample extends MapCoordinate {
   pointIndex: number;
-  score: number;
+  score: number | null;
   riskLevel: RouteMapRiskLevel;
   basis: string;
   contextLabel?: string;

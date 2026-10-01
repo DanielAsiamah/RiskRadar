@@ -74,7 +74,7 @@ function networkMetadata(store, sourceDefinitions, states) {
 }
 
 export function createLiveIncidentRouteHandler({
-  store, ingestionService, sourceDefinitions = [], analyzeLocation, analyzePoint, ingestionSecret, now = () => new Date(),
+  store, ingestionService, sourceDefinitions = [], analyzeLocation, analyzePoint, analyzeRoutePoint = analyzePoint, ingestionSecret, now = () => new Date(),
 } = {}) {
   if (!store || typeof store.listPublicIncidents !== 'function') throw new TypeError('store must support public incident queries');
   if (!ingestionService || typeof ingestionService.run !== 'function') throw new TypeError('ingestionService is required');
@@ -162,7 +162,7 @@ export function createLiveIncidentRouteHandler({
               const latitude = number(sample?.latitude);
               const longitude = number(sample?.longitude);
               if (!validPoint(latitude, longitude)) throw new TypeError(`routeSamples[${index}] is invalid`);
-              const analysis = await analyzePoint({ latitude, longitude });
+              const analysis = await analyzeRoutePoint({ latitude, longitude });
               return { id: String(sample.id ?? `sample-${index + 1}`), latitude, longitude, ...contextFor(analysis) };
             }));
             const nearbyGroups = await Promise.all(samples.map((sample) => incidentsNear(sample.latitude, sample.longitude, calculatedAt)));

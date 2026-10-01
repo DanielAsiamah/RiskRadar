@@ -3,6 +3,22 @@ import test from 'node:test';
 
 import { summarizeRouteProgress } from './progress.ts';
 
+test('keeps an unavailable nearby sample instead of substituting a distant low score', () => {
+  const progress = summarizeRouteProgress({
+    currentLocation: { latitude: 51.5, longitude: -0.1 },
+    routePoints: [{ latitude: 51.5, longitude: -0.1 }, { latitude: 51.51, longitude: -0.1 }],
+    routeRiskSamples: [
+      { latitude: 51.5, longitude: -0.1, pointIndex: 0, score: null, riskLevel: 'unknown', basis: 'Data unavailable' },
+      { latitude: 51.51, longitude: -0.1, pointIndex: 1, score: 12, riskLevel: 'low', basis: 'Recorded incidents' },
+    ],
+  });
+  assert.equal(progress.nearestSample?.pointIndex, 0);
+  assert.equal(progress.nearestSample?.riskLevel, 'unknown');
+  assert.equal(progress.upcomingHotzone, undefined);
+  assert.match(progress.message, /unavailable/i);
+  assert.doesNotMatch(progress.message, /12\/100|LOW/);
+});
+
 test('tracks a position between widely spaced route vertices', () => {
   const progress = summarizeRouteProgress({
     currentLocation: { latitude: 51.5, longitude: -0.05 },
