@@ -35,6 +35,7 @@ import {
   type RouteGuardTravelMode,
 } from '../api/route-guard';
 import { formatRouteGuardAlert } from '../route-guard/presentation';
+import { routeGuardAccessState, shouldRecordRouteUsage } from '../route-guard/access';
 import { evaluateRouteApproachAlert, type RouteApproachAlert } from '../route-guard/alerts';
 import { applyRouteLiveRefresh, startRouteRiskPolling } from '../route-guard/refresh';
 import { readJourneyLocation, watchJourneyLocation } from '../route-guard/location-device';
@@ -135,7 +136,9 @@ export default function RouteGuard({
   }, []);
 
   const hasStart = start.trim().length > 0 || !!startCoordinates;
-  const canScan = premium && usageReady && routeScansUsed < 100 && hasStart && destination.trim().length > 0 && !loading && !locating && !backgroundBusy;
+  const localDevelopment = Platform.OS === 'web' && routeStatus?.access?.localDevelopment === true;
+  const accessState = routeGuardAccessState({ premium, localDevelopment, usageReady, routeScansUsed });
+  const canScan = accessState.canAccess && accessState.allowanceReady && accessState.hasAllowance && hasStart && destination.trim().length > 0 && !loading && !locating && !backgroundBusy;
 
   const handleStartChange = (value: string) => {
     setStart(value);
@@ -196,6 +199,10 @@ export default function RouteGuard({
         setTrackingError(locationError.message);
         clearLocationWatcher();
       },
+      (warning) => {
+        setJourneyTimestamp(null);
+        setTrackingError(warning.message);
+      },
     );
   };
 
@@ -253,7 +260,7 @@ export default function RouteGuard({
   }, []);
 
   const handleScan = async () => {
-    if (!premium) {
+    if (!accessState.canAccess) {
       onUpgrade();
       return;
     }
@@ -270,7 +277,7 @@ export default function RouteGuard({
         destination: destination.trim(),
         travelMode,
         entitlement: 'pro',
-        routeScansUsed,
+        routeScansUsed: localDevelopment ? 0 : routeScansUsed,
       });
       setResult(scan);
       if (startCoordinates) {
@@ -280,7 +287,7 @@ export default function RouteGuard({
         });
         setJourneyAccuracy(startCoordinates.accuracyMetres ?? null);
       }
-      await onUsageChange(scan.usage.usedAfter);
+      if (shouldRecordRouteUsage(scan.access)) await onUsageChange(scan.usage.usedAfter);
     } catch (scanError) {
       setError(scanError instanceof Error ? scanError.message : 'Route Guard could not scan this route.');
     } finally {
@@ -304,7 +311,7 @@ export default function RouteGuard({
             <View style={tw`flex-1`}>
               <View style={tw`flex-row items-center`}>
                 <Text style={tw`text-lg font-black text-slate-950`}>Route Guard</Text>
-                <View style={tw`ml-2 rounded-full bg-indigo-600 px-2 py-1`}><Text style={tw`text-[9px] font-black tracking-widest text-white`}>PRO</Text></View>
+                <View style={tw`ml-2 rounded-full bg-indigo-600 px-2 py-1`}><Text style={tw`text-[9px] font-black tracking-widest text-white`}>{localDevelopment ? 'LOCAL DEV' : 'PRO'}</Text></View>
               </View>
               <Text style={tw`text-[10px] font-black tracking-widest text-indigo-600 mt-1`}>LIVE ROUTE INTELLIGENCE</Text>
             </View>
@@ -320,12 +327,19 @@ export default function RouteGuard({
             scansRemaining={Math.max(0, 100 - routeScansUsed)}
           />
 
+          {localDevelopment ? (
+            <View style={[membershipStyles.card, tw`bg-indigo-50 border-indigo-100 mb-5`]}>
+              <Text style={tw`text-sm font-black text-indigo-900`}>Local development access</Text>
+              <Text style={tw`text-xs text-indigo-800 leading-5 mt-2`}>Try real routes and foreground GPS on this computer without Supabase or payment. This does not create a PRO subscription. Public routing limits still apply.</Text>
+            </View>
+          ) : null}
+
           {!premium && backgroundState?.enabled ? (
             <Pressable accessibilityRole="button" onPress={() => { void stopJourneyTracking().catch(() => setTrackingError('Could not stop background monitoring. Please retry.')); }} style={tw`bg-slate-900 rounded-xl px-4 py-3 mb-4`}>
               <Text style={tw`text-white font-bold text-center`}>Stop active background route</Text>
             </Pressable>
           ) : null}
-          {!premium ? (
+          {!accessState.canAccess && !routeStatusLoading ? (
             <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`border-indigo-100 mb-5`]}>
               <View style={tw`w-12 h-12 rounded-2xl bg-indigo-50 items-center justify-center mb-4`}><LockKeyhole size={23} color={membershipColors.indigo} /></View>
               <Text style={tw`text-xl font-black text-slate-950 mb-2`}>Route Guard is a PRO feature</Text>
@@ -335,7 +349,7 @@ export default function RouteGuard({
                 <Text style={tw`text-white font-black ml-2`}>Explore RiskRadar PRO</Text>
               </Pressable>
             </View>
-          ) : (
+          ) : accessState.canAccess ? (
             <>
               <View style={[membershipStyles.card, tw`bg-slate-50 mb-5`]}>
                 <LocationInput label="START" value={start} onChangeText={handleStartChange} placeholder="Postcode or place" />
@@ -372,9 +386,9 @@ export default function RouteGuard({
                 {error ? <Text selectable style={tw`text-sm font-bold text-rose-600 mb-4`}>{error}</Text> : null}
                 <Pressable onPress={() => void handleScan()} disabled={!canScan} accessibilityRole="button" accessibilityState={{ disabled: !canScan }} style={({ pressed }) => [membershipStyles.primaryButton, (!canScan || loading) && tw`opacity-50`, pressed && canScan && tw`opacity-80`]}>
                   {loading ? <ActivityIndicator color="white" /> : <ShieldAlert size={19} color="white" />}
-                  <Text style={tw`text-white font-black ml-2`}>{loading ? 'Building route preview...' : usageReady ? 'Scan route' : 'Loading allowance...'}</Text>
+                  <Text style={tw`text-white font-black ml-2`}>{loading ? 'Building route preview...' : accessState.allowanceReady ? 'Scan route' : 'Loading allowance...'}</Text>
                 </Pressable>
-                <Text style={tw`text-[11px] text-slate-400 text-center mt-3`}>{Math.max(0, 100 - routeScansUsed)} of 100 scans remaining this month</Text>
+                <Text style={tw`text-[11px] text-slate-400 text-center mt-3`}>{localDevelopment ? 'Development scans do not use a paid monthly allowance.' : `${Math.max(0, 100 - routeScansUsed)} of 100 scans remaining this month`}</Text>
               </View>
 
               {result ? (
@@ -409,7 +423,7 @@ export default function RouteGuard({
                 </View>
               ) : null}
             </>
-          )}
+          ) : null}
 
           <View style={tw`rounded-3xl border border-amber-100 bg-amber-50 px-5 py-4`}>
             <Text style={tw`text-xs font-black text-amber-800 mb-1`}>Area intelligence, not guaranteed safety</Text>
@@ -433,7 +447,7 @@ function RouteGuardStatusCard({
   scansRemaining: number;
 }) {
   const providerLabel = status?.provider === 'free-osm'
-    ? 'Free UK routing online'
+    ? 'Free UK routing configured'
     : status?.provider === 'mock'
       ? 'Mock routing ready'
       : status?.provider === 'unavailable'
@@ -462,8 +476,8 @@ function RouteGuardStatusCard({
             <ActivityIndicator color={membershipColors.indigo} />
           ) : (
             <>
-              <Text style={tw`text-lg font-black text-indigo-600`}>{scansRemaining}</Text>
-              <Text style={tw`text-[8px] font-black tracking-widest text-indigo-500`}>LEFT</Text>
+              <Text style={tw`text-lg font-black text-indigo-600`}>{status?.access?.localDevelopment ? 'DEV' : scansRemaining}</Text>
+              <Text style={tw`text-[8px] font-black tracking-widest text-indigo-500`}>{status?.access?.localDevelopment ? 'LOCAL' : 'LEFT'}</Text>
             </>
           )}
         </View>
@@ -471,7 +485,7 @@ function RouteGuardStatusCard({
       {error ? <Text selectable style={tw`text-[11px] font-bold text-amber-700 mt-3`}>{error}</Text> : null}
       {status ? (
         <View style={tw`flex-row flex-wrap gap-2 mt-4`}>
-          <StatusPill label={`${status.usage.includedMonthlyScans} scans/month`} />
+          <StatusPill label={status.access?.localDevelopment ? 'Local testing access' : `${status.usage.includedMonthlyScans} scans/month`} />
           <StatusPill label={`Provider: ${status.provider}`} />
           <StatusPill label={status.supabase.requiredForRouteScan ? 'Supabase required' : 'Works without Supabase'} />
         </View>
@@ -578,7 +592,7 @@ function RouteResult({
     alertRadiusMetres: 500,
   }) : null;
   const liveRiskLevel = progress?.upcomingHotzone?.riskLevel ?? progress?.nearestSample?.riskLevel ?? result.overallRiskLevel;
-  const liveRisk = RISK_COLORS[liveRiskLevel];
+  const liveRisk = RISK_COLORS[tracking && trackingError ? 'unknown' : liveRiskLevel];
 
   return (
     <View style={[membershipStyles.card, membershipStyles.elevatedCard, tw`mb-5`]}>
@@ -612,8 +626,8 @@ function RouteResult({
             markers={[]}
             liveIncidentMarkers={liveIncidentMarkers}
             selectedPoint={currentLocation ?? routePoints[0]}
-            selectedPointLabel={currentLocation ? 'Your current location' : 'Route start'}
-            followPoint={tracking && followPosition ? currentLocation : null}
+            selectedPointLabel={currentLocation ? trackingError ? 'Last known location' : 'Your current location' : 'Route start'}
+            followPoint={tracking && !trackingError && followPosition ? currentLocation : null}
             onFollowInterrupted={() => setFollowPosition(false)}
             areaPoints={[]}
             boundaryPoints={[]}
@@ -645,7 +659,7 @@ function RouteResult({
       <RouteJourneyAlerts
         result={scannedResult}
         progress={progress}
-        tracking={foregroundTracking && !liveRefreshError}
+        tracking={foregroundTracking && !liveRefreshError && !trackingError}
         accuracyMetres={currentAccuracy}
         locationTimestamp={currentTimestamp}
       />
@@ -798,12 +812,13 @@ function LiveProgressCard({
   onStartTracking(): void;
   onStopTracking(): void;
 }) {
-  const statusCopy = progress?.status === 'off-route'
+  const waitingForLocation = tracking && !!trackingError;
+  const statusCopy = waitingForLocation ? 'WAITING FOR LOCATION' : progress?.status === 'off-route'
     ? 'OFF SCANNED ROUTE'
     : tracking
       ? 'LIVE POSITION ACTIVE'
       : 'LIVE POSITION READY';
-  const alert = formatRouteGuardAlert(progress);
+  const alert = formatRouteGuardAlert(progress, waitingForLocation ? trackingError! : undefined);
 
   return (
     <View style={[tw`rounded-3xl border px-4 py-4 mb-5`, { backgroundColor: color.soft, borderColor: `${color.strong}33` }]}>
@@ -828,7 +843,7 @@ function LiveProgressCard({
         ) : null}
       </View>
 
-      {trackingError ? <Text selectable style={tw`text-xs font-bold text-rose-600 mt-3`}>{trackingError}</Text> : null}
+      {trackingError && !waitingForLocation ? <Text selectable style={tw`text-xs font-bold text-rose-600 mt-3`}>{trackingError}</Text> : null}
 
       <Pressable
         onPress={tracking ? onStopTracking : onStartTracking}

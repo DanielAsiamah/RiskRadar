@@ -55,3 +55,31 @@ test('reports denied permission but suppresses errors after cancellation', async
   await new Promise((done) => setImmediate(done));
   assert.deepEqual(errors, ['Location permission denied']);
 });
+
+test('temporary warnings keep the watch alive but are ignored after stopping', async () => {
+  let warn!: (error: Error) => void;
+  let update!: (location: JourneyLocation) => void;
+  let removed = 0;
+  const warnings: string[] = [];
+  const received: JourneyLocation[] = [];
+  const stop = startJourneyLocationSession({
+    subscribe: async (onLocation, _onError, onWarning) => {
+      update = onLocation; warn = onWarning;
+      return { remove: () => { removed += 1; } };
+    },
+    onLocation: (location) => received.push(location),
+    onError: () => assert.fail('A temporary warning is not a terminal error'),
+    onWarning: (error) => warnings.push(error.message),
+  });
+  await new Promise((done) => setImmediate(done));
+  assert.equal(typeof warn, 'function');
+  warn(new Error('Waiting for GPS'));
+  update(fix);
+  assert.equal(removed, 0);
+  assert.deepEqual(warnings, ['Waiting for GPS']);
+  assert.deepEqual(received, [fix]);
+  stop();
+  warn(new Error('Late warning'));
+  assert.deepEqual(warnings, ['Waiting for GPS']);
+  assert.equal(removed, 1);
+});

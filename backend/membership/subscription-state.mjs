@@ -96,7 +96,7 @@ export function normalizeStripeSubscription(subscription, userId, eventCreatedAt
     stripe_subscription_id: subscription.id ?? null,
     stripe_price_id: item?.price?.id ?? null,
     status: subscription.status ?? 'free',
-    current_period_end: toIsoString(subscription.current_period_end),
+    current_period_end: toIsoString(item?.current_period_end ?? subscription.current_period_end),
     cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
     last_event_created_at: toIsoString(eventCreatedAt),
   };

@@ -9,7 +9,14 @@ export interface RouteGuardAlertPresentation {
   action: string;
 }
 
-export function formatRouteGuardAlert(progress: RouteGuardProgressSummary | null): RouteGuardAlertPresentation {
+export function formatRouteGuardAlert(progress: RouteGuardProgressSummary | null, locationWarning?: string): RouteGuardAlertPresentation {
+  if (locationWarning) {
+    return {
+      level: 'unknown', title: 'Waiting for location', scoreLabel: null, distanceLabel: null,
+      detail: locationWarning,
+      action: 'Approach alerts are paused until a fresh location arrives.',
+    };
+  }
   if (!progress) {
     return {
       level: 'low',

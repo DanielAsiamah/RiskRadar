@@ -29,6 +29,7 @@ import { createStripeBilling } from './membership/stripe-billing.mjs';
 import { createMembershipRouteHandler } from './membership/routes.mjs';
 import { createWatchlistStore } from './membership/watchlist-store.mjs';
 import { createRouteGuardRouteHandler } from './route-guard.mjs';
+import { createRouteGuardAccess } from './route-guard-access.mjs';
 import { createRoutePointAnalyzer, requireRouteCrimeRecords } from './route-analysis.mjs';
 import { createLiveIncidentIngestionService } from './live-incidents/ingestion-service.mjs';
 import { createMemoryLiveIncidentStore } from './live-incidents/memory-store.mjs';
@@ -126,6 +127,7 @@ const liveIncidentRoutes = createLiveIncidentRouteHandler({
 });
 const routeGuardRoutes = createRouteGuardRouteHandler({
   provider: process.env.ROUTE_PROVIDER || 'free-osm',
+  access: createRouteGuardAccess({ env: process.env, host: HOST, port: PORT, config: membershipConfig, store: membershipStore }),
   sendJson,
   sampleRisk: sampleRouteGuardRisk,
 });

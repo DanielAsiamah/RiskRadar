@@ -54,6 +54,15 @@ test('formats an upcoming hotzone as a road-specific warning card', () => {
   assert.equal(alert.action, 'Consider a safer route or stay more aware through this section.');
 });
 
+test('a missing fresh location suppresses stale approaching scores and distances', () => {
+  const alert = formatRouteGuardAlert(approachingProgress, 'Location temporarily unavailable.');
+  assert.equal(alert.level, 'unknown');
+  assert.equal(alert.title, 'Waiting for location');
+  assert.equal(alert.scoreLabel, null);
+  assert.equal(alert.distanceLabel, null);
+  assert.match(alert.action, /paused/);
+});
+
 test('formats on-route low risk as a calm tracking card', () => {
   const alert = formatRouteGuardAlert({
     status: 'on-route',

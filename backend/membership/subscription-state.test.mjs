@@ -132,3 +132,20 @@ test('normalizes stripe subscriptions to database rows', () => {
     },
   );
 });
+
+test('normalizes the item-level billing period used by current Stripe subscription payloads', () => {
+  const row = normalizeStripeSubscription({
+    id: 'sub_current', customer: 'cus_current', status: 'active',
+    items: { data: [{ price: { id: 'price_pro' }, current_period_end: 1793491200 }] },
+  }, 'user-1', '2026-10-06T12:00:00.000Z');
+  assert.equal(row.current_period_end, '2026-11-01T00:00:00.000Z');
+});
+
+test('item billing periods take precedence over older subscription-level fields', () => {
+  const row = normalizeStripeSubscription({
+    id: 'sub_current', customer: 'cus_current', status: 'active',
+    current_period_end: 1788134400,
+    items: { data: [{ price: { id: 'price_pro' }, current_period_end: 1793491200 }] },
+  }, 'user-1', '2026-10-06T12:00:00.000Z');
+  assert.equal(row.current_period_end, '2026-11-01T00:00:00.000Z');
+});

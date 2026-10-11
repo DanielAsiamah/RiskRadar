@@ -6,9 +6,10 @@ export interface JourneyLocation {
 }
 
 export function startJourneyLocationSession(input: {
-  subscribe(onLocation: (location: JourneyLocation) => void, onError: (error: Error) => void): Promise<{ remove(): void }>;
+  subscribe(onLocation: (location: JourneyLocation) => void, onError: (error: Error) => void, onWarning: (warning: Error) => void): Promise<{ remove(): void }>;
   onLocation(location: JourneyLocation): void;
   onError(error: Error): void;
+  onWarning?(warning: Error): void;
 }) {
   let active = true;
   let subscription: { remove(): void } | undefined;
@@ -26,7 +27,9 @@ export function startJourneyLocationSession(input: {
     try {
       const created = await input.subscribe((location) => {
         if (active) input.onLocation(location);
-      }, fail);
+      }, fail, (warning) => {
+        if (active) input.onWarning?.(warning);
+      });
       if (active) subscription = created;
       else created.remove();
     } catch (error) {

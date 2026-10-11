@@ -1,4 +1,5 @@
 import { createRouteProviderQueue } from './route-provider-queue.mjs';
+import { createRouteGuardAccess, RouteGuardAccessError } from './route-guard-access.mjs';
 
 const PRO_MONTHLY_ROUTE_SCANS = 100;
 const SUPPORTED_TRAVEL_MODES = new Set(['walking', 'driving', 'transit']);
@@ -505,7 +506,7 @@ export async function createFreeRouteGuardScan(input, {
   };
 }
 
-export function createRouteGuardStatus({ provider = process.env.ROUTE_PROVIDER || 'free-osm' } = {}) {
+export function createRouteGuardStatus({ provider = process.env.ROUTE_PROVIDER || 'free-osm', access = { localDevelopment: false, subscriptionConfigured: false } } = {}) {
   const selectedProvider = String(provider || 'free-osm').trim().toLowerCase();
   const normalizedProvider = ['free-osm', 'osm', 'free'].includes(selectedProvider)
     ? 'free-osm'
@@ -517,6 +518,7 @@ export function createRouteGuardStatus({ provider = process.env.ROUTE_PROVIDER |
   return {
     ready: normalizedProvider === 'mock' || normalizedProvider === 'free-osm',
     provider: normalizedProvider,
+    access,
     usage: {
       entitlement: 'pro',
       includedMonthlyScans: PRO_MONTHLY_ROUTE_SCANS,
@@ -531,8 +533,10 @@ export function createRouteGuardStatus({ provider = process.env.ROUTE_PROVIDER |
         : 'Route Guard can run in deterministic mock mode without Google billing.',
     },
     supabase: {
-      requiredForRouteScan: false,
-      note: 'Route scans can run locally without Supabase; Supabase is used later for authenticated subscription state.',
+      requiredForRouteScan: !access.localDevelopment,
+      note: access.localDevelopment
+        ? 'Local development access is enabled on this computer. No subscription is granted.'
+        : 'Route scans require a verified account and active subscription.',
     },
     disclaimer: FREE_ROUTE_DISCLAIMER,
   };
@@ -555,7 +559,7 @@ async function readJsonBody(request, maxBytes = 32 * 1024) {
 }
 
 function defaultSendJson(_request, response, statusCode, payload) {
-  response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+  response.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
   response.end(JSON.stringify(payload));
 }
 
@@ -565,11 +569,13 @@ export function createRouteGuardRouteHandler({
   geocodeLocation,
   fetchRoute,
   sampleRisk,
+  access = createRouteGuardAccess(),
 } = {}) {
+  const respond = (request, response, status, payload) => sendJson(request, response, status, payload, { 'Cache-Control': 'no-store' });
   return {
     async handle(request, response, url) {
       if (request.method === 'GET' && url.pathname === '/api/route-guard/status') {
-        sendJson(request, response, 200, createRouteGuardStatus({ provider }));
+        respond(request, response, 200, createRouteGuardStatus({ provider, access: access.describe(request) }));
         return true;
       }
 
@@ -577,14 +583,21 @@ export function createRouteGuardRouteHandler({
 
       try {
         const selectedProvider = String(provider).trim().toLowerCase();
-        const body = await readJsonBody(request);
+        const granted = await access.authorize(request);
+        const input = await readJsonBody(request);
+        if (!input || typeof input !== 'object' || Array.isArray(input)) {
+          throw new RouteGuardError('Route Guard request body must be a JSON object.');
+        }
+        const body = { ...input, entitlement: 'pro', routeScansUsed: granted.mode === 'local-development' ? 0 : input.routeScansUsed };
+        const publicAccess = { mode: granted.mode };
         if (selectedProvider === 'mock') {
-          sendJson(request, response, 200, createMockRouteGuardScan(body));
+          respond(request, response, 200, { ...createMockRouteGuardScan(body), access: publicAccess });
           return true;
         }
         if (['free-osm', 'osm', 'free'].includes(selectedProvider)) {
           try {
-            sendJson(request, response, 200, await createFreeRouteGuardScan(body, { geocodeLocation, fetchRoute, sampleRisk }));
+            const scan = await createFreeRouteGuardScan(body, { geocodeLocation, fetchRoute, sampleRisk });
+            respond(request, response, 200, { ...scan, access: publicAccess });
           } catch (error) {
             if (error instanceof RouteGuardError) throw error;
             throw new RouteGuardError('The route provider is unavailable. Please retry shortly.', 502, 'ROUTE_PROVIDER_FAILED');
@@ -599,10 +612,10 @@ export function createRouteGuardRouteHandler({
           );
         }
       } catch (error) {
-        const routeError = error instanceof RouteGuardError
+        const routeError = error instanceof RouteGuardError || error instanceof RouteGuardAccessError
           ? error
           : new RouteGuardError('Route Guard could not build this route.', 500, 'ROUTE_GUARD_FAILED');
-        sendJson(request, response, routeError.statusCode, {
+        respond(request, response, routeError.statusCode, {
           error: routeError.message,
           code: routeError.code,
         });

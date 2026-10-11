@@ -25,6 +25,22 @@ Use the same command after cloning the repository on macOS. Git will then run th
 
 ## Run locally
 
+### Test Route Guard without Supabase
+
+From the cloned repository on macOS or Windows:
+
+```sh
+npm run start:local
+```
+
+This builds the website, then starts it at `http://localhost:3001`. Keep the terminal running and open **Route Guard** from the home screen. The **LOCAL DEV** label confirms development access. Routes and available risk readings use real public sources; unavailable readings remain unknown. No payment, Google key, or fake subscription is needed, and these scans do not consume a paid allowance.
+
+The launcher binds to `127.0.0.1` and enables development access only for direct, same-origin requests on this computer. It refuses `NODE_ENV=production`. Do not expose it through a tunnel or reverse proxy. This mode does not enable access from a phone; deployed/native testing needs configured account access and a reachable API. Public routing limits still apply.
+
+For normal account-gated operation, use the commands below instead. `npm run api` does not enable development access.
+
+### Expo or normal website operation
+
 Open two terminals.
 
 Terminal 1:
@@ -74,7 +90,7 @@ curl http://127.0.0.1:3001/api/route-guard/status
 
 `/api/route-guard/status` should report `ready: true`, the active provider, 100 included Route Guard scans per month, and `google.required: false`. Route Guard currently defaults to free backend routing (`ROUTE_PROVIDER=free-osm` in the server) and does not need `GOOGLE_MAPS_API_KEY`.
 
-Example Route Guard scan without Google billing:
+Example Route Guard scan while `npm run start:local` is running (macOS shell):
 
 ```bash
 curl -X POST http://127.0.0.1:3001/api/route-guard \
@@ -84,19 +100,23 @@ curl -X POST http://127.0.0.1:3001/api/route-guard \
 
 The response should include `provider: "free-osm"`, `googleRequestMade: false`, route points, sampled risk scores, and anonymised context labels such as Police.uk-style "On or near..." areas when available. Routing failures return an error, never generated fallback geometry. Mock routes require explicit `ROUTE_PROVIDER=mock` configuration and must not be used for real journeys.
 
+Outside explicit local development access, scans require a bearer token verified against Supabase and an active, unexpired subscription belonging to that user. The request body's `entitlement` field never authorizes access. Missing membership configuration returns 503, unsigned requests return 401, and missing/expired subscriptions return 403. Monthly usage is still client-maintained; persistent server-side quota accounting remains required before a paid public launch.
+
 Unavailable route readings use `score: null` and `riskLevel: "unknown"`, shown in grey. An incomplete route has no overall numerical score; known elevated sections can still be shown. Each route baseline lookup has a 10-second response deadline and uses one crime-data lookup rather than generating a full area report. Existing shared upstream requests may finish populating the cache after the deadline. Start live position to retry readings through periodic refresh. Unknown risk does not mean low risk. The scan client allows up to 60 seconds for geocoding, queued routing, and risk lookup combined.
 
 Walking uses the dedicated FOSSGIS/OSRM pedestrian service, while driving uses its car service. The backend serializes routing requests with at least 1.1 seconds between starts and accepts at most three pending routing requests per process. This public service is for light use, not unlimited production capacity. Review the [provider usage policy](https://routing.openstreetmap.de/about.html) before deployment; multiple backend processes need a shared rate limit or a self-hosted routing service. The route-source panel includes attribution and the required map-correction link. Transit remains a disclosed walking-corridor estimate, not a bus or train itinerary.
 
 ### Test Route Guard approach alerts
 
-1. Open Route Guard with PRO access, enter a start and destination, and scan a route.
+1. Open Route Guard with PRO access or localhost development access, enter a start and destination, and scan a route.
 2. Select **Enable browser alerts** to request optional browser notification permission.
 3. Select **Start live position** and allow location access. Use HTTPS on a phone; localhost is suitable for testing on the computer itself.
 4. Keep the page open. An amber or red sample within 500 metres ahead along the route triggers an on-screen journey alert with its road/context, score, distance, and explanation. Supported browsers also receive a notification when permission is granted.
 5. To reproduce a warning without travelling, use browser developer tools to override geolocation to a position just before an elevated sample on the scanned route.
 
 Approach alerts require a GPS reading no older than 30 seconds with accuracy of 100 metres or better. Each sample/severity alerts once per scanned route; escalation from amber to red can alert again. Pausing tracking, leaving the route, or receiving mock routing suppresses approach alerts. Scanning a new route stops tracking until you restart it.
+
+Temporary browser GPS unavailability or timeouts keep the location watch alive. The status changes to **Waiting for location**, clears the stale score/distance from the approach card, and pauses new alerts until a fresh fix arrives. Denied permission stops the watch. Re-enable access and select **Start live position** to restart after a permission denial.
 
 Browser banners may be unavailable even after permission is granted, so the latest alert remains visible in the page. This foreground website feature does not promise alerts with the page closed or the phone locked.
 

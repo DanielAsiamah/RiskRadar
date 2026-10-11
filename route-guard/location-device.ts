@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as Location from 'expo-location';
 import { startJourneyLocationSession, type JourneyLocation } from './location-session';
+import { watchBrowserJourneyPosition } from './browser-location';
 
 function normalize(position: { coords: { latitude: number; longitude: number; accuracy: number | null }; timestamp: number }): JourneyLocation {
   return {
@@ -33,18 +34,12 @@ export async function readJourneyLocation(): Promise<JourneyLocation> {
   return normalize(await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High }));
 }
 
-export function watchJourneyLocation(onLocation: (location: JourneyLocation) => void, onError: (error: Error) => void) {
+export function watchJourneyLocation(onLocation: (location: JourneyLocation) => void, onError: (error: Error) => void, onWarning?: (warning: Error) => void) {
   return startJourneyLocationSession({
-    onLocation, onError,
-    subscribe: async (update, fail) => {
+    onLocation, onError, onWarning,
+    subscribe: async (update, fail, warn) => {
       if (Platform.OS === 'web') {
-        const geolocation = browserLocation();
-        const id = geolocation.watchPosition(
-          (position) => update(normalize(position)),
-          (error) => fail(new Error(error.message || 'Location access failed.')),
-          { enableHighAccuracy: true, maximumAge: 10_000, timeout: 15_000 },
-        );
-        return { remove: () => geolocation.clearWatch(id) };
+        return watchBrowserJourneyPosition(browserLocation(), update, fail, warn);
       }
       await requireNativePermission();
       return Location.watchPositionAsync(

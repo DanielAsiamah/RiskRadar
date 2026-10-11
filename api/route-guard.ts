@@ -42,6 +42,7 @@ export interface RouteGuardHotzone {
 }
 
 export interface RouteGuardScan {
+  access?: { mode: 'local-development' | 'subscription' };
   provider: 'mock' | 'free-osm';
   googleRequestMade: false;
   start: string;
@@ -84,6 +85,7 @@ export interface RouteGuardScan {
 }
 
 export interface RouteGuardStatus {
+  access?: { localDevelopment: boolean; subscriptionConfigured: boolean };
   ready: boolean;
   provider: 'mock' | 'free-osm' | 'unavailable';
   usage: {

@@ -1,12 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { createRouteGuardRouteHandler } from './route-guard.mjs';
+import { createRouteGuardRouteHandler as createSecuredHandler } from './route-guard.mjs';
+import { createRouteGuardAccess } from './route-guard-access.mjs';
+
+const paidAccess = createRouteGuardAccess({
+  config: { configured: true },
+  now: () => Date.parse('2026-10-06T12:00:00Z'),
+  store: {
+    verifyAccessToken: async () => ({ id: 'user-1' }),
+    getSubscription: async () => ({ user_id: 'user-1', status: 'active', current_period_end: '2026-11-01T00:00:00Z' }),
+  },
+});
+const createRouteGuardRouteHandler = (options = {}) => createSecuredHandler({ access: paidAccess, ...options });
 
 function createRequest(body, method = 'POST') {
   const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];
   return {
     method,
+    headers: { authorization: 'Bearer test-token' },
     [Symbol.asyncIterator]: async function* () {
       yield* chunks;
     },
@@ -36,6 +48,30 @@ const validBody = {
   routeScansUsed: 4,
 };
 
+test('route API fails closed without a server access policy even when the body claims PRO', async () => {
+  const handler = createSecuredHandler({ provider: 'mock' });
+  const response = createResponse();
+  await handler.handle(createRequest(validBody), response, new URL('http://localhost/api/route-guard'));
+  assert.equal(response.statusCode, 503);
+  assert.equal(JSON.parse(response.body).code, 'ROUTE_GUARD_AUTH_UNAVAILABLE');
+});
+
+test('local development scans override client entitlement and do not consume the paid allowance', async () => {
+  const handler = createRouteGuardRouteHandler({
+    provider: 'mock',
+    access: {
+      describe: () => ({ localDevelopment: true }),
+      authorize: async () => ({ mode: 'local-development' }),
+    },
+  });
+  const response = createResponse();
+  await handler.handle(createRequest({ ...validBody, entitlement: 'free', routeScansUsed: 100 }), response, new URL('http://localhost/api/route-guard'));
+  assert.equal(response.statusCode, 200);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.access.mode, 'local-development');
+  assert.equal(payload.usage.usedBefore, 0);
+});
+
 test('POST /api/route-guard returns a mock route scan', async () => {
   const handler = createRouteGuardRouteHandler({ provider: 'mock' });
   const response = createResponse();
@@ -59,8 +95,12 @@ test('POST /api/route-guard returns structured entitlement and limit errors', as
   const handler = createRouteGuardRouteHandler();
 
   const freeResponse = createResponse();
-  await handler.handle(
-    createRequest({ ...validBody, entitlement: 'free' }),
+  const freeHandler = createRouteGuardRouteHandler({ access: createRouteGuardAccess({
+    config: { configured: true },
+    store: { verifyAccessToken: async () => ({ id: 'free-user' }), getSubscription: async () => null },
+  }) });
+  await freeHandler.handle(
+    createRequest({ ...validBody, entitlement: 'pro' }),
     freeResponse,
     new URL('http://localhost/api/route-guard'),
   );
@@ -89,6 +129,7 @@ test('route guard handler ignores other routes and rejects invalid JSON', async 
 
   const invalidRequest = {
     method: 'POST',
+    headers: { authorization: 'Bearer test-token' },
     [Symbol.asyncIterator]: async function* () {
       yield Buffer.from('{not json');
     },
@@ -232,9 +273,47 @@ test('real routing failures return an error, never generated geometry or a consu
   assert.equal(fallbackPayload.usage, undefined);
 
   const freeResponse = createResponse();
-  await handler.handle(createRequest({ ...validBody, entitlement: 'free' }), freeResponse, new URL('http://localhost/api/route-guard'));
-  assert.equal(freeResponse.statusCode, 403);
-  assert.equal(JSON.parse(freeResponse.body).code, 'PREMIUM_REQUIRED');
+  const unsignedRequest = { ...createRequest(validBody), headers: {} };
+  await handler.handle(unsignedRequest, freeResponse, new URL('http://localhost/api/route-guard'));
+  assert.equal(freeResponse.statusCode, 401);
+  assert.equal(JSON.parse(freeResponse.body).code, 'AUTHENTICATION_REQUIRED');
+});
+
+test('status exposes local access only for requests accepted by the actual access policy', async () => {
+  const handler = createSecuredHandler({
+    access: createRouteGuardAccess({ env: { NODE_ENV: 'development', ROUTE_GUARD_LOCAL_DEVELOPMENT: 'true' }, host: '127.0.0.1', port: 3001 }),
+  });
+  for (const [remoteAddress, localDevelopment] of [['127.0.0.1', true], ['192.168.1.1', false]]) {
+    const response = createResponse();
+    await handler.handle({ method: 'GET', headers: { host: 'localhost:3001' }, socket: { remoteAddress } }, response, new URL('http://localhost:3001/api/route-guard/status'));
+    const payload = JSON.parse(response.body);
+    assert.equal(payload.access.localDevelopment, localDevelopment);
+    assert.equal(payload.supabase.requiredForRouteScan, !localDevelopment);
+    assert.equal(response.headers['Cache-Control'], 'no-store');
+  }
+});
+
+test('custom server responses also prevent caching request-specific access status', async () => {
+  let sentHeaders;
+  const handler = createRouteGuardRouteHandler({
+    sendJson: (_request, _response, _status, _body, headers) => { sentHeaders = headers; },
+  });
+  await handler.handle(createRequest(null, 'GET'), createResponse(), new URL('http://localhost/api/route-guard/status'));
+  assert.equal(sentHeaders?.['Cache-Control'], 'no-store');
+});
+
+test('non-object JSON bodies return a validation error after authorization', async () => {
+  const handler = createRouteGuardRouteHandler({ provider: 'mock' });
+  for (const value of [null, [], 'pro', 42]) {
+    const response = createResponse();
+    const request = {
+      method: 'POST', headers: { authorization: 'Bearer test-token' },
+      [Symbol.asyncIterator]: async function* () { yield Buffer.from(JSON.stringify(value)); },
+    };
+    await handler.handle(request, response, new URL('http://localhost/api/route-guard'));
+    assert.equal(response.statusCode, 400);
+    assert.equal(JSON.parse(response.body).code, 'INVALID_ROUTE_GUARD_INPUT');
+  }
 });
 
 test('the default route provider is real routing rather than a generated preview', async () => {
