@@ -63,6 +63,21 @@ test('restores unavailable samples without accepting a fabricated numeric unknow
   assert.equal(parseRouteBackgroundState(JSON.stringify(inconsistent)), null);
 });
 
+test('restores source coverage and drops malformed metadata without losing the journey', () => {
+  const state = createRouteBackgroundState(route, 'source-health', 1000);
+  const liveData = {
+    checkedAt: '2026-10-13T12:00:00Z', scope: 'source-network', status: 'unavailable',
+    sources: [{ sourceId: 'ea', label: 'England floods', state: 'stale', lastSuccessAt: '2026-10-13T10:00:00Z',
+      staleAfterMs: 45 * 60_000, coverage: { countries: ['England'], regions: [], kind: 'flood' } }],
+  };
+  const restored = parseRouteBackgroundState(JSON.stringify({ ...state, route: { ...route, liveData } }));
+  assert.deepEqual(restored?.route.liveData, liveData);
+  const malformed = parseRouteBackgroundState(JSON.stringify({ ...state, route: { ...route, liveData: { ...liveData, sources: null } } }));
+  assert.equal(malformed?.enabled, true);
+  assert.equal(malformed?.route.liveData, undefined);
+  assert.equal(malformed?.route.liveIncidentMarkers?.[0].id, 'closure-1');
+});
+
 test('rejects missing, corrupt, generated and unbounded route state', () => {
   const state = createRouteBackgroundState(route, 'session-1', 1000);
   for (const value of [

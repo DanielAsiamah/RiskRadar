@@ -46,6 +46,25 @@ test('cleared incidents reduce scores without compounding previous live contribu
   assert.deepEqual(cooled.liveIncidentMarkers, []);
   assert.doesNotMatch(cooled.sampledRiskScores[0].basis, /Flood warning/);
 });
+
+test('missing source health never becomes a successful empty live check', () => {
+  const updated = applyRouteLiveRefresh(samples, {
+    ...response, live: { ...response.live, samples: [{ liveScore: 20, contextScore: 20, contributors: [] }] },
+  });
+  assert.match(updated.sampledRiskScores[0].basis, /source.*unavailable/i);
+  assert.doesNotMatch(updated.sampledRiskScores[0].basis, /No contributing active incidents/);
+  assert.equal(updated.overallRiskScore, 20);
+});
+
+test('source outage metadata travels with known incident warnings rather than clearing them', () => {
+  const liveData = { checkedAt: response.live.calculatedAt, scope: 'source-network' as const, status: 'unavailable' as const, sources: [] };
+  const updated = applyRouteLiveRefresh(samples, { ...response, liveData });
+  assert.deepEqual(updated.liveData, liveData);
+  assert.equal(updated.overallRiskScore, 82);
+  assert.deepEqual(updated.liveIncidentMarkers.map((marker) => marker.id), ['flood-1']);
+  assert.match(updated.sampledRiskScores[0].basis, /Flood warning nearby/);
+  assert.match(updated.sampledRiskScores[0].basis, /sources unavailable/);
+});
 test('rejects incomplete, mismatched and malformed refresh responses', () => {
   for (const changed of [
     { ...response, samples: [] },

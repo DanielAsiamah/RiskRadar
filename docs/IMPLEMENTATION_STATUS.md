@@ -1,10 +1,18 @@
 # RiskRadar Implementation Status
 
-Checkpoint review: 11 October 2026.
+Checkpoint review: 13 October 2026.
 
 The goal remains a working frontend and backend with maps and approach alerts while walking or travelling. A passing test suite alone does not establish that the complete app is ready for a real journey.
 
 ## Verified in this checkpoint
+
+- Initial Route Guard scans and live-risk refreshes now include named source health, geography, hazard category, last successful check, and freshness limits. A successful API response no longer implies that its upstream live feeds are available.
+- Backend reads age out stale health even when ingestion has stopped. The route screen also rechecks freshness every 30 seconds, with expandable source details and distinct limited/unavailable messaging. This is source-network status, not a claim that every point on the route has coverage.
+- Regression tests cover unavailable/malformed metadata, disconnected sources, expiry, preserved known incidents, unchanged historical scores, and saved-journey compatibility. The first full run caught an older-session round-trip regression; it was fixed and the subsequent full suite passed typecheck and 388 tests.
+- The final full suite passed all 388 tests again. The web export and credential scanner passed. A real browser run opened the mobile source details and scanned a real route, but its first live refresh returned HTTP 400; the original response body was not retained, so its exact cause is unconfirmed. A repeat passed the real refresh and simulated GPS loss/recovery, off-route movement, rejoining, and stopping with no page errors. That repeat's initial scan had four unavailable risk samples; it did not substitute scores for them.
+- The restarted local preview retrieved seven Environment Agency flood records and reported limited England-flood coverage. TfL and other unconnected feeds remained explicitly unavailable. The inspected screenshots show the compact/expanded coverage panel and approach card; some map tiles were still loading. This does not prove physical-device or production delivery.
+
+## Previous checkpoint (11 October 2026)
 
 - `npm run start:local` uses a platform-neutral Node launcher and builds the web export before starting a loopback-only API. It was exercised on this Mac; Windows execution remains unverified. The Route Guard screen uses explicit server-confirmed development access without a fake account or payment. Public routing limits still apply.
 - Normal route scans verify the Supabase bearer identity and an active, unexpired subscription belonging to that user. A client-supplied PRO label no longer authorizes a scan. Missing configuration fails closed. Development access is disabled in production and rejects foreign origins, non-loopback peers, unexpected hosts, and forwarded requests.
@@ -34,7 +42,8 @@ The goal remains a working frontend and backend with maps and approach alerts wh
 - Account access: this checkout has no `.env`. Local development access now permits computer-only Route Guard testing. Real Supabase/Stripe setup, payment-to-unlock verification, and durable server-side quota enforcement remain required for paid deployment.
 - Public routing capacity: the community service has usage limits and no production uptime guarantee. A multi-process deployment needs shared rate limiting or a self-hosted provider.
 - Route performance: public geocoding, routing, and crime feeds can still fail or be slow. The scan client has a 60-second total request deadline. Load and deployment testing remains required; shared upstream requests may finish warming the cache after a risk lookup has returned unavailable.
-- Live-source availability: the Environment Agency feed has intermittent failures. The running preview recorded three accepted flood records at its last successful poll on 27 September, but its source status was `stale` on the 28 September check. TfL remains `not-configured` without `TFL_APP_KEY`; the other listed regional providers are not yet connected.
+- Refresh reliability: a failed baseline lookup currently rejects the whole live-risk refresh and uses a generic HTTP 400 response. The client preserves the last reading and pauses new alerts, but partial-refresh handling and correct upstream error classification still need implementation.
+- Live-source availability: the Environment Agency feed can fail intermittently; consult the source panel rather than treating an empty map as an all-clear. Its coverage is England floods only. TfL remains `not-configured` without `TFL_APP_KEY`; the other listed regional providers are not yet connected. Historical crime data is not a live incident stream.
 - Transit currently uses a disclosed walking-corridor estimate. Actual public-transport routing remains required for the full transport goal.
 - Live incident history remains in memory and is lost when the backend restarts. Durable production storage, ingestion scheduling, and delivery remain unfinished.
 - Native installed-build testing is still required for locked-screen alerts, permission revocation, background/foreground handoff, stop-during-refresh, and restart recovery.

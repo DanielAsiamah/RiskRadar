@@ -130,6 +130,7 @@ const routeGuardRoutes = createRouteGuardRouteHandler({
   access: createRouteGuardAccess({ env: process.env, host: HOST, port: PORT, config: membershipConfig, store: membershipStore }),
   sendJson,
   sampleRisk: sampleRouteGuardRisk,
+  getLiveDataStatus: liveIncidentRoutes.getLiveDataStatus,
 });
 let stopLiveIngestionPolling = null;
 const upstreamCache = new Map();

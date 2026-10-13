@@ -1,6 +1,7 @@
 import { apiRequest } from './client';
 import type { RouteLiveRefresh } from '../route-guard/refresh';
 import type { LiveIncidentMapMarker } from '../live-incidents/types';
+import type { RouteLiveData } from '../route-guard/live-data';
 
 export type RouteGuardTravelMode = 'walking' | 'driving' | 'transit';
 export type RouteGuardRiskLevel = 'low' | 'amber' | 'red' | 'unknown';
@@ -66,6 +67,7 @@ export interface RouteGuardScan {
   overallRiskScore: number | null;
   overallRiskLevel: RouteGuardRiskLevel;
   liveIncidentMarkers?: LiveIncidentMapMarker[];
+  liveData?: RouteLiveData;
   usage: {
     entitlement: 'pro';
     includedMonthlyScans: 100;

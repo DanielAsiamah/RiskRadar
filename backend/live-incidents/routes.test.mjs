@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { createLiveIncidentRouteHandler } from './routes.mjs';
+import { createLiveSourceDefinitions } from './sources.mjs';
 
 function createRequest({ method = 'GET', body = null, headers = {} } = {}) {
   const chunks = body === null ? [] : [Buffer.from(JSON.stringify(body))];
@@ -21,6 +22,49 @@ const pointAnalysis = {
   postcodeData: { latitude: 51.4062, longitude: 0.0186 },
   crimeData: { crimeScore: 34, timingContext: { adjustedScore: 36, totalAdjustment: 2, factors: [{ id: 'night', label: 'Late-night pressure', points: 2 }] } },
 };
+
+test('route refresh discloses stale and disconnected sources without changing the historical score', async () => {
+  const deps = dependencies({ sourceDefinitions: createLiveSourceDefinitions() });
+  deps.store.listSourceStates = async () => [{
+    sourceId: 'environment-agency-floods-england', state: 'healthy',
+    lastSuccessAt: '2026-08-27T17:00:00.000Z',
+  }];
+  const routes = createLiveIncidentRouteHandler(deps);
+  const response = createResponse();
+  await routes.handle(createRequest({ method: 'POST', body: { routeSamples: [
+    { id: '0', latitude: 51.5, longitude: -0.1 },
+  ] } }), response, new URL('http://localhost/api/live-risk'));
+  const payload = JSON.parse(response.body);
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.liveData?.status, 'unavailable');
+  assert.equal(payload.liveData.sources[0].state, 'stale');
+  assert.equal(payload.liveData.sources[1].state, 'not-configured');
+  assert.equal(payload.live.samples[0].liveScore, 36);
+});
+
+test('public source status ages out and a source-state read failure is disclosed', async () => {
+  const deps = dependencies({ sourceDefinitions: createLiveSourceDefinitions() });
+  deps.store.listSourceStates = async () => [{
+    sourceId: 'environment-agency-floods-england', state: 'healthy', lastSuccessAt: '2026-08-27T16:00:00Z',
+  }];
+  const routes = createLiveIncidentRouteHandler(deps);
+  for (const path of ['/api/live-source-status', '/api/live-incidents?lat=51.5&lng=-0.1']) {
+    const response = createResponse();
+    await routes.handle(createRequest(), response, new URL(`http://localhost${path}`));
+    const payload = JSON.parse(response.body);
+    assert.equal(payload.sources[0].state, 'stale');
+    assert.equal(payload.network.status, 'limited');
+    assert.equal(payload.liveData.status, 'unavailable');
+  }
+  deps.store.listSourceStates = async () => { throw new Error('database offline'); };
+  const response = createResponse();
+  await routes.handle(createRequest({ method: 'POST', body: { latitude: 51.5, longitude: -0.1 } }), response, new URL('http://localhost/api/live-risk'));
+  const payload = JSON.parse(response.body);
+  assert.equal(response.statusCode, 200);
+  assert.equal(payload.liveData.status, 'unavailable');
+  assert.equal(payload.liveData.sources[0].state, 'failed');
+  assert.equal(payload.live.liveScore, 36);
+});
 
 test('route refresh uses its lightweight analysis dependency instead of a full area report', async () => {
   const calls = [];

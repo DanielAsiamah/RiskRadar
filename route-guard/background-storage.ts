@@ -1,5 +1,6 @@
 import type { RouteBackgroundState } from './background.ts';
 import type { RouteGuardScan } from '../api/route-guard.ts';
+import { readRouteLiveData } from './live-data.ts';
 
 export const ROUTE_BACKGROUND_STORAGE_KEY = 'riskradar-route-background-v1';
 export const ROUTE_BACKGROUND_MAX_AGE_MS = 4 * 60 * 60 * 1000;
@@ -56,6 +57,8 @@ export function parseRouteBackgroundState(raw: string | null): RouteBackgroundSt
     if (route.geocoded !== undefined && (typeof route.geocoded?.start?.label !== 'string' || typeof route.geocoded?.destination?.label !== 'string')) return null;
     if (route.routeProvider !== undefined && typeof route.routeProvider?.modeDisclosure !== 'string') return null;
     if (route.fallbackReason !== undefined && typeof route.fallbackReason !== 'string') return null;
+    // Older or malformed metadata must become unknown, never a fresh live check.
+    if (route.liveData !== undefined && !readRouteLiveData(route.liveData)) delete route.liveData;
     if (route.liveIncidentMarkers !== undefined) {
       if (!Array.isArray(route.liveIncidentMarkers) || route.liveIncidentMarkers.length > 100) return null;
       const ids = new Set<string>();

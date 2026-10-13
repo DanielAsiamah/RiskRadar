@@ -1,10 +1,12 @@
 import type { RouteGuardHotzone, RouteGuardRiskLevel, RouteGuardRiskSample } from '../api/route-guard.ts';
 import { buildLiveIncidentMarkers } from '../live-incidents/presentation.ts';
+import { describeRouteLiveData, readRouteLiveData, type RouteLiveData } from './live-data.ts';
 
 export interface RouteLiveRefresh {
   mode: 'route';
   samples: Array<{ id: string; latitude: number; longitude: number }>;
   incidents: unknown[];
+  liveData?: RouteLiveData;
   live: {
     calculatedAt: string;
     samples: Array<{
@@ -56,6 +58,11 @@ export function applyRouteLiveRefresh(original: RouteGuardRiskSample[], response
     || !Array.isArray(response.incidents)
     || !original.length || response.samples.length !== original.length || response.live.samples.length !== original.length
     || !Number.isFinite(Date.parse(response.live.calculatedAt))) throw new Error('Incomplete live route update.');
+  const liveData = readRouteLiveData(response.liveData);
+  const sourceStatus = describeRouteLiveData(liveData, Date.parse(response.live.calculatedAt));
+  const coverageNote = sourceStatus.status === 'unavailable'
+    ? 'Live sources unavailable; current conditions could not be confirmed.'
+    : 'Live coverage is limited to the named sources and their listed areas.';
   const sampledRiskScores = original.map((sample, index): RouteGuardRiskSample => {
     const point = response.samples[index];
     const reading = response.live.samples[index];
@@ -66,7 +73,7 @@ export function applyRouteLiveRefresh(original: RouteGuardRiskSample[], response
     const reasons = reading.contributors.map((item) => item.reason).filter((reason): reason is string => typeof reason === 'string');
     return {
       ...sample, score: reading.liveScore, riskLevel: level(reading.liveScore), contributors: reading.contributors,
-      basis: `Area and time context: ${reading.contextScore}/100. ${reasons.length ? [...new Set(reasons)].join(' ') : 'No contributing active incidents in the current feed.'}`,
+      basis: `Area and time context: ${reading.contextScore}/100. ${reasons.length ? [...new Set(reasons)].join(' ') : 'No matching incident in the available reports.'} ${coverageNote}`,
     };
   });
   const hotzoneSections: RouteGuardHotzone[] = [];
@@ -87,6 +94,7 @@ export function applyRouteLiveRefresh(original: RouteGuardRiskSample[], response
     .map((contributor) => contributor.incidentId)
     .filter((incidentId): incidentId is string => typeof incidentId === 'string' && incidentId.length > 0));
   return {
+    liveData,
     sampledRiskScores,
     hotzoneSections,
     overallRiskScore,

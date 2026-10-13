@@ -2,6 +2,7 @@ import { timingSafeEqual } from 'node:crypto';
 
 import { toPublicIncident } from './contracts.mjs';
 import { calculateLiveRisk, calculateRouteLiveRisk } from './risk-overlay.mjs';
+import { createLiveDataStatus } from './source-health.mjs';
 
 const MAX_BODY_BYTES = 8_192;
 const DISCLAIMER = 'RiskRadar provides current area intelligence from named sources. It is not an emergency service and does not guarantee that a place or route is safe.';
@@ -84,7 +85,16 @@ export function createLiveIncidentRouteHandler({
     return store.listPublicIncidents({ point: { latitude, longitude }, radiusKm: 50, limit: 100, calculatedAt });
   }
 
+  async function getLiveDataStatus() {
+    let states;
+    try { states = await store.listSourceStates(); } catch {
+      states = sourceDefinitions.map((source) => ({ sourceId: source.id, state: 'failed' }));
+    }
+    return createLiveDataStatus(sourceDefinitions, states, now().toISOString());
+  }
+
   return Object.freeze({
+    getLiveDataStatus,
     async handle(request, response, url) {
       if (request.method === 'GET' && url.pathname === '/api/live-incidents') {
         const latitude = number(url.searchParams.get('lat'));
@@ -96,14 +106,14 @@ export function createLiveIncidentRouteHandler({
           return true;
         }
         const generatedAt = now().toISOString();
-        const [states, incidents] = await Promise.all([
-          store.listSourceStates(),
+        const [liveData, incidents] = await Promise.all([
+          getLiveDataStatus(),
           store.listPublicIncidents({ point: { latitude, longitude }, radiusKm, limit, calculatedAt: generatedAt }),
         ]);
         sendJson(response, 200, {
           generatedAt, query: { latitude, longitude, radiusKm, limit },
-          network: networkMetadata(store, sourceDefinitions, states), coverage: sourceDefinitions.map((source) => source.coverage),
-          sources: states, incidents, disclaimer: DISCLAIMER,
+          network: networkMetadata(store, sourceDefinitions, liveData.sources), coverage: sourceDefinitions.map((source) => source.coverage),
+          sources: liveData.sources, liveData, incidents, disclaimer: DISCLAIMER,
         });
         return true;
       }
@@ -116,17 +126,17 @@ export function createLiveIncidentRouteHandler({
           sendJson(response, 404, { error: 'Live incident was not found.', code: 'LIVE_INCIDENT_NOT_FOUND' });
           return true;
         }
-        const states = await store.listSourceStates();
+        const liveData = await getLiveDataStatus();
         sendJson(response, 200, {
           incident: toPublicIncident(incident), versions: await store.listPublicVersions(incidentId), evidence: await store.listPublicEvidence(incidentId),
-          network: networkMetadata(store, sourceDefinitions, states), disclaimer: DISCLAIMER,
+          network: networkMetadata(store, sourceDefinitions, liveData.sources), liveData, disclaimer: DISCLAIMER,
         });
         return true;
       }
 
       if (request.method === 'GET' && url.pathname === '/api/live-source-status') {
-        const states = await store.listSourceStates();
-        sendJson(response, 200, { generatedAt: now().toISOString(), network: networkMetadata(store, sourceDefinitions, states), sources: states, disclaimer: DISCLAIMER });
+        const liveData = await getLiveDataStatus();
+        sendJson(response, 200, { generatedAt: liveData.checkedAt, network: networkMetadata(store, sourceDefinitions, liveData.sources), sources: liveData.sources, liveData, disclaimer: DISCLAIMER });
         return true;
       }
 
@@ -145,7 +155,7 @@ export function createLiveIncidentRouteHandler({
             if (!validPoint(latitude, longitude)) throw new TypeError('Postcode analysis did not include a valid location');
             const historical = contextFor(analysis);
             const live = calculateLiveRisk({ ...historical, incidents: await incidentsNear(latitude, longitude, calculatedAt), point: { latitude, longitude }, calculatedAt });
-            sendJson(response, 200, { mode: 'postcode', postcode: analysis.postcode, point: { latitude, longitude }, historical: { baselineScore: historical.baselineScore }, context: { contextScore: historical.contextScore, adjustments: historical.contextAdjustments }, live, disclaimer: DISCLAIMER });
+            sendJson(response, 200, { mode: 'postcode', postcode: analysis.postcode, point: { latitude, longitude }, historical: { baselineScore: historical.baselineScore }, context: { contextScore: historical.contextScore, adjustments: historical.contextAdjustments }, live, liveData: await getLiveDataStatus(), disclaimer: DISCLAIMER });
             return true;
           }
           if (validPoint(number(body.latitude), number(body.longitude))) {
@@ -154,7 +164,7 @@ export function createLiveIncidentRouteHandler({
             const analysis = await analyzePoint({ latitude, longitude });
             const historical = contextFor(analysis);
             const live = calculateLiveRisk({ ...historical, incidents: await incidentsNear(latitude, longitude, calculatedAt), point: { latitude, longitude }, calculatedAt });
-            sendJson(response, 200, { mode: 'point', point: { latitude, longitude }, historical: { baselineScore: historical.baselineScore }, context: { contextScore: historical.contextScore, adjustments: historical.contextAdjustments }, live, disclaimer: DISCLAIMER });
+            sendJson(response, 200, { mode: 'point', point: { latitude, longitude }, historical: { baselineScore: historical.baselineScore }, context: { contextScore: historical.contextScore, adjustments: historical.contextAdjustments }, live, liveData: await getLiveDataStatus(), disclaimer: DISCLAIMER });
             return true;
           }
           if (Array.isArray(body.routeSamples) && body.routeSamples.length >= 1 && body.routeSamples.length <= 12) {
@@ -172,7 +182,7 @@ export function createLiveIncidentRouteHandler({
             const contributingIncidents = incidents
               .filter((incident) => contributingIds.has(incident.id))
               .map((incident) => toPublicIncident(incident));
-            sendJson(response, 200, { mode: 'route', samples, live, incidents: contributingIncidents, disclaimer: DISCLAIMER });
+            sendJson(response, 200, { mode: 'route', samples, live, incidents: contributingIncidents, liveData: await getLiveDataStatus(), disclaimer: DISCLAIMER });
             return true;
           }
           throw new TypeError('Provide exactly one postcode, point, or routeSamples request.');
@@ -204,8 +214,8 @@ export function createLiveIncidentRouteHandler({
       return false;
     },
     async getReadiness() {
-      const states = await store.listSourceStates();
-      return networkMetadata(store, sourceDefinitions, states);
+      const liveData = await getLiveDataStatus();
+      return networkMetadata(store, sourceDefinitions, liveData.sources);
     },
   });
 }

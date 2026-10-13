@@ -48,6 +48,29 @@ const validBody = {
   routeScansUsed: 4,
 };
 
+test('initial real route scan includes live-source availability and tolerates a source-status outage', async () => {
+  const liveData = { checkedAt: '2026-10-13T12:00:00Z', scope: 'source-network', status: 'unavailable', sources: [] };
+  for (const failed of [false, true]) {
+    const handler = createRouteGuardRouteHandler({
+      provider: 'free-osm',
+      geocodeLocation: async (query) => ({ latitude: 51.5, longitude: -0.1, label: query }),
+      fetchRoute: async () => ({
+        routePoints: [{ latitude: 51.5, longitude: -0.1 }, { latitude: 51.51, longitude: -0.1 }],
+        distanceMetres: 1100, durationSeconds: 800,
+      }),
+      sampleRisk: async () => ({ score: 20, basis: 'Historical baseline' }),
+      getLiveDataStatus: async () => { if (failed) throw new Error('Store unavailable'); return liveData; },
+    });
+    const response = createResponse();
+    await handler.handle(createRequest(validBody), response, new URL('http://localhost/api/route-guard'));
+    assert.equal(response.statusCode, 200);
+    const payload = JSON.parse(response.body);
+    assert.equal(payload.liveData?.status, 'unavailable');
+    assert.equal(payload.overallRiskScore, 20);
+    if (!failed) assert.deepEqual(payload.liveData, liveData);
+  }
+});
+
 test('route API fails closed without a server access policy even when the body claims PRO', async () => {
   const handler = createSecuredHandler({ provider: 'mock' });
   const response = createResponse();

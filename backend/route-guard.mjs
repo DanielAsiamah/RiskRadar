@@ -569,6 +569,7 @@ export function createRouteGuardRouteHandler({
   geocodeLocation,
   fetchRoute,
   sampleRisk,
+  getLiveDataStatus,
   access = createRouteGuardAccess(),
 } = {}) {
   const respond = (request, response, status, payload) => sendJson(request, response, status, payload, { 'Cache-Control': 'no-store' });
@@ -597,7 +598,10 @@ export function createRouteGuardRouteHandler({
         if (['free-osm', 'osm', 'free'].includes(selectedProvider)) {
           try {
             const scan = await createFreeRouteGuardScan(body, { geocodeLocation, fetchRoute, sampleRisk });
-            respond(request, response, 200, { ...scan, access: publicAccess });
+            let liveData;
+            try { liveData = await getLiveDataStatus?.(); } catch { /* Keep the route usable while reporting unavailable live coverage. */ }
+            liveData ??= { checkedAt: new Date().toISOString(), scope: 'source-network', status: 'unavailable', sources: [] };
+            respond(request, response, 200, { ...scan, liveData, access: publicAccess });
           } catch (error) {
             if (error instanceof RouteGuardError) throw error;
             throw new RouteGuardError('The route provider is unavailable. Please retry shortly.', 502, 'ROUTE_PROVIDER_FAILED');

@@ -38,6 +38,7 @@ import { formatRouteGuardAlert } from '../route-guard/presentation';
 import { routeGuardAccessState, shouldRecordRouteUsage } from '../route-guard/access';
 import { evaluateRouteApproachAlert, type RouteApproachAlert } from '../route-guard/alerts';
 import { applyRouteLiveRefresh, startRouteRiskPolling } from '../route-guard/refresh';
+import { describeRouteLiveData, type RouteLiveData } from '../route-guard/live-data';
 import { readJourneyLocation, watchJourneyLocation } from '../route-guard/location-device';
 import { requestRouteNotificationPermission, sendRouteApproachNotification } from '../route-guard/notification-device';
 import { readBackgroundRoute, startBackgroundRoute, stopBackgroundRoute } from '../route-guard/background-device';
@@ -646,6 +647,8 @@ function RouteResult({
         </View>
       ) : null}
 
+      {result.provider === 'free-osm' ? <RouteLiveCoverage value={result.liveData} /> : null}
+
       <LiveProgressCard
         progress={progress}
         currentAccuracy={currentAccuracy}
@@ -667,8 +670,8 @@ function RouteResult({
       <View style={tw`rounded-2xl bg-slate-50 px-4 py-3 mb-5`}>
         <Text style={tw`text-xs font-black text-slate-700`}>
           {result.provider === 'mock' ? 'Live refresh unavailable for generated routes'
-            : liveRefreshError ? 'Live incident refresh retrying'
-              : tracking ? 'Live incident refresh active' : 'Live incident refresh paused'}
+            : liveRefreshError ? 'Route data refresh retrying'
+              : tracking ? 'Route data refresh running' : 'Route data refresh paused'}
         </Text>
         <Text style={tw`text-xs text-slate-500 mt-1`}>
           {liveUpdatedAt ? `Last checked: ${new Date(liveUpdatedAt).toLocaleTimeString()}. ` : ''}
@@ -725,6 +728,36 @@ function RouteResult({
 
       <Text style={tw`text-[10px] text-slate-400 leading-4 mt-3`}>{result.disclaimer}</Text>
       <Text style={tw`text-[10px] font-bold text-indigo-600 mt-2`}>Google requests made: 0</Text>
+    </View>
+  );
+}
+
+function RouteLiveCoverage({ value }: { value: RouteLiveData | undefined }) {
+  const [now, setNow] = useState(Date.now);
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  const model = describeRouteLiveData(value, now);
+  return (
+    <View style={tw`rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 mb-5`}>
+      <Text accessibilityRole="header" style={tw`text-xs font-black text-slate-800`}>{model.title}</Text>
+      <Text style={tw`text-xs text-slate-600 leading-5 mt-1`}>{model.detail}</Text>
+      {model.sources.length > 0 ? (
+        <Pressable accessibilityRole="button" accessibilityState={{ expanded }} onPress={() => setExpanded((open) => !open)} style={tw`py-2 mt-1`}>
+          <Text style={tw`text-xs font-bold text-indigo-700`}>{expanded ? 'Hide source details' : 'View source details'}</Text>
+        </Pressable>
+      ) : null}
+      {expanded ? model.sources.map((source) => (
+        <View key={source.id} style={tw`mt-3`}>
+          <Text style={tw`text-xs font-bold text-slate-700`}>{source.label}: {source.stateLabel}</Text>
+          <Text style={tw`text-[11px] text-slate-500 mt-1`}>{source.detail}</Text>
+          <Text style={tw`text-[11px] text-slate-500 mt-1`}>
+            {source.lastSuccessAt ? `Last successful check: ${new Date(source.lastSuccessAt).toLocaleString()}` : 'No successful source check recorded.'}
+          </Text>
+        </View>
+      )) : null}
     </View>
   );
 }
