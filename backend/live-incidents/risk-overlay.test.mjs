@@ -155,3 +155,35 @@ test('risk calculations validate scores and handle a maximum context score', () 
   assert.equal(result.liveDelta, 0);
   assert.throws(() => calculateRouteLiveRisk({ samples: [], incidents: [], calculatedAt }), /samples/);
 });
+
+test('partial routes retain known risk and incident evidence but withhold aggregate scores', () => {
+  const route = calculateRouteLiveRisk({
+    samples: [
+      { id: 'known', latitude: 52.9, longitude: -1.3, baselineScore: 20, contextScore: 20 },
+      { id: 'missing', ...point, dataAvailable: false, baselineScore: null, contextScore: null },
+    ], incidents: [officialFlood], calculatedAt,
+  });
+  assert.equal(route.samples[0].liveScore, 20);
+  assert.equal(route.samples[1].dataAvailable, false);
+  assert.equal(route.samples[1].liveScore, null);
+  assert.equal(route.samples[1].liveDelta, null);
+  assert.equal(route.samples[1].riskLevel, 'unknown');
+  assert.equal(route.samples[1].contributors[0].scoreContribution, null);
+  assert.deepEqual(route.contributingIncidentIds, ['inc_flood_1']);
+  assert.equal(route.maximumLiveScore, null);
+  assert.equal(route.exposureWeightedLiveScore, null);
+});
+
+test('unknown route samples must be explicit null readings, not fabricated values', () => {
+  for (const sample of [
+    { ...point, baselineScore: null, contextScore: null },
+    { ...point, dataAvailable: false, baselineScore: 20, contextScore: 20 },
+  ]) assert.throws(() => calculateRouteLiveRisk({ samples: [sample], incidents: [], calculatedAt }));
+});
+
+test('coincident route points produce a finite aggregate from known readings', () => {
+  const result = calculateRouteLiveRisk({ samples: [
+    { ...point, baselineScore: 10, contextScore: 10 }, { ...point, baselineScore: 30, contextScore: 30 },
+  ], incidents: [], calculatedAt });
+  assert.equal(result.exposureWeightedLiveScore, 20);
+});

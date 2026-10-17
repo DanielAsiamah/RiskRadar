@@ -65,6 +65,58 @@ test('source outage metadata travels with known incident warnings rather than cl
   assert.match(updated.sampledRiskScores[0].basis, /Flood warning nearby/);
   assert.match(updated.sampledRiskScores[0].basis, /sources unavailable/);
 });
+
+test('partial refresh clears stale scores but keeps available hotzones and incident markers', () => {
+  const originals: RouteGuardRiskSample[] = [
+    { ...samples[0], score: 90, riskLevel: 'red' },
+    { ...samples[0], pointIndex: 7, latitude: 51.001, contextLabel: 'Station Road' },
+  ];
+  const partial: RouteLiveRefresh = {
+    ...response,
+    samples: [response.samples[0], { id: '7', latitude: 51.001, longitude: -1 }],
+    live: { ...response.live, samples: [
+      { dataAvailable: false, liveScore: null, contextScore: null, contributors: response.live.samples[0].contributors },
+      { liveScore: 82, contextScore: 20, contributors: [] },
+    ] },
+  };
+  const result = applyRouteLiveRefresh(originals, partial);
+  assert.equal(result.sampledRiskScores[0].score, null);
+  assert.equal(result.sampledRiskScores[0].riskLevel, 'unknown');
+  assert.match(result.sampledRiskScores[0].basis, /unavailable/);
+  assert.doesNotMatch(result.sampledRiskScores[0].basis, /null\/100|0\/100/);
+  assert.equal(result.sampledRiskScores[1].score, 82);
+  assert.deepEqual(result.hotzoneSections.map((zone) => zone.startPointIndex), [7]);
+  assert.equal(result.overallRiskScore, null);
+  assert.equal(result.overallRiskLevel, 'unknown');
+  assert.deepEqual(result.liveIncidentMarkers.map((marker) => marker.id), ['flood-1']);
+  const recovered = applyRouteLiveRefresh(result.sampledRiskScores, {
+    ...partial, live: { ...partial.live, samples: [
+      { dataAvailable: true, liveScore: 20, contextScore: 20, contributors: [] },
+      { dataAvailable: true, liveScore: 20, contextScore: 20, contributors: [] },
+    ] },
+  });
+  assert.equal(recovered.overallRiskScore, 20);
+  assert.equal(recovered.overallRiskLevel, 'low');
+  assert.deepEqual(recovered.liveIncidentMarkers, []);
+});
+
+test('all unavailable samples produce unknown risk, not a zero score or a refresh exception', () => {
+  const result = applyRouteLiveRefresh(samples, {
+    ...response, live: { ...response.live, samples: [{ dataAvailable: false, liveScore: null, contextScore: null, contributors: [] }] },
+  });
+  assert.equal(result.overallRiskScore, null);
+  assert.equal(result.overallRiskLevel, 'unknown');
+  assert.deepEqual(result.hotzoneSections, []);
+});
+
+test('unavailable flags never legitimise numeric guesses or malformed readings', () => {
+  for (const reading of [
+    { dataAvailable: false, liveScore: 30, contextScore: 20, contributors: [] },
+    { dataAvailable: true, liveScore: null, contextScore: null, contributors: [] },
+    { liveScore: null, contextScore: null, contributors: [] },
+    { dataAvailable: false, liveScore: null, contextScore: 20, contributors: [] },
+  ]) assert.throws(() => applyRouteLiveRefresh(samples, { ...response, live: { ...response.live, samples: [reading] } }));
+});
 test('rejects incomplete, mismatched and malformed refresh responses', () => {
   for (const changed of [
     { ...response, samples: [] },

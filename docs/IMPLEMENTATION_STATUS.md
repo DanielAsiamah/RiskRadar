@@ -1,10 +1,19 @@
 # RiskRadar Implementation Status
 
-Checkpoint review: 13 October 2026.
+Checkpoint review: 17 October 2026.
 
 The goal remains a working frontend and backend with maps and approach alerts while walking or travelling. A passing test suite alone does not establish that the complete app is ready for a real journey.
 
 ## Verified in this checkpoint
+
+- Route refreshes now isolate failed or malformed historical baselines per section instead of rejecting the entire route. Valid readings continue updating; unavailable readings explicitly become `null` / `unknown`, and any missing section withholds the overall score. Later successful refreshes restore readings automatically.
+- Independent incident evidence remains visible when a baseline is missing, without inventing a numeric score or score-based alert for that section. Valid upcoming sections can still trigger approach alerts. A failure of the incident store itself still pauses new alerts and preserves the last successful client result rather than pretending the incident layer is empty.
+- Invalid or ambiguous risk requests are rejected before any analysis starts. Upstream failures now receive sanitized HTTP 502/504 responses rather than a generic request-validation HTTP 400. Coincident route points no longer produce a non-finite aggregate score.
+- The fresh full `npm test` run passed typecheck and all 401 tests with no failures or skipped tests. The current web export and public-credential scanner passed. Regression coverage includes partial and total baseline outages, malformed data, request validation, retained public evidence, recovery, and persisted background-session behavior.
+- A real browser check scanned Waterloo Station to London Bridge Station using free routing: 2,596 metres, 80 route points, and 12 sampled sections. All 12 historical readings were initially unavailable; the real refresh recovered five and left seven explicitly unknown while tracking continued. GPS loss/recovery, leaving/rejoining the route, stopping, and mobile/desktop rendering passed with simulated browser geolocation and no page errors. This is evidence of graceful partial recovery, not complete data coverage or a physical-device journey.
+- A separate browser-only fault-injection check verified that one unavailable section does not suppress a valid upcoming-section alert, then restored all readings on the next refresh. The 82/100 alert and subsequent 20/100 readings in that check were synthetic fixtures, not real-world risk findings. The inspected real mobile screenshot also showed limited live-source coverage alongside an available route reading.
+
+## Previous checkpoint (13 October 2026)
 
 - Initial Route Guard scans and live-risk refreshes now include named source health, geography, hazard category, last successful check, and freshness limits. A successful API response no longer implies that its upstream live feeds are available.
 - Backend reads age out stale health even when ingestion has stopped. The route screen also rechecks freshness every 30 seconds, with expandable source details and distinct limited/unavailable messaging. This is source-network status, not a claim that every point on the route has coverage.
@@ -42,7 +51,8 @@ The goal remains a working frontend and backend with maps and approach alerts wh
 - Account access: this checkout has no `.env`. Local development access now permits computer-only Route Guard testing. Real Supabase/Stripe setup, payment-to-unlock verification, and durable server-side quota enforcement remain required for paid deployment.
 - Public routing capacity: the community service has usage limits and no production uptime guarantee. A multi-process deployment needs shared rate limiting or a self-hosted provider.
 - Route performance: public geocoding, routing, and crime feeds can still fail or be slow. The scan client has a 60-second total request deadline. Load and deployment testing remains required; shared upstream requests may finish warming the cache after a risk lookup has returned unavailable.
-- Refresh reliability: a failed baseline lookup currently rejects the whole live-risk refresh and uses a generic HTTP 400 response. The client preserves the last reading and pauses new alerts, but partial-refresh handling and correct upstream error classification still need implementation.
+- Baseline availability: partial refreshes now recover independently, but upstream crime-data reliability remains a limitation. The latest real browser check initially had 12 unavailable readings and still had seven missing after refresh. Do not substitute guesses or interpret an unknown section as safe.
+- Incident-only alerts: evidence at an unscored section is retained on the map, but an independent nonnumeric hazard-approach notification is not implemented. Score-based alerts intentionally require an available reading.
 - Live-source availability: the Environment Agency feed can fail intermittently; consult the source panel rather than treating an empty map as an all-clear. Its coverage is England floods only. TfL remains `not-configured` without `TFL_APP_KEY`; the other listed regional providers are not yet connected. Historical crime data is not a live incident stream.
 - Transit currently uses a disclosed walking-corridor estimate. Actual public-transport routing remains required for the full transport goal.
 - Live incident history remains in memory and is lost when the backend restarts. Durable production storage, ingestion scheduling, and delivery remain unfinished.

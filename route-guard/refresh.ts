@@ -10,8 +10,9 @@ export interface RouteLiveRefresh {
   live: {
     calculatedAt: string;
     samples: Array<{
-      liveScore: number;
-      contextScore: number;
+      dataAvailable?: boolean;
+      liveScore: number | null;
+      contextScore: number | null;
       contributors: Array<{ incidentId?: string; reason?: string; category?: string }>;
     }>;
   };
@@ -19,6 +20,10 @@ export interface RouteLiveRefresh {
 
 function level(score: number): RouteGuardRiskLevel {
   return score >= 76 ? 'red' : score >= 46 ? 'amber' : 'low';
+}
+
+function validScore(score: unknown): score is number {
+  return typeof score === 'number' && Number.isFinite(score) && score >= 0 && score <= 100;
 }
 
 export function startRouteRiskPolling(input: {
@@ -67,10 +72,19 @@ export function applyRouteLiveRefresh(original: RouteGuardRiskSample[], response
     const point = response.samples[index];
     const reading = response.live.samples[index];
     if (!point || point.id !== String(sample.pointIndex) || point.latitude !== sample.latitude || point.longitude !== sample.longitude
-      || !reading || !Number.isFinite(reading.liveScore) || reading.liveScore < 0 || reading.liveScore > 100
-      || !Number.isFinite(reading.contextScore) || reading.contextScore < 0 || reading.contextScore > 100
-      || !Array.isArray(reading.contributors)) throw new Error('Live route update did not match this journey.');
+      || !reading || (reading.dataAvailable !== undefined && typeof reading.dataAvailable !== 'boolean')
+      || !Array.isArray(reading.contributors) || reading.contributors.some((item) => !item || typeof item !== 'object')) {
+      throw new Error('Live route update did not match this journey.');
+    }
     const reasons = reading.contributors.map((item) => item.reason).filter((reason): reason is string => typeof reason === 'string');
+    if (reading.dataAvailable === false) {
+      if (reading.liveScore !== null || reading.contextScore !== null) throw new Error('Unavailable route readings must contain null scores.');
+      return {
+        ...sample, score: null, riskLevel: 'unknown', contributors: reading.contributors,
+        basis: `Risk data is unavailable for this section; no score is assigned. ${[...new Set(reasons)].join(' ')} ${coverageNote}`.replace(/\s+/g, ' ').trim(),
+      };
+    }
+    if (!validScore(reading.liveScore) || !validScore(reading.contextScore)) throw new Error('Live route update contained invalid scores.');
     return {
       ...sample, score: reading.liveScore, riskLevel: level(reading.liveScore), contributors: reading.contributors,
       basis: `Area and time context: ${reading.contextScore}/100. ${reasons.length ? [...new Set(reasons)].join(' ') : 'No matching incident in the available reports.'} ${coverageNote}`,
@@ -85,10 +99,10 @@ export function applyRouteLiveRefresh(original: RouteGuardRiskSample[], response
       summary: sample.contextLabel ? `${sample.contextLabel}: ${sample.basis}` : sample.basis,
     });
   }
-  const scores = response.live.samples.map((sample) => sample.liveScore);
-  const average = scores.reduce((sum, score) => sum + score, 0) / scores.length;
-  const maximum = Math.max(...scores);
-  const overallRiskScore = Math.round(average * 0.7 + maximum * 0.3);
+  const scores = sampledRiskScores.map((sample) => sample.score).filter(validScore);
+  const overallRiskScore = scores.length === sampledRiskScores.length
+    ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length * 0.7 + Math.max(...scores) * 0.3)
+    : null;
   const contributingIncidentIds = new Set(response.live.samples
     .flatMap((sample) => sample.contributors)
     .map((contributor) => contributor.incidentId)
@@ -98,9 +112,9 @@ export function applyRouteLiveRefresh(original: RouteGuardRiskSample[], response
     sampledRiskScores,
     hotzoneSections,
     overallRiskScore,
-    overallRiskLevel: level(overallRiskScore),
+    overallRiskLevel: overallRiskScore === null ? 'unknown' as const : level(overallRiskScore),
     // Keep the highest-severity map markers within the background storage limit.
-    // All contributors above still participate in scoring and approach warnings.
+    // Evidence at an unscored section stays visible without inventing a numeric alert.
     liveIncidentMarkers: buildLiveIncidentMarkers(response.incidents)
       .filter((marker) => contributingIncidentIds.has(marker.id)).slice(0, 100),
   };

@@ -96,7 +96,7 @@ function contributorFor(incident, point, calculatedAtMs, contextScore) {
     / (HALF_LIFE_MS[incident.category] ?? HALF_LIFE_MS.default));
   const statusFactor = statusFactorFor(incident, calculatedAtMs, lastObservedAtMs);
   const severityFactor = SEVERITY_FACTORS[incident.severity];
-  const capFactor = scoreCapImpact(incident.riskConstraints?.maxScoreDelta, contextScore);
+  const capFactor = contextScore === null ? 1 : scoreCapImpact(incident.riskConstraints?.maxScoreDelta, contextScore);
   const rawImpact = Math.min(1, severityFactor * incident.confidence * distanceFactor * freshnessFactor * statusFactor, capFactor);
   if (rawImpact <= 0) return null;
 
@@ -112,7 +112,7 @@ function contributorFor(incident, point, calculatedAtMs, contextScore) {
     freshnessFactor,
     statusFactor,
     rawImpact,
-    scoreContribution: Math.round((100 - contextScore) * rawImpact),
+    scoreContribution: contextScore === null ? null : Math.round((100 - contextScore) * rawImpact),
     sourceUpdatedAt: incident.sourceUpdatedAt,
     reason: `${incident.category} is active within its reported affected area.`,
   };
@@ -120,8 +120,13 @@ function contributorFor(incident, point, calculatedAtMs, contextScore) {
 
 export function calculateLiveRisk(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('risk input must be an object');
-  assertScore(input.baselineScore, 'baselineScore');
-  assertScore(input.contextScore, 'contextScore');
+  const dataAvailable = input.dataAvailable !== false;
+  if (dataAvailable) {
+    assertScore(input.baselineScore, 'baselineScore');
+    assertScore(input.contextScore, 'contextScore');
+  } else if (input.baselineScore !== null || input.contextScore !== null) {
+    throw new TypeError('Unavailable risk readings must contain null scores');
+  }
   assertPoint(input.point);
   if (!Array.isArray(input.incidents)) throw new TypeError('incidents must be an array');
   if (!Array.isArray(input.contextAdjustments)) throw new TypeError('contextAdjustments must be an array');
@@ -130,6 +135,14 @@ export function calculateLiveRisk(input) {
     .map((incident) => contributorFor(incident, input.point, calculatedAtMs, input.contextScore))
     .filter(Boolean)
     .sort((left, right) => right.rawImpact - left.rawImpact || String(left.incidentId).localeCompare(String(right.incidentId)));
+  if (!dataAvailable) {
+    // Matching incident evidence survives a baseline outage, without inventing a score.
+    return freezeResult({
+      dataAvailable: false, baselineScore: null, contextScore: null, contextAdjustments: [],
+      liveScore: null, liveDelta: null, riskLevel: 'unknown', contributors,
+      policyVersion: LIVE_RISK_POLICY_VERSION, calculatedAt: input.calculatedAt,
+    });
+  }
   const combinedImpact = contributors.reduce((remaining, contributor) => remaining * (1 - contributor.rawImpact), 1);
   let liveScore = input.contextScore === 100
     ? 100
@@ -139,6 +152,7 @@ export function calculateLiveRisk(input) {
   }
   liveScore = Math.max(input.contextScore, Math.min(100, liveScore));
   return freezeResult({
+    dataAvailable: true,
     baselineScore: input.baselineScore,
     contextScore: input.contextScore,
     contextAdjustments: input.contextAdjustments,
@@ -168,6 +182,7 @@ export function calculateRouteLiveRisk(input) {
   const samples = input.samples.map((sample, index) => {
     assertPoint(sample, `samples[${index}]`);
     return calculateLiveRisk({
+      dataAvailable: sample.dataAvailable,
       baselineScore: sample.baselineScore,
       contextScore: sample.contextScore,
       contextAdjustments: sample.contextAdjustments ?? [],
@@ -176,17 +191,22 @@ export function calculateRouteLiveRisk(input) {
       calculatedAt: input.calculatedAt,
     });
   });
-  const weights = segmentWeights(input.samples);
+  const availableSamples = samples.filter((sample) => sample.dataAvailable).length;
+  const complete = availableSamples === samples.length;
+  let weights = segmentWeights(input.samples);
+  if (weights.every((weight) => weight === 0)) weights = weights.map(() => 1);
   const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
-  const exposureWeightedLiveScore = Math.round(samples.reduce(
+  const exposureWeightedLiveScore = complete ? Math.round(samples.reduce(
     (sum, sample, index) => sum + sample.liveScore * weights[index],
     0,
-  ) / totalWeight);
+  ) / totalWeight) : null;
   const contributingIncidentIds = [...new Set(samples.flatMap((sample) => sample.contributors.map((item) => item.incidentId)))].sort();
   return Object.freeze({
     samples: Object.freeze(samples),
-    maximumLiveScore: Math.max(...samples.map((sample) => sample.liveScore)),
+    maximumLiveScore: complete ? Math.max(...samples.map((sample) => sample.liveScore)) : null,
     exposureWeightedLiveScore,
+    dataAvailability: Object.freeze({ availableSamples, totalSamples: samples.length,
+      status: complete ? 'complete' : availableSamples ? 'partial' : 'unavailable' }),
     contributingIncidentIds: Object.freeze(contributingIncidentIds),
     policyVersion: LIVE_RISK_POLICY_VERSION,
     calculatedAt: input.calculatedAt,

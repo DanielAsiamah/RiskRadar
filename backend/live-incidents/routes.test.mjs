@@ -23,6 +23,117 @@ const pointAnalysis = {
   crimeData: { crimeScore: 34, timingContext: { adjustedScore: 36, totalAdjustment: 2, factors: [{ id: 'night', label: 'Late-night pressure', points: 2 }] } },
 };
 
+test('one failed route baseline does not discard other samples and can recover on the next refresh', async () => {
+  let fail = true;
+  const routes = createLiveIncidentRouteHandler(dependencies({ analyzeRoutePoint: async ({ latitude }) => {
+    if (fail && latitude === 51.51) throw Object.assign(new Error('private provider failure'), { statusCode: 504 });
+    return pointAnalysis;
+  } }));
+  const body = { routeSamples: [
+    { id: '0', latitude: 51.5, longitude: -0.1 }, { id: '8', latitude: 51.51, longitude: -0.1 },
+  ] };
+  const response = createResponse();
+  await routes.handle(createRequest({ method: 'POST', body }), response, new URL('http://localhost/api/live-risk'));
+  assert.equal(response.statusCode, 200, response.body);
+  const partial = JSON.parse(response.body);
+  assert.equal(partial.live.samples[0].liveScore, 36);
+  assert.equal(partial.live.samples[1].dataAvailable, false);
+  assert.equal(partial.live.samples[1].liveScore, null);
+  assert.equal(partial.live.samples[1].riskLevel, 'unknown');
+  assert.equal(partial.live.exposureWeightedLiveScore, null);
+  assert.equal(response.body.includes('private provider'), false);
+  fail = false;
+  const recovered = createResponse();
+  await routes.handle(createRequest({ method: 'POST', body }), recovered, new URL('http://localhost/api/live-risk'));
+  assert.equal(recovered.statusCode, 200);
+  assert.equal(JSON.parse(recovered.body).live.samples[1].liveScore, 36);
+});
+
+test('all missing baselines remain unknown while independent incident evidence is retained', async () => {
+  const deps = dependencies({ analyzeRoutePoint: async () => { throw new Error('baseline offline'); } });
+  deps.store.listPublicIncidents = async () => [{
+    id: 'flood-without-baseline', category: 'flood', severity: 4, confidence: 1,
+    affectedRadiusMetres: 300, publicationState: 'published', verificationLevel: 'Official',
+    status: 'active', lastObservedAt: '2026-08-27T18:00:00.000Z',
+    geometry: { type: 'Point', coordinates: [-0.1, 51.5] }, centroid: { latitude: 51.5, longitude: -0.1 },
+    title: 'Official flood warning', provider: 'environment-agency', rawPayload: { secret: true },
+  }];
+  const routes = createLiveIncidentRouteHandler(deps);
+  const response = createResponse();
+  await routes.handle(createRequest({ method: 'POST', body: { routeSamples: [
+    { id: '0', latitude: 51.5, longitude: -0.1 },
+  ] } }), response, new URL('http://localhost/api/live-risk'));
+  assert.equal(response.statusCode, 200, response.body);
+  const payload = JSON.parse(response.body);
+  assert.equal(payload.live.samples[0].liveScore, null);
+  assert.equal(payload.live.samples[0].contributors[0].scoreContribution, null);
+  assert.deepEqual(payload.incidents.map((item) => item.id), ['flood-without-baseline']);
+  assert.equal(response.body.includes('rawPayload'), false);
+});
+
+test('invalid or ambiguous risk requests are rejected before any analysis starts', async () => {
+  let calls = 0;
+  const analyze = async () => { calls += 1; return pointAnalysis; };
+  const routes = createLiveIncidentRouteHandler(dependencies({ analyzePoint: analyze, analyzeLocation: analyze, analyzeRoutePoint: analyze }));
+  for (const body of [
+    { latitude: null, longitude: null }, { latitude: '', longitude: 0 }, { latitude: true, longitude: 0 },
+    { postcode: 'BR1 5NN', latitude: 51.5, longitude: -0.1 },
+    { routeSamples: [{ id: 'a', latitude: 51.5, longitude: -0.1 }, { id: 'b', latitude: 999, longitude: 0 }] },
+    { routeSamples: [{ id: 'same', latitude: 51.5, longitude: -0.1 }, { id: 'same', latitude: 51.6, longitude: -0.1 }] },
+  ]) {
+    const response = createResponse();
+    await routes.handle(createRequest({ method: 'POST', body }), response, new URL('http://localhost/api/live-risk'));
+    assert.equal(response.statusCode, 400, JSON.stringify(body));
+    assert.equal(JSON.parse(response.body).code, 'LIVE_REQUEST_INVALID');
+  }
+  assert.equal(calls, 0);
+});
+
+test('upstream failures use retryable server responses without leaking raw provider errors', async () => {
+  for (const statusCode of [502, 504]) {
+    const routes = createLiveIncidentRouteHandler(dependencies({ analyzePoint: async () => {
+      throw Object.assign(new Error('private upstream URL and credential'), { statusCode });
+    } }));
+    const response = createResponse();
+    await routes.handle(createRequest({ method: 'POST', body: { latitude: 51.5, longitude: -0.1 } }), response, new URL('http://localhost/api/live-risk'));
+    assert.equal(response.statusCode, statusCode);
+    assert.equal(JSON.parse(response.body).code, 'LIVE_RISK_UNAVAILABLE');
+    assert.equal(response.body.includes('credential'), false);
+  }
+});
+
+test('malformed per-point analysis is isolated just like a failed lookup', async () => {
+  for (const crimeData of [
+    { crimeScore: 101 }, { crimeScore: 20, timingContext: { adjustedScore: -1 } },
+    { crimeScore: 20, timingContext: { factors: 'invalid upstream shape' } },
+  ]) {
+    const routes = createLiveIncidentRouteHandler(dependencies({ analyzeRoutePoint: async ({ latitude }) => (
+      latitude === 51.5 ? { crimeData } : pointAnalysis
+    ) }));
+    const response = createResponse();
+    await routes.handle(createRequest({ method: 'POST', body: { routeSamples: [
+      { id: '0', latitude: 51.5, longitude: -0.1 }, { id: '1', latitude: 51.6, longitude: -0.1 },
+    ] } }), response, new URL('http://localhost/api/live-risk'));
+    assert.equal(response.statusCode, 200, response.body);
+    const payload = JSON.parse(response.body);
+    assert.equal(payload.live.samples[0].liveScore, null);
+    assert.equal(payload.live.samples[1].liveScore, 36);
+  }
+});
+
+test('an incident-store outage is not disguised as a successful empty incident layer', async () => {
+  const deps = dependencies();
+  deps.store.listPublicIncidents = async () => { throw new Error('private store failure'); };
+  const routes = createLiveIncidentRouteHandler(deps);
+  const response = createResponse();
+  await routes.handle(createRequest({ method: 'POST', body: { routeSamples: [
+    { id: '0', latitude: 51.5, longitude: -0.1 },
+  ] } }), response, new URL('http://localhost/api/live-risk'));
+  assert.equal(response.statusCode, 502);
+  assert.equal(JSON.parse(response.body).code, 'LIVE_RISK_UNAVAILABLE');
+  assert.equal(response.body.includes('private'), false);
+});
+
 test('route refresh discloses stale and disconnected sources without changing the historical score', async () => {
   const deps = dependencies({ sourceDefinitions: createLiveSourceDefinitions() });
   deps.store.listSourceStates = async () => [{

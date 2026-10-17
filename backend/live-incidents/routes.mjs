@@ -17,8 +17,48 @@ function sendJson(response, statusCode, payload) {
 }
 
 function number(value) {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null;
   const result = Number(value);
   return Number.isFinite(result) ? result : null;
+}
+
+class LiveRequestError extends Error {}
+
+function parseRiskRequest(body) {
+  const postcode = Object.hasOwn(body, 'postcode');
+  const point = Object.hasOwn(body, 'latitude') || Object.hasOwn(body, 'longitude');
+  const route = Object.hasOwn(body, 'routeSamples');
+  if (Number(postcode) + Number(point) + Number(route) !== 1) {
+    throw new LiveRequestError('Provide exactly one postcode, point, or routeSamples request.');
+  }
+  if (postcode) {
+    if (typeof body.postcode !== 'string' || !body.postcode.trim() || body.postcode.length > 200) {
+      throw new LiveRequestError('postcode must contain a location of at most 200 characters.');
+    }
+    return { mode: 'postcode', postcode: body.postcode.trim() };
+  }
+  if (point) {
+    const latitude = number(body.latitude);
+    const longitude = number(body.longitude);
+    if (!validPoint(latitude, longitude)) throw new LiveRequestError('Provide valid latitude and longitude.');
+    return { mode: 'point', latitude, longitude };
+  }
+  if (!Array.isArray(body.routeSamples) || body.routeSamples.length < 1 || body.routeSamples.length > 12) {
+    throw new LiveRequestError('routeSamples must contain between 1 and 12 points.');
+  }
+  const ids = new Set();
+  const samples = body.routeSamples.map((sample, index) => {
+    const latitude = number(sample?.latitude);
+    const longitude = number(sample?.longitude);
+    const id = sample?.id ?? `sample-${index + 1}`;
+    if (!validPoint(latitude, longitude) || !['string', 'number'].includes(typeof id)
+      || !String(id).trim() || String(id).length > 128 || ids.has(String(id))) {
+      throw new LiveRequestError(`routeSamples[${index}] must contain valid coordinates and a unique id.`);
+    }
+    ids.add(String(id));
+    return { id: String(id), latitude, longitude };
+  });
+  return { mode: 'route', samples };
 }
 
 function validPoint(latitude, longitude) {
@@ -29,7 +69,9 @@ function contextFor(analysis) {
   const baselineScore = analysis?.crimeData?.crimeScore;
   const timingContext = analysis?.crimeData?.timingContext ?? {};
   const contextScore = timingContext.adjustedScore ?? baselineScore;
-  if (typeof baselineScore !== 'number' || !Number.isFinite(baselineScore) || typeof contextScore !== 'number' || !Number.isFinite(contextScore)) {
+  if (typeof baselineScore !== 'number' || !Number.isFinite(baselineScore) || baselineScore < 0 || baselineScore > 100
+    || typeof contextScore !== 'number' || !Number.isFinite(contextScore) || contextScore < 0 || contextScore > 100
+    || !Array.isArray(timingContext.factors ?? [])) {
     throw new TypeError('Historical analysis did not include valid risk scores');
   }
   return { baselineScore, contextScore, contextAdjustments: timingContext.factors ?? [] };
@@ -148,8 +190,9 @@ export function createLiveIncidentRouteHandler({
         }
         const calculatedAt = now().toISOString();
         try {
-          if (typeof body.postcode === 'string' && body.postcode.trim()) {
-            const analysis = await analyzeLocation(body.postcode.trim());
+          const query = parseRiskRequest(body);
+          if (query.mode === 'postcode') {
+            const analysis = await analyzeLocation(query.postcode);
             const latitude = analysis?.postcodeData?.latitude;
             const longitude = analysis?.postcodeData?.longitude;
             if (!validPoint(latitude, longitude)) throw new TypeError('Postcode analysis did not include a valid location');
@@ -158,22 +201,22 @@ export function createLiveIncidentRouteHandler({
             sendJson(response, 200, { mode: 'postcode', postcode: analysis.postcode, point: { latitude, longitude }, historical: { baselineScore: historical.baselineScore }, context: { contextScore: historical.contextScore, adjustments: historical.contextAdjustments }, live, liveData: await getLiveDataStatus(), disclaimer: DISCLAIMER });
             return true;
           }
-          if (validPoint(number(body.latitude), number(body.longitude))) {
-            const latitude = number(body.latitude);
-            const longitude = number(body.longitude);
+          if (query.mode === 'point') {
+            const { latitude, longitude } = query;
             const analysis = await analyzePoint({ latitude, longitude });
             const historical = contextFor(analysis);
             const live = calculateLiveRisk({ ...historical, incidents: await incidentsNear(latitude, longitude, calculatedAt), point: { latitude, longitude }, calculatedAt });
             sendJson(response, 200, { mode: 'point', point: { latitude, longitude }, historical: { baselineScore: historical.baselineScore }, context: { contextScore: historical.contextScore, adjustments: historical.contextAdjustments }, live, liveData: await getLiveDataStatus(), disclaimer: DISCLAIMER });
             return true;
           }
-          if (Array.isArray(body.routeSamples) && body.routeSamples.length >= 1 && body.routeSamples.length <= 12) {
-            const samples = await Promise.all(body.routeSamples.map(async (sample, index) => {
-              const latitude = number(sample?.latitude);
-              const longitude = number(sample?.longitude);
-              if (!validPoint(latitude, longitude)) throw new TypeError(`routeSamples[${index}] is invalid`);
-              const analysis = await analyzeRoutePoint({ latitude, longitude });
-              return { id: String(sample.id ?? `sample-${index + 1}`), latitude, longitude, ...contextFor(analysis) };
+          if (query.mode === 'route') {
+            const samples = await Promise.all(query.samples.map(async (sample) => {
+              try {
+                const analysis = await analyzeRoutePoint({ latitude: sample.latitude, longitude: sample.longitude });
+                return { ...sample, dataAvailable: true, ...contextFor(analysis) };
+              } catch {
+                return { ...sample, dataAvailable: false, baselineScore: null, contextScore: null, contextAdjustments: [] };
+              }
             }));
             const nearbyGroups = await Promise.all(samples.map((sample) => incidentsNear(sample.latitude, sample.longitude, calculatedAt)));
             const incidents = [...new Map(nearbyGroups.flat().map((incident) => [incident.id, incident])).values()];
@@ -185,9 +228,14 @@ export function createLiveIncidentRouteHandler({
             sendJson(response, 200, { mode: 'route', samples, live, incidents: contributingIncidents, liveData: await getLiveDataStatus(), disclaimer: DISCLAIMER });
             return true;
           }
-          throw new TypeError('Provide exactly one postcode, point, or routeSamples request.');
         } catch (error) {
-          sendJson(response, 400, { error: error.message, code: 'LIVE_REQUEST_INVALID' });
+          if (error instanceof LiveRequestError) {
+            sendJson(response, 400, { error: error.message, code: 'LIVE_REQUEST_INVALID' });
+          } else {
+            sendJson(response, error?.statusCode === 504 ? 504 : 502, {
+              error: 'Risk data is temporarily unavailable. Please retry shortly.', code: 'LIVE_RISK_UNAVAILABLE',
+            });
+          }
           return true;
         }
       }

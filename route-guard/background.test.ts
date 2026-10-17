@@ -116,3 +116,28 @@ test('a fresh incident can raise background route risk and trigger an approach a
   assert.deepEqual(h.read()?.route.liveIncidentMarkers?.map((marker) => marker.id), ['closure-1']);
   assert.match(h.read()?.lastAlert?.body ?? '', /Road closure/);
 });
+
+test('partial refresh keeps valid approach alerts working and persists unknown sections', async () => {
+  const initial = state();
+  initial.lastRefreshAt = 0;
+  initial.route.sampledRiskScores = [
+    { pointIndex: 0, latitude: 51.5, longitude: -0.1, score: 90, riskLevel: 'red', basis: 'Old reading' },
+    { pointIndex: 1, latitude: 51.5, longitude: -0.09, score: 20, riskLevel: 'low', basis: 'Old reading', contextLabel: 'High Street' },
+  ];
+  const h = harness(initial);
+  const result = await processRouteBackgroundUpdate([location], {
+    ...h.dependencies,
+    refresh: async () => ({ mode: 'route', samples: [
+      { id: '0', latitude: 51.5, longitude: -0.1 }, { id: '1', latitude: 51.5, longitude: -0.09 },
+    ], incidents: [], live: { calculatedAt: new Date(now).toISOString(), samples: [
+      { dataAvailable: false, liveScore: null, contextScore: null, contributors: [] },
+      { dataAvailable: true, liveScore: 80, contextScore: 80, contributors: [] },
+    ] } }),
+  });
+  assert.equal(result, 'alerted');
+  assert.deepEqual(h.sent, ['Approaching High Street']);
+  assert.equal(h.read()?.route.sampledRiskScores[0].score, null);
+  assert.equal(h.read()?.route.sampledRiskScores[0].riskLevel, 'unknown');
+  assert.equal(h.read()?.route.overallRiskScore, null);
+  assert.equal(h.read()?.lastRefreshAt, now);
+});
