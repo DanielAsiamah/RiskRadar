@@ -75,6 +75,8 @@ export async function processRouteBackgroundUpdate(
     progress, tracking: true, provider: route.provider,
     accuracyMetres: location.accuracyMetres, locationTimestamp: location.timestamp,
     now: dependencies.now(), alertedKeys: new Set(initial.alertedKeys),
+    incidentContext: { currentLocation: location, routePoints: route.routePoints,
+      samples: route.sampledRiskScores, liveData: route.liveData },
   });
   let next: RouteBackgroundState = { ...initial, route, lastRefreshAt, lastLocation: location, warning: null };
   if (alert) {

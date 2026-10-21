@@ -13,7 +13,7 @@ export interface RouteLiveRefresh {
       dataAvailable?: boolean;
       liveScore: number | null;
       contextScore: number | null;
-      contributors: Array<{ incidentId?: string; reason?: string; category?: string }>;
+      contributors: Array<{ incidentId?: string; reason?: string; category?: string; [key: string]: unknown }>;
     }>;
   };
 }

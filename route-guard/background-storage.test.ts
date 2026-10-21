@@ -31,6 +31,17 @@ test('round-trips a bounded real route session and starts with a fresh risk chec
   assert.equal(state.enabled, true);
 });
 
+test('restored incident alert links reject unsafe protocols without losing the journey', () => {
+  const state = createRouteBackgroundState(route, 'session-1', 1000);
+  const lastAlert = { key: 'incident:flood-1:1:4', title: 'Flood warning ahead', body: 'Official report',
+    level: 'red', incidentId: 'flood-1', sourceUrl: 'javascript:alert(1)', observedAt: 'bad timestamp',
+    createdAt: 1000, notificationSent: false };
+  const restored = parseRouteBackgroundState(JSON.stringify({ ...state, lastAlert }));
+  assert.ok(restored);
+  assert.equal(restored.lastAlert?.sourceUrl, undefined);
+  assert.equal(restored.lastAlert?.observedAt, undefined);
+});
+
 test('a busy live route keeps monitoring after restoring its bounded map overlay', () => {
   const incidents = Array.from({ length: 120 }, (_, index) => ({
     id: `incident-${index}`, category: 'road-closure', severity: index === 119 ? 5 : 3,

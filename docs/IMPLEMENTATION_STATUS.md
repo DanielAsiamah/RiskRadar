@@ -1,10 +1,19 @@
 # RiskRadar Implementation Status
 
-Checkpoint review: 17 October 2026.
+Checkpoint review: 21 October 2026.
 
 The goal remains a working frontend and backend with maps and approach alerts while walking or travelling. A passing test suite alone does not establish that the complete app is ready for a real journey.
 
 ## Verified in this checkpoint
+
+- Route Guard now has an incident-specific approach trigger independent of historical scores. The backend provides allow-listed evidence only for published official/corroborated, active/updated incidents with severity 3-5, precise location, an unexpired observation and major-alert authority. Missing scores remain unknown; no synthetic score is assigned to make an alert fire.
+- Foreground and saved native background journeys use the same trigger. It requires fresh health for the incident's own provider, a recent accurate GPS fix and an affected sampled route section within 500 metres ahead along the route. Behind-route and across-bend sections are excluded. Repeated samples and routine versions do not repeat the alert; increased severity can notify again. A numeric warning is not immediately repeated for a section whose incident already alerted.
+- The existing journey panel shows incident source, last observation time and an HTTPS evidence link. Saved alerts validate links and timestamps before displaying them. The UI style and free routing provider are unchanged. This is on-device journey logic, not a deployed server-push service.
+- A mobile/desktop browser fixture used the production backend risk calculation with all scores unknown. It verified a factual warning, a working source link in another tab, duplicate suppression and one escalation notification. All fixture incidents were explicitly labelled test data, and browser notification delivery was simulated. Screenshots were inspected; no page errors occurred.
+- After restarting the local API, a separate real-provider browser run passed a 2,173-metre Waterloo-to-London-Bridge route, live API refresh, simulated GPS loss/recovery, off-route movement and rejoining. Eleven of twelve historical readings were initially unavailable; six remained unavailable after refresh. This demonstrates recovery, not complete feed coverage. No account or payment state was injected and no Google request was made.
+- The full suite passed typecheck and 411 tests, including incident eligibility, source freshness, null-score warnings, safe evidence links, deduplication and background-state integration. The web export and public-credential scan passed. Review was performed directly; no independent reviewer was available.
+
+## Previous checkpoint (17 October 2026)
 
 - Route refreshes now isolate failed or malformed historical baselines per section instead of rejecting the entire route. Valid readings continue updating; unavailable readings explicitly become `null` / `unknown`, and any missing section withholds the overall score. Later successful refreshes restore readings automatically.
 - Independent incident evidence remains visible when a baseline is missing, without inventing a numeric score or score-based alert for that section. Valid upcoming sections can still trigger approach alerts. A failure of the incident store itself still pauses new alerts and preserves the last successful client result rather than pretending the incident layer is empty.
@@ -51,8 +60,8 @@ The goal remains a working frontend and backend with maps and approach alerts wh
 - Account access: this checkout has no `.env`. Local development access now permits computer-only Route Guard testing. Real Supabase/Stripe setup, payment-to-unlock verification, and durable server-side quota enforcement remain required for paid deployment.
 - Public routing capacity: the community service has usage limits and no production uptime guarantee. A multi-process deployment needs shared rate limiting or a self-hosted provider.
 - Route performance: public geocoding, routing, and crime feeds can still fail or be slow. The scan client has a 60-second total request deadline. Load and deployment testing remains required; shared upstream requests may finish warming the cache after a risk lookup has returned unavailable.
-- Baseline availability: partial refreshes now recover independently, but upstream crime-data reliability remains a limitation. The latest real browser check initially had 12 unavailable readings and still had seven missing after refresh. Do not substitute guesses or interpret an unknown section as safe.
-- Incident-only alerts: evidence at an unscored section is retained on the map, but an independent nonnumeric hazard-approach notification is not implemented. Score-based alerts intentionally require an available reading.
+- Baseline availability: partial refreshes now recover independently, but upstream crime-data reliability remains a limitation. The latest real browser check initially had 11 unavailable readings and still had six missing after refresh. Do not substitute guesses or interpret an unknown section as safe.
+- Incident delivery: local incident-only approach warnings now work for eligible sampled sections, but deployed server-push delivery, receipt processing, real-device background proof, configurable alert thresholds/muting, and full route-corridor coverage remain unfinished. Sparse route samples can miss an incident between samples.
 - Live-source availability: the Environment Agency feed can fail intermittently; consult the source panel rather than treating an empty map as an all-clear. Its coverage is England floods only. TfL remains `not-configured` without `TFL_APP_KEY`; the other listed regional providers are not yet connected. Historical crime data is not a live incident stream.
 - Transit currently uses a disclosed walking-corridor estimate. Actual public-transport routing remains required for the full transport goal.
 - Live incident history remains in memory and is lost when the backend restarts. Durable production storage, ingestion scheduling, and delivery remain unfinished.

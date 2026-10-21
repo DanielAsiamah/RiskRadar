@@ -1,6 +1,7 @@
 import type { RouteBackgroundState } from './background.ts';
 import type { RouteGuardScan } from '../api/route-guard.ts';
 import { readRouteLiveData } from './live-data.ts';
+import { safeIncidentSourceUrl } from './incident-alerts.ts';
 
 export const ROUTE_BACKGROUND_STORAGE_KEY = 'riskradar-route-background-v1';
 export const ROUTE_BACKGROUND_MAX_AGE_MS = 4 * 60 * 60 * 1000;
@@ -75,6 +76,15 @@ export function parseRouteBackgroundState(raw: string | null): RouteBackgroundSt
       || typeof value.lastAlert.body !== 'string' || typeof value.lastAlert.key !== 'string'
       || !risk(value.lastAlert.level) || !Number.isFinite(value.lastAlert.createdAt)
       || typeof value.lastAlert.notificationSent !== 'boolean')) return null;
+    if (value.lastAlert) {
+      if (value.lastAlert.sourceUrl !== undefined) {
+        const sourceUrl = safeIncidentSourceUrl(value.lastAlert.sourceUrl);
+        if (sourceUrl) value.lastAlert.sourceUrl = sourceUrl;
+        else delete value.lastAlert.sourceUrl;
+      }
+      if (value.lastAlert.observedAt !== undefined && (typeof value.lastAlert.observedAt !== 'string'
+        || !Number.isFinite(Date.parse(value.lastAlert.observedAt)))) delete value.lastAlert.observedAt;
+    }
     return value as RouteBackgroundState;
   } catch {
     return null;

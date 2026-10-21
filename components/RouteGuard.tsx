@@ -415,6 +415,7 @@ export default function RouteGuard({
                   </Text>
                   {backgroundState?.warning ? <Text style={tw`text-xs text-amber-700 mt-2`}>{backgroundState.warning}</Text> : null}
                   {backgroundState?.lastAlert ? <Text style={tw`text-xs font-bold text-slate-700 mt-2`}>Latest: {backgroundState.lastAlert.title}. {backgroundState.lastAlert.body}</Text> : null}
+                  {backgroundState?.lastAlert ? <RouteAlertEvidence alert={backgroundState.lastAlert} /> : null}
                   <Pressable accessibilityRole="button" disabled={backgroundBusy} onPress={() => {
                     if (backgroundState?.enabled) void stopJourneyTracking().catch(() => setTrackingError('Could not stop background monitoring. Please retry.'));
                     else void startBackground();
@@ -661,6 +662,8 @@ function RouteResult({
 
       <RouteJourneyAlerts
         result={scannedResult}
+        liveResult={result}
+        currentLocation={currentLocation}
         progress={progress}
         tracking={foregroundTracking && !liveRefreshError && !trackingError}
         accuracyMetres={currentAccuracy}
@@ -762,8 +765,10 @@ function RouteLiveCoverage({ value }: { value: RouteLiveData | undefined }) {
   );
 }
 
-function RouteJourneyAlerts({ result, progress, tracking, accuracyMetres, locationTimestamp }: {
+function RouteJourneyAlerts({ result, liveResult, currentLocation, progress, tracking, accuracyMetres, locationTimestamp }: {
   result: RouteGuardScan;
+  liveResult: RouteGuardScan;
+  currentLocation: MapCoordinate | null;
   progress: RouteGuardProgressSummary | null;
   tracking: boolean;
   accuracyMetres: number | null;
@@ -782,6 +787,8 @@ function RouteJourneyAlerts({ result, progress, tracking, accuracyMetres, locati
     const alert = evaluateRouteApproachAlert({
       progress, tracking, provider: result.provider, accuracyMetres, locationTimestamp,
       now: Date.now(), alertedKeys: alertedKeys.current,
+      incidentContext: currentLocation ? { currentLocation, routePoints: liveResult.routePoints,
+        samples: liveResult.sampledRiskScores, liveData: liveResult.liveData } : undefined,
     });
     if (!alert) return;
     alertedKeys.current.add(alert.key);
@@ -793,7 +800,7 @@ function RouteJourneyAlerts({ result, progress, tracking, accuracyMetres, locati
         : 'Alert shown here. Notifications are unavailable or not enabled; keep Route Guard visible.');
     });
     return () => { active = false; };
-  }, [result, progress, tracking, accuracyMetres, locationTimestamp]);
+  }, [result, liveResult, currentLocation, progress, tracking, accuracyMetres, locationTimestamp]);
 
   const enableNotifications = async () => {
     const granted = await requestRouteNotificationPermission();
@@ -821,9 +828,23 @@ function RouteJourneyAlerts({ result, progress, tracking, accuracyMetres, locati
             <Text style={tw`text-[10px] font-bold text-slate-500 mb-1`}>LATEST JOURNEY ALERT</Text>
             <Text style={{ color: RISK_COLORS[latest.level].strong, fontWeight: '900' }}>{latest.title}</Text>
             <Text style={tw`text-xs text-slate-700 leading-5 mt-1`}>{latest.body}</Text>
+            <RouteAlertEvidence alert={latest} />
           </View>
         ) : null}
       </View>
+    </View>
+  );
+}
+
+function RouteAlertEvidence({ alert }: { alert: RouteApproachAlert }) {
+  return (
+    <View>
+      {alert.observedAt ? <Text style={tw`text-[11px] text-slate-500 mt-2`}>Source last checked: {new Date(alert.observedAt).toLocaleString()}</Text> : null}
+      {alert.sourceUrl ? (
+        <Pressable accessibilityRole="link" onPress={() => void Linking.openURL(alert.sourceUrl!).catch(() => undefined)} style={tw`self-start py-2 mt-1`}>
+          <Text style={tw`text-xs font-bold text-indigo-700 underline`}>View source report</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }

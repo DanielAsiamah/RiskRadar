@@ -6,6 +6,7 @@ export interface RouteLiveData {
   status: 'limited' | 'unavailable';
   sources: Array<{
     sourceId: string;
+    provider?: string;
     label: string;
     state: RouteSourceState;
     lastSuccessAt: string | null;
@@ -30,6 +31,7 @@ export function readRouteLiveData(value: unknown): RouteLiveData | undefined {
   const ids = new Set<string>();
   for (const source of data.sources) {
     if (!source || !text(source.sourceId) || ids.has(source.sourceId) || !text(source.label)
+      || (source.provider !== undefined && !text(source.provider))
       || !Object.hasOwn(labels, source.state)
       || (source.lastSuccessAt !== null && !timestamp(source.lastSuccessAt))
       || (source.staleAfterMs !== null && (!Number.isFinite(source.staleAfterMs) || source.staleAfterMs <= 0))

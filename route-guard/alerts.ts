@@ -1,11 +1,15 @@
 import { formatRouteGuardAlert } from './presentation.ts';
 import type { RouteGuardProgressSummary } from './progress.ts';
+import { evaluateIncidentApproach, type RouteIncidentContext } from './incident-alerts.ts';
 
 export interface RouteApproachAlert {
   key: string;
   title: string;
   body: string;
   level: 'amber' | 'red';
+  incidentId?: string;
+  sourceUrl?: string;
+  observedAt?: string;
 }
 
 export function evaluateRouteApproachAlert(input: {
@@ -16,14 +20,20 @@ export function evaluateRouteApproachAlert(input: {
   locationTimestamp: number | null;
   now: number;
   alertedKeys: ReadonlySet<string>;
+  incidentContext?: RouteIncidentContext;
 }): RouteApproachAlert | null {
   const { progress, accuracyMetres, locationTimestamp } = input;
   if (!input.tracking || input.provider !== 'free-osm' || progress?.status !== 'on-route') return null;
   if (accuracyMetres === null || !Number.isFinite(accuracyMetres) || accuracyMetres < 0 || accuracyMetres > 100) return null;
   if (locationTimestamp === null || !Number.isFinite(locationTimestamp) || !Number.isFinite(input.now)
     || input.now - locationTimestamp < 0 || input.now - locationTimestamp > 30_000) return null;
+  const incidentAlert = input.incidentContext && evaluateIncidentApproach(input.incidentContext, input.now, input.alertedKeys);
+  if (incidentAlert) return incidentAlert;
   const sample = progress.upcomingHotzone;
   if (!sample || (sample.riskLevel !== 'amber' && sample.riskLevel !== 'red')) return null;
+  const contributors = input.incidentContext?.samples.find((item) => item.pointIndex === sample.pointIndex)?.contributors;
+  if (Array.isArray(contributors) && contributors.some((item) => typeof item?.incidentId === 'string'
+    && [...input.alertedKeys].some((key) => key.startsWith(`incident:${encodeURIComponent(item.incidentId!)}:`)))) return null;
   const key = `${sample.pointIndex}:${sample.latitude}:${sample.longitude}:${sample.riskLevel}`;
   if (input.alertedKeys.has(key)) return null;
   const presentation = formatRouteGuardAlert(progress);

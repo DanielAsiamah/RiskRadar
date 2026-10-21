@@ -141,3 +141,32 @@ test('partial refresh keeps valid approach alerts working and persists unknown s
   assert.equal(h.read()?.route.overallRiskScore, null);
   assert.equal(h.read()?.lastRefreshAt, now);
 });
+
+test('a refreshed official incident alerts and persists even with no historical reading', async () => {
+  const initial = state();
+  initial.lastRefreshAt = 0;
+  const h = harness(initial);
+  const result = await processRouteBackgroundUpdate([location], {
+    ...h.dependencies,
+    refresh: async () => ({ mode: 'route', incidents: [], samples: [{ id: '0', latitude: 51.5, longitude: -0.092 }],
+      liveData: { checkedAt: new Date(now).toISOString(), scope: 'source-network', status: 'limited', sources: [{
+        sourceId: 'ea', provider: 'environment-agency', label: 'Environment Agency', state: 'healthy',
+        lastSuccessAt: new Date(now).toISOString(), staleAfterMs: 1_800_000,
+        coverage: { countries: ['England'], regions: [], kind: 'flood' },
+      }] },
+      live: { calculatedAt: new Date(now).toISOString(), samples: [{
+        dataAvailable: false, liveScore: null, contextScore: null, contributors: [{ incidentId: 'flood-1',
+          incidentAlert: { incidentId: 'flood-1', version: 1, provider: 'environment-agency',
+            title: 'Flood warning', locationLabel: 'High Street', severity: 4, verificationLabel: 'Official',
+            observedAt: new Date(now).toISOString(), expiresAt: new Date(now + 60_000).toISOString(),
+            sourceUrl: 'https://check-for-flooding.service.gov.uk/' },
+        }],
+      }] } }),
+  });
+  assert.equal(result, 'alerted');
+  assert.deepEqual(h.sent, ['Flood warning ahead']);
+  assert.equal(h.read()?.route.sampledRiskScores[0].score, null);
+  assert.equal(h.read()?.lastAlert?.sourceUrl, 'https://check-for-flooding.service.gov.uk/');
+  assert.equal(await processRouteBackgroundUpdate([location], h.dependencies), 'updated');
+  assert.equal(h.sent.length, 1);
+});

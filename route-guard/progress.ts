@@ -112,7 +112,7 @@ function findNearestSample(currentLocation: RouteProgressPoint, samples: RoutePr
     .sort((first, second) => first.distanceMetres - second.distanceMetres)[0];
 }
 
-function projectOntoRoute(location: RouteProgressPoint, points: RouteProgressPoint[]) {
+export function projectOntoRoute(location: RouteProgressPoint, points: RouteProgressPoint[]) {
   let best = { distanceMetres: distanceMetres(location, points[0]), alongMetres: 0 };
   let accumulated = 0;
   // Project onto each segment in a local metre grid; sample indexes are not geometry indexes.

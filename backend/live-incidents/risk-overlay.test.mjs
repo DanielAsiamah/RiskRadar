@@ -187,3 +187,34 @@ test('coincident route points produce a finite aggregate from known readings', (
   ], incidents: [], calculatedAt });
   assert.equal(result.exposureWeightedLiveScore, 20);
 });
+
+test('eligible incident approach evidence survives an unavailable historical score', () => {
+  const incident = { ...officialFlood, provider: 'environment-agency', currentVersion: 2,
+    title: 'Flood warning', locationLabel: 'Lower River Soar', locationPrecision: 'exact-area',
+    sourceUrl: 'https://check-for-flooding.service.gov.uk/', rawPayload: { private: true } };
+  const result = calculateLiveRisk({ dataAvailable: false, baselineScore: null, contextScore: null,
+    contextAdjustments: [], incidents: [incident], point, calculatedAt });
+  assert.deepEqual(result.contributors[0].incidentAlert, {
+    incidentId: incident.id, version: 2, provider: 'environment-agency', title: 'Flood warning',
+    locationLabel: 'Lower River Soar', severity: 4, verificationLabel: 'Official',
+    observedAt: incident.lastObservedAt, expiresAt: incident.expiresAt,
+    sourceUrl: incident.sourceUrl,
+  });
+  assert.equal(result.liveScore, null);
+  assert.equal(JSON.stringify(result).includes('rawPayload'), false);
+});
+
+test('uncertain, expired, imprecise or unauthorised incidents cannot create approach alerts', () => {
+  const incident = { ...officialFlood, provider: 'environment-agency', currentVersion: 2,
+    title: 'Flood warning', locationLabel: 'Lower River Soar', locationPrecision: 'exact-area' };
+  for (const override of [
+    { publicationState: 'preliminary' }, { verificationLevel: 'Unverified' },
+    { status: 'resolving' }, { severity: 2 }, { locationPrecision: 'district' },
+    { riskConstraints: { canTriggerMajorAlert: false } }, { currentVersion: 0 },
+    { expiresAt: calculatedAt }, { lastObservedAt: '2026-08-27T18:05:00.000Z' },
+  ]) {
+    const result = calculateLiveRisk({ dataAvailable: false, baselineScore: null, contextScore: null,
+      contextAdjustments: [], incidents: [{ ...incident, ...override }], point, calculatedAt });
+    assert.equal(result.contributors.some((item) => item.incidentAlert), false, JSON.stringify(override));
+  }
+});

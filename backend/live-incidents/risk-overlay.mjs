@@ -72,6 +72,28 @@ function scoreCapImpact(maxScoreDelta, contextScore) {
   return availableScore === 0 ? 0 : Math.min(1, maxScoreDelta / availableScore);
 }
 
+function incidentApproachEvidence(incident, calculatedAtMs) {
+  const observedAt = Date.parse(incident.lastObservedAt);
+  const expiresAt = Date.parse(incident.expiresAt);
+  if (incident.publicationState !== 'published' || !['Official', 'Corroborated'].includes(incident.verificationLevel)
+    || !['active', 'updated'].includes(incident.status) || incident.severity < 3
+    || incident.riskConstraints?.canTriggerMajorAlert !== true
+    || !['exact-area', 'road-segment'].includes(incident.locationPrecision)
+    || !Number.isInteger(incident.currentVersion) || incident.currentVersion < 1
+    || !Number.isFinite(observedAt) || observedAt > calculatedAtMs
+    || !Number.isFinite(expiresAt) || expiresAt <= calculatedAtMs
+    || ![incident.id, incident.provider, incident.title, incident.locationLabel]
+      .every((value) => typeof value === 'string' && value.trim() && value.length <= 300)) return undefined;
+  let sourceUrl = null;
+  try { if (new URL(incident.sourceUrl).protocol === 'https:') sourceUrl = incident.sourceUrl; } catch { /* Evidence may lack a public link. */ }
+  return Object.freeze({
+    incidentId: incident.id, version: incident.currentVersion, provider: incident.provider,
+    title: incident.title, locationLabel: incident.locationLabel, severity: incident.severity,
+    verificationLabel: incident.verificationLevel, observedAt: incident.lastObservedAt,
+    expiresAt: incident.expiresAt, sourceUrl,
+  });
+}
+
 function contributorFor(incident, point, calculatedAtMs, contextScore) {
   if (!incident || typeof incident !== 'object' || incident.publicationState === 'review'
     || incident.publicationState === 'rejected') return null;
@@ -113,6 +135,7 @@ function contributorFor(incident, point, calculatedAtMs, contextScore) {
     statusFactor,
     rawImpact,
     scoreContribution: contextScore === null ? null : Math.round((100 - contextScore) * rawImpact),
+    incidentAlert: incidentApproachEvidence(incident, calculatedAtMs),
     sourceUpdatedAt: incident.sourceUpdatedAt,
     reason: `${incident.category} is active within its reported affected area.`,
   };
